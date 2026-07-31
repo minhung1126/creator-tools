@@ -4,6 +4,8 @@ import App from './App.jsx'
 import './index.css'
 import './sticky-bulk-edit.css'
 import './notification-center.css'
+import './thumbnail-preview.css'
+import './thumbnail-preview.js'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
