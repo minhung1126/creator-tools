@@ -38,8 +38,8 @@ def get_client_config() -> dict:
     }
 
 
-def create_oauth_flow() -> Flow:
-    """Create an OAuth2 flow instance."""
+def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
+    """Create an OAuth2 flow, generating PKCE only for a new authorization request."""
     config = get_client_config()
     redirect_uri = settings.get_redirect_uri()
 
@@ -52,25 +52,29 @@ def create_oauth_flow() -> Flow:
     flow = Flow.from_client_config(
         config,
         scopes=SCOPES,
-        redirect_uri=redirect_uri
+        redirect_uri=redirect_uri,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=code_verifier is None,
     )
     return flow
 
 
-def get_auth_url() -> str:
-    """Generate the Google OAuth consent URL."""
+def get_auth_url() -> tuple[str, str, str]:
+    """Generate the Google OAuth consent URL and return its PKCE state."""
     flow = create_oauth_flow()
-    auth_url, _ = flow.authorization_url(
+    auth_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent"
     )
-    return auth_url
+    if not flow.code_verifier:
+        raise RuntimeError("Google OAuth PKCE code verifier was not generated.")
+    return auth_url, state, flow.code_verifier
 
 
-def exchange_code_for_tokens(code: str) -> dict:
-    """Exchange authorization code for tokens and fetch user profile."""
-    flow = create_oauth_flow()
+def exchange_code_for_tokens(code: str, code_verifier: str) -> dict:
+    """Exchange an authorization code with its original PKCE verifier."""
+    flow = create_oauth_flow(code_verifier=code_verifier)
     flow.fetch_token(code=code)
     creds = flow.credentials
 
