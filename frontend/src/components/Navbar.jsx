@@ -75,7 +75,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
             onClick={() => setIsYoutubeOpen((open) => !open)}
             aria-expanded={isYoutubeOpen}
             aria-controls="youtube-nav-items"
-            style={{ width: '100%', border: 'none', background: 'transparent', font: 'inherit', textAlign: 'left' }}
+            style={{ width: '100%', border: 'none', font: 'inherit', textAlign: 'left' }}
           >
             <Youtube size={18} />
             <span style={{ flex: 1 }}>YouTube</span>
