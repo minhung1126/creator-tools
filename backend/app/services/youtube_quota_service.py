@@ -1,4 +1,4 @@
-"""Persistent estimate of YouTube Data API quota used by this application."""
+"""Persistent request-level estimate of YouTube Data API quota usage."""
 
 import json
 import logging
@@ -15,7 +15,10 @@ _DATA_DIR = _PROJECT_ROOT / "data"
 _QUOTA_FILE = _DATA_DIR / "youtube_quota_usage.json"
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
-# YouTube Data API quota costs documented by Google.
+# Official YouTube Data API v3 quota costs for every method currently called by
+# this application. Costs are per HTTP request, not per returned item. That
+# means pagination and videos.list batches of at most 50 IDs each count as
+# separate requests.
 QUOTA_COSTS = {
     "playlistItems.list": 1,
     "videos.list": 1,
@@ -23,11 +26,13 @@ QUOTA_COSTS = {
     "playlistItems.delete": 50,
 }
 
+QUOTA_SOURCE_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
+QUOTA_COSTS_VERIFIED_AT = "2026-08-01"
 DEFAULT_DAILY_LIMIT = 10_000
 
 
 class YouTubeQuotaTracker:
-    """Thread-safe JSON-backed tracker for quota-consuming calls made by this app."""
+    """Thread-safe JSON-backed tracker for requests sent by this application."""
 
     def __init__(self, path: Path = _QUOTA_FILE, daily_limit: int = DEFAULT_DAILY_LIMIT):
         self._path = path
@@ -86,12 +91,15 @@ class YouTubeQuotaTracker:
             logger.error("Failed to persist YouTube quota usage: %s", exc)
 
     def record(self, method: str, calls: int = 1) -> Dict[str, Any]:
+        """Record requests using Google's documented per-request method cost."""
         if calls <= 0:
             return self.get_usage()
 
         cost_per_call = QUOTA_COSTS.get(method)
         if cost_per_call is None:
-            logger.warning("Unknown YouTube quota method not recorded: %s", method)
+            # Do not silently invent a cost. New API methods must be added from
+            # the official quota table before they can be tracked accurately.
+            logger.error("Unknown YouTube quota method was not recorded: %s", method)
             return self.get_usage()
 
         with self._lock:
@@ -101,6 +109,9 @@ class YouTubeQuotaTracker:
                 method,
                 {"calls": 0, "units": 0, "cost_per_call": cost_per_call},
             )
+            # Refresh the displayed cost if an official method cost changes in
+            # a future release while retaining today's accumulated totals.
+            method_data["cost_per_call"] = cost_per_call
             method_data["calls"] += calls
             method_data["units"] += units
             data["used_units"] += units
@@ -129,7 +140,13 @@ class YouTubeQuotaTracker:
             "reset_at": self._next_reset().isoformat(),
             "reset_timezone": "America/Los_Angeles",
             "is_estimate": True,
-            "note": "僅統計此系統發出的 YouTube Data API 呼叫，不含同一 Google Cloud 專案的其他應用程式。",
+            "calculation_basis": "official-per-request-method-cost",
+            "quota_source_url": QUOTA_SOURCE_URL,
+            "quota_costs_verified_at": QUOTA_COSTS_VERIFIED_AT,
+            "note": (
+                "依 YouTube 官方各方法的每次 request 配額成本計算；分頁與每 50 部影片一批的 "
+                "videos.list 都分別計次。僅統計此系統送出的請求，不含同一 Google Cloud 專案的其他應用程式。"
+            ),
         }
 
 

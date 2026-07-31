@@ -60,7 +60,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0 }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
               <strong style={{ color: '#fff', fontSize: '1rem' }}>YouTube API 今日估算用量</strong>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>僅記錄本系統呼叫</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>依官方每次 request 成本計算</span>
             </div>
             <div style={{ marginTop: '5px', color: '#fff', fontSize: '1.35rem', fontWeight: 700 }}>
               {usage?.used_units?.toLocaleString()} / {usage?.daily_limit?.toLocaleString()}
@@ -85,14 +85,14 @@ export default function YouTubeQuotaBanner({ refreshKey = 0 }) {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <Clock3 size={14} /> 太平洋時間重設：{resetPacificText}（本地：{resetLocalText}）
         </span>
-        <span>播放清單預覽優先使用 yt-dlp，不消耗 API 配額。</span>
+        <span>播放清單排序使用 yt-dlp；私人資料補齊仍可能使用 videos.list。</span>
       </div>
 
       {usage?.methods?.length > 0 && (
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
           {usage.methods.map((item) => (
             <span key={item.method} className="badge badge-info" style={{ fontSize: '0.72rem' }}>
-              {item.method}: {item.calls} 次 / {item.units} units
+              {item.method}: {item.calls} 次 × {item.cost_per_call} = {item.units} units
             </span>
           ))}
         </div>
@@ -100,6 +100,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0 }) {
 
       <p style={{ marginTop: '10px', color: 'var(--text-dim)', fontSize: '0.72rem', lineHeight: 1.5 }}>
         {usage?.note}
+        {usage?.quota_costs_verified_at ? ` 官方費用表核對日期：${usage.quota_costs_verified_at}。` : ''}
       </p>
     </div>
   );
