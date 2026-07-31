@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
-from backend.app.services.sheets_service import get_all_rows_for_type
+from backend.app.services.sheets_service import get_all_rows_for_sheet
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_entries_ytdlp,
@@ -35,6 +35,9 @@ class BatchUpdateInput(BaseModel):
     spreadsheet_url_or_id: Optional[str] = ""
     playlist_id: Optional[str] = ""
     video_type: str = "Video"
+    worksheet_name: str
+    title_column: str
+    description_column: str
     team: str
     assignments: List[VideoAssignment]
 
@@ -73,10 +76,11 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
     spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
     if not spreadsheet_id:
         raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
+    if payload.title_column == payload.description_column:
+        raise HTTPException(status_code=400, detail="Title and description columns must be different.")
+
     try:
-        sheet_rows = get_all_rows_for_type(creds, spreadsheet_id, payload.video_type)
-        title_key = "Youtube Title" if payload.video_type.lower() == "video" else "Shorts Title"
-        desc_key = "Youtube Description" if payload.video_type.lower() == "video" else "Shorts Description"
+        sheet_rows = get_all_rows_for_sheet(creds, spreadsheet_id, payload.worksheet_name)
         prepared = []
         for assignment in payload.assignments:
             video_id = assignment.video_id
@@ -84,6 +88,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             if not person or person == "不編輯":
                 prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": "使用者選擇不編輯"})
                 continue
+
             matches = [row for row in sheet_rows if row.get("所屬團體") == payload.team and row.get("人") == person]
             if len(matches) == 0:
                 prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {payload.team} 的人物 {person} 資料"})
@@ -91,13 +96,25 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             if len(matches) > 1:
                 prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"團體 {payload.team} 的人物 {person} 有多筆 ({len(matches)} 筆) 資料，為避免誤更新已略過"})
                 continue
+
             row = matches[0]
-            new_title = str(row.get(title_key) or "").strip()
-            new_description = row.get(desc_key)
+            new_title = str(row.get(payload.title_column) or "").strip()
+            new_description = row.get(payload.description_column)
             if not new_title or new_description is None:
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"Sheet 缺少 {title_key} 或 {desc_key}"})
+                prepared.append({
+                    "video_id": video_id,
+                    "person": person,
+                    "status": "skipped",
+                    "reason": f"工作表缺少 {payload.title_column} 或 {payload.description_column} 的內容",
+                })
                 continue
-            prepared.append({"video_id": video_id, "person": person, "status": "pending", "new_title": new_title, "new_description": str(new_description)})
+            prepared.append({
+                "video_id": video_id,
+                "person": person,
+                "status": "pending",
+                "new_title": new_title,
+                "new_description": str(new_description),
+            })
 
         pending_ids = [item["video_id"] for item in prepared if item["status"] == "pending"]
         details_map = {item["id"]: item for item in fetch_video_details(creds, pending_ids) if item.get("id")}
@@ -135,6 +152,9 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             "updated_count": sum(1 for item in results if item["status"] == "updated"),
             "skipped_count": sum(1 for item in results if item["status"] == "skipped"),
             "failed_count": sum(1 for item in results if item["status"] == "failed"),
+            "worksheet_name": payload.worksheet_name,
+            "title_column": payload.title_column,
+            "description_column": payload.description_column,
             "results": results,
             "quota_usage": youtube_quota_tracker.get_usage(),
         }
