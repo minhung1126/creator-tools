@@ -28,6 +28,22 @@ function readRemembered(videoType) {
   }
 }
 
+function sortVideosByUploadTime(videos) {
+  return [...videos].sort((a, b) => {
+    const aTime = Date.parse(a.published_at || '');
+    const bTime = Date.parse(b.published_at || '');
+    const aHasTime = Number.isFinite(aTime);
+    const bHasTime = Number.isFinite(bTime);
+
+    if (aHasTime && bHasTime) {
+      return aTime - bTime || (a.sequence ?? 0) - (b.sequence ?? 0);
+    }
+    if (aHasTime) return -1;
+    if (bHasTime) return 1;
+    return (a.sequence ?? 0) - (b.sequence ?? 0);
+  });
+}
+
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
   const remembered = useMemo(() => readRemembered(videoType), [videoType]);
@@ -148,7 +164,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setResult(null);
     try {
       const res = await api.getPlaylistVideos(playlistId);
-      const videoList = res.videos || [];
+      const videoList = sortVideosByUploadTime(res.videos || []);
       setVideos(videoList);
       setAssignments(Object.fromEntries(videoList.map((video) => [video.video_id, '不編輯'])));
       setPlaylistSource(res.source || '');
