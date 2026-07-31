@@ -99,6 +99,17 @@ def all_skipped_message(items, attempted_count: int) -> str:
     return f"所有已指定人物的 {attempted_count} 支影片都被略過。{summary}。範例：{examples}"
 
 
+def upload_time_sort_key(video_id: str, details_map, original_positions):
+    """Sort valid YouTube publishedAt values oldest-first with stable fallbacks."""
+    detail = details_map.get(video_id) or {}
+    published_at = (detail.get("snippet") or {}).get("publishedAt") or ""
+    return (
+        not bool(published_at),
+        published_at,
+        original_positions.get(video_id, 0),
+    )
+
+
 @router.get("/quota-usage")
 def get_quota_usage():
     return youtube_quota_tracker.get_usage()
@@ -296,9 +307,12 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
             source = "yt-dlp"
         except Exception as exc:
             fallback_reason = str(exc)
-            logger.warning("yt-dlp order lookup failed during publish; using API order: %s", exc)
+            logger.warning("yt-dlp lookup failed during publish; using API playlist data: %s", exc)
 
         details_map = {item["id"]: item for item in fetch_video_details(creds, ordered_ids) if item.get("id")}
+        original_positions = {video_id: index for index, video_id in enumerate(ordered_ids)}
+        ordered_ids.sort(key=lambda video_id: upload_time_sort_key(video_id, details_map, original_positions))
+
         results = []
         for video_id in ordered_ids:
             detail = details_map.get(video_id)
@@ -318,6 +332,7 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
             "results": results,
             "source": source,
             "fallback_reason": fallback_reason,
+            "sort_order": "published_at_ascending",
             "quota_usage": youtube_quota_tracker.get_usage(),
         }
     except Exception as exc:
