@@ -61,6 +61,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [enabledPeople, setEnabledPeople] = useState(remembered.enabledPeople || []);
   const [videos, setVideos] = useState([]);
   const [assignments, setAssignments] = useState({});
+  const [selectedVideoIds, setSelectedVideoIds] = useState([]);
+  const [bulkPerson, setBulkPerson] = useState('');
   const [playlistSource, setPlaylistSource] = useState('');
   const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
   const [loadingSheet, setLoadingSheet] = useState(false);
@@ -114,6 +116,12 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     [teamPeople, enabledPeople],
   );
 
+  useEffect(() => {
+    if (bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) {
+      setBulkPerson('');
+    }
+  }, [availablePeople, bulkPerson]);
+
   const handleRefreshSheet = async () => {
     setLoadingSheet(true);
     setErrorMsg(null);
@@ -147,6 +155,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setSelectedTeam('');
     setTeamPeople([]);
     setEnabledPeople([]);
+    setSelectedVideoIds([]);
+    setBulkPerson('');
     if (!nextWorksheet) return;
     try {
       const options = await api.parseSheetOptions(spreadsheetId, nextWorksheet);
@@ -167,6 +177,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       const videoList = sortVideosByUploadTime(res.videos || []);
       setVideos(videoList);
       setAssignments(Object.fromEntries(videoList.map((video) => [video.video_id, '不編輯'])));
+      setSelectedVideoIds([]);
+      setBulkPerson('');
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
       setQuotaRefreshKey((key) => key + 1);
@@ -184,6 +196,33 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const setAllPeople = (checked) => setEnabledPeople(checked ? [...teamPeople] : []);
+
+  const toggleVideoSelection = (videoId) => {
+    setSelectedVideoIds((current) => current.includes(videoId)
+      ? current.filter((item) => item !== videoId)
+      : [...current, videoId]);
+  };
+
+  const setAllVideosSelected = (checked) => {
+    setSelectedVideoIds(checked ? videos.map((video) => video.video_id) : []);
+  };
+
+  const applyBulkAssignment = () => {
+    if (!selectedVideoIds.length) return toast.warning('請先勾選要批量編輯的影片');
+    if (!bulkPerson) return toast.warning('請先選擇要套用的人物');
+
+    const selectedCount = selectedVideoIds.length;
+    setAssignments((current) => {
+      const next = { ...current };
+      selectedVideoIds.forEach((videoId) => {
+        next[videoId] = bulkPerson;
+      });
+      return next;
+    });
+    setSelectedVideoIds([]);
+    setBulkPerson('');
+    toast.success(`已套用到 ${selectedCount} 支影片，尚未送出`);
+  };
 
   const doExecute = async () => {
     setConfirmOpen(false);
@@ -288,9 +327,38 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       {videos.length > 0 && (
         <div className="section-gap" style={{ gap: 18 }}>
           <div><h2 style={{ fontSize: '1.3rem' }}>為每支影片指定人物（{videos.length} 支）</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
+
+          <div className="glass-panel" style={{ padding: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ color: '#fff', fontSize: '1.05rem' }}>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 4 }}>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p>
+              </div>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}>
+                <input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} />
+                全選 / 全不選
+              </label>
+            </div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
+              <div className="form-group" style={{ flex: '1 1 240px' }}>
+                <label className="form-label">批量套用人物</label>
+                <select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}>
+                  <option value="">請選擇人物</option>
+                  <option value="不編輯">不編輯（略過）</option>
+                  {availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}
+                </select>
+              </div>
+              <button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button>
+            </div>
+          </div>
+
           <div className="video-card-grid">
             {videos.map((video) => (
-              <div key={video.video_id} className="glass-panel video-card">
+              <div key={video.video_id} className="glass-panel video-card" style={{ borderColor: selectedVideoIds.includes(video.video_id) ? 'var(--primary)' : undefined }}>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} />
+                  加入批量編輯
+                </label>
                 <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={video.title} /> : <div>無縮圖</div>}</div>
                 <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{video.title || '無標題影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>Video ID: {video.video_id}</p></div>
                 <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.video_id] || '不編輯'} onChange={(e) => setAssignments((current) => ({ ...current, [video.video_id]: e.target.value }))}><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
