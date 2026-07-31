@@ -1,0 +1,13 @@
+/* Keep the YouTube bulk assignment controls visible while reviewing video cards. */
+.glass-panel:has(+ .video-card-grid) {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
+}
+
+@media (max-width: 720px) {
+  .glass-panel:has(+ .video-card-grid) {
+    top: 8px;
+  }
+}
