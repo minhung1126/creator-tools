@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ ./backend/
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-ENV HOST=http://localhost:8000
+ENV HOST=0.0.0.0
 ENV PORT=8000
 
 EXPOSE 8000

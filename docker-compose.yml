@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   creator-tools:
     image: ghcr.io/minhung1126/creator-tools:latest
@@ -9,8 +7,11 @@ services:
     env_file:
       - .env
     environment:
-      - HOST=${HOST:-http://localhost:8000}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - SECRET_KEY=${SECRET_KEY:-creator-tools-super-secret-key-2026}
+    volumes:
+      - ./runtime_config.json:/app/runtime_config.json
     restart: unless-stopped

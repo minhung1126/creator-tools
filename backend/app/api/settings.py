@@ -1,67 +1,75 @@
-from fastapi import APIRouter, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
+from google.oauth2.credentials import Credentials
+
 from backend.app.core.config import settings
+from backend.app.core.dependencies import require_credentials
+from backend.app.core.runtime_config import runtime_config
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
 
-class SystemSettingsModel(BaseModel):
-    host: Optional[str] = "http://localhost:8000"
-    frontend_url: Optional[str] = "http://localhost:3000"
-    google_client_id: Optional[str] = ""
-    google_client_secret: Optional[str] = ""
+
+class ResourceSettingsModel(BaseModel):
+    """Settings that can be modified via the UI and persisted."""
     default_spreadsheet_id: Optional[str] = ""
     default_playlist_id: Optional[str] = ""
     default_drive_folder_id: Optional[str] = ""
-    
+
     # Meta API Extensibility Fields
     meta_app_id: Optional[str] = ""
     meta_app_secret: Optional[str] = ""
     meta_access_token: Optional[str] = ""
 
+
 @router.get("")
-def get_system_settings():
+def get_system_settings(creds: Credentials = Depends(require_credentials)):
+    """Get current system settings (requires authentication)."""
+    rc = runtime_config.get_all()
     return {
-        "host": settings.HOST,
-        "frontend_url": settings.FRONTEND_URL,
+        "host": settings.base_url,
+        "frontend_url": settings.frontend_url,
         "redirect_uri": settings.get_redirect_uri(),
-        "google_client_id": settings.GOOGLE_CLIENT_ID,
-        "google_client_secret_set": bool(settings.GOOGLE_CLIENT_SECRET),
-        "default_spreadsheet_id": settings.DEFAULT_SPREADSHEET_ID,
-        "default_playlist_id": settings.DEFAULT_PLAYLIST_ID,
-        "default_drive_folder_id": settings.DEFAULT_DRIVE_FOLDER_ID,
-        
+        "google_client_configured": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
+        "default_spreadsheet_id": rc.get("default_spreadsheet_id", ""),
+        "default_playlist_id": rc.get("default_playlist_id", ""),
+        "default_drive_folder_id": rc.get("default_drive_folder_id", ""),
+
         # Meta API Integration Status
-        "meta_app_id": settings.META_APP_ID,
-        "meta_configured": bool(settings.META_APP_ID and settings.META_ACCESS_TOKEN)
+        "meta_app_id": rc.get("meta_app_id", ""),
+        "meta_configured": bool(rc.get("meta_app_id") and rc.get("meta_access_token"))
     }
 
+
 @router.post("")
-def update_system_settings(payload: SystemSettingsModel):
-    if payload.host is not None:
-        settings.HOST = payload.host
-    if payload.frontend_url is not None:
-        settings.FRONTEND_URL = payload.frontend_url
-    if payload.google_client_id is not None:
-        settings.GOOGLE_CLIENT_ID = payload.google_client_id
-    if payload.google_client_secret:
-        settings.GOOGLE_CLIENT_SECRET = payload.google_client_secret
+def update_system_settings(
+    payload: ResourceSettingsModel,
+    creds: Credentials = Depends(require_credentials)
+):
+    """Update and persist resource settings (requires authentication)."""
+    update_data = {}
     if payload.default_spreadsheet_id is not None:
-        settings.DEFAULT_SPREADSHEET_ID = payload.default_spreadsheet_id
+        update_data["default_spreadsheet_id"] = payload.default_spreadsheet_id
     if payload.default_playlist_id is not None:
-        settings.DEFAULT_PLAYLIST_ID = payload.default_playlist_id
+        update_data["default_playlist_id"] = payload.default_playlist_id
     if payload.default_drive_folder_id is not None:
-        settings.DEFAULT_DRIVE_FOLDER_ID = payload.default_drive_folder_id
-        
+        update_data["default_drive_folder_id"] = payload.default_drive_folder_id
     if payload.meta_app_id is not None:
-        settings.META_APP_ID = payload.meta_app_id
+        update_data["meta_app_id"] = payload.meta_app_id
     if payload.meta_app_secret is not None:
-        settings.META_APP_SECRET = payload.meta_app_secret
+        update_data["meta_app_secret"] = payload.meta_app_secret
     if payload.meta_access_token is not None:
-        settings.META_ACCESS_TOKEN = payload.meta_access_token
+        update_data["meta_access_token"] = payload.meta_access_token
+
+    runtime_config.update(update_data)
+    logger.info("System settings updated: %s", list(update_data.keys()))
 
     return {
         "status": "success",
-        "message": "Settings updated successfully",
-        "settings": get_system_settings()
+        "message": "Settings updated and saved successfully",
+        "settings": get_system_settings(creds)
     }

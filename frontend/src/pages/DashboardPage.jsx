@@ -1,39 +1,39 @@
 import React from 'react';
-import { 
-  Layers, 
-  Send, 
-  Settings, 
-  CheckCircle2, 
-  AlertTriangle, 
-  FileSpreadsheet, 
-  PlaySquare, 
+import {
+  Layers,
+  Send,
+  Settings,
+  CheckCircle2,
+  AlertTriangle,
+  FileSpreadsheet,
+  PlaySquare,
   ArrowRight,
   Sparkles
 } from 'lucide-react';
 
 export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div className="section-gap">
       {/* Header Banner */}
-      <div className="glass-panel" style={{ 
-        padding: '32px', 
+      <div className="glass-panel" style={{
+        padding: '32px',
         background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(236, 72, 153, 0.1) 100%)',
         position: 'relative',
         overflow: 'hidden'
       }}>
         <div style={{ position: 'relative', zIndex: 2 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(99, 102, 241, 0.2)', padding: '4px 12px', borderRadius: '20px', fontSize: '0.8rem', color: '#a5b4fc', marginBottom: '12px' }}>
+          <div className="badge badge-info" style={{ marginBottom: '12px' }}>
             <Sparkles size={14} /> 創作者自動化工作流系統
           </div>
           <h1 style={{ fontSize: '2.2rem', marginBottom: '8px' }}>YouTube Creator Tools 控制台</h1>
-          <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
+          <p className="section-desc" style={{ maxWidth: '640px', lineHeight: 1.6 }}>
             整合 Google Sheets API 與 YouTube Data API，為創作者提供草稿影片標題說明批次更新、影片自動發布與播放清單清理等工作流。
           </p>
         </div>
       </div>
 
       {/* Quick Status Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
+      <div className="status-grid">
         <div className="glass-panel" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 500 }}>Google API 連線</span>
@@ -81,10 +81,9 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
       {/* Main Feature Cards */}
       <h2 style={{ fontSize: '1.4rem' }}>功能模組 Quick Entry</h2>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px' }}>
-        {/* Module 1 Card */}
+      <div className="feature-grid">
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ background: 'rgba(99, 102, 241, 0.15)', padding: '12px', borderRadius: '12px', width: 'fit-content', color: 'var(--primary)' }}>
+          <div className="icon-box icon-box-primary">
             <Layers size={28} />
           </div>
           <div>
@@ -98,9 +97,8 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           </button>
         </div>
 
-        {/* Module 2 Card */}
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ background: 'rgba(236, 72, 153, 0.15)', padding: '12px', borderRadius: '12px', width: 'fit-content', color: 'var(--secondary)' }}>
+          <div className="icon-box icon-box-secondary">
             <Send size={28} />
           </div>
           <div>
@@ -114,15 +112,14 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           </button>
         </div>
 
-        {/* Module 3 Card */}
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ background: 'rgba(6, 182, 212, 0.15)', padding: '12px', borderRadius: '12px', width: 'fit-content', color: 'var(--accent)' }}>
+          <div className="icon-box icon-box-accent">
             <Settings size={28} />
           </div>
           <div>
             <h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>系統設定與資源管理</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5 }}>
-              統一管理 Google OAuth 認證、Host 網址設定、Google Sheets & Drive 預射網址/ID、以及預留未來的 Meta API 模組配置。
+              統一管理 Google OAuth 認證、Google Sheets & Drive 預設網址/ID、以及預留未來的 Meta API 模組配置。
             </p>
           </div>
           <button className="btn btn-secondary" onClick={() => setActiveTab('settings')} style={{ marginTop: 'auto' }}>

@@ -22,13 +22,7 @@ async function request(endpoint, options = {}) {
 export const api = {
   // Auth
   getAuthConfig: () => request('/auth/config'),
-  getAuthUrl: (clientId, clientSecret) => {
-    const params = new URLSearchParams();
-    if (clientId) params.append('client_id', clientId);
-    if (clientSecret) params.append('client_secret', clientSecret);
-    const query = params.toString() ? `?${params.toString()}` : '';
-    return request(`/auth/url${query}`);
-  },
+  getAuthUrl: () => request('/auth/url'),
   getUserStatus: () => request('/auth/user'),
   logout: () => request('/auth/logout', { method: 'POST' }),
 
@@ -37,28 +31,28 @@ export const api = {
   updateSettings: (payload) => request('/settings', { method: 'POST', body: JSON.stringify(payload) }),
 
   // Sheets
-  parseSheetOptions: (spreadsheetUrlOrId) => 
+  parseSheetOptions: (spreadsheetUrlOrId) =>
     request('/sheets/parse-options', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId }) }),
-  
-  getTeamPeople: (spreadsheetUrlOrId, videoType, team) => 
+
+  getTeamPeople: (spreadsheetUrlOrId, videoType, team) =>
     request('/sheets/people', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, video_type: videoType, team }) }),
 
   // YouTube
-  getPlaylistVideos: (playlistId) => 
+  getPlaylistVideos: (playlistId) =>
     request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
 
-  batchUpdateMetadata: (spreadsheetUrlOrId, playlistId, videoType, team, assignments) => 
-    request('/youtube/batch-update', { 
-      method: 'POST', 
-      body: JSON.stringify({ 
-        spreadsheet_url_or_id: spreadsheetUrlOrId, 
-        playlist_id: playlistId, 
-        video_type: videoType, 
-        team, 
-        assignments 
-      }) 
+  batchUpdateMetadata: (spreadsheetUrlOrId, playlistId, videoType, team, assignments) =>
+    request('/youtube/batch-update', {
+      method: 'POST',
+      body: JSON.stringify({
+        spreadsheet_url_or_id: spreadsheetUrlOrId,
+        playlist_id: playlistId,
+        video_type: videoType,
+        team,
+        assignments
+      })
     }),
 
-  publishAndCleanup: (playlistId) => 
+  publishAndCleanup: (playlistId) =>
     request('/youtube/publish-and-cleanup', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) })
 };

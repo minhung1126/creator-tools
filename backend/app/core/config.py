@@ -1,22 +1,21 @@
-import os
+import warnings
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import Optional
+
 
 class Settings(BaseSettings):
-    HOST: str = "http://localhost:8000"
-    FRONTEND_URL: str = "http://localhost:3000"
-    
+    HOST: str = "localhost"
+    PORT: int = 8000
+
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
-    GOOGLE_REDIRECT_URI: str = ""
-    
+
     SECRET_KEY: str = "creator-tools-super-secret-key-change-in-production-2026"
-    
-    # Default Resource Configurations
-    DEFAULT_SPREADSHEET_ID: str = "1xsxDJ80-TOQs3d3ecHALEbyMlxxEkwXNjHaW7yA8wVs"
-    DEFAULT_PLAYLIST_ID: str = "PLhu1MP3FpZmHar5qPZJkl6zCqXzddF4nC"
+
+    # Default Resource Configurations (can be overridden by runtime_config.json)
+    DEFAULT_SPREADSHEET_ID: str = ""
+    DEFAULT_PLAYLIST_ID: str = ""
     DEFAULT_DRIVE_FOLDER_ID: str = ""
-    
+
     # Future Extensibility: Meta API Settings
     META_APP_ID: str = ""
     META_APP_SECRET: str = ""
@@ -28,10 +27,38 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    @property
+    def is_production(self) -> bool:
+        """Determine if running in production based on HOST value."""
+        return self.HOST not in ("localhost", "127.0.0.1", "0.0.0.0")
+
+    @property
+    def scheme(self) -> str:
+        return "https" if self.is_production else "http"
+
+    @property
+    def base_url(self) -> str:
+        """Full backend base URL."""
+        if self.is_production:
+            return f"{self.scheme}://{self.HOST}"
+        return f"{self.scheme}://{self.HOST}:{self.PORT}"
+
+    @property
+    def frontend_url(self) -> str:
+        """Frontend URL — same origin in production, port 3000 in dev."""
+        if self.is_production:
+            return self.base_url
+        return f"http://{self.HOST}:3000"
+
     def get_redirect_uri(self) -> str:
-        if self.GOOGLE_REDIRECT_URI:
-            return self.GOOGLE_REDIRECT_URI
-        clean_host = self.HOST.rstrip("/")
-        return f"{clean_host}/api/v1/auth/callback"
+        return f"{self.base_url}/api/v1/auth/callback"
+
 
 settings = Settings()
+
+# Startup warning for default SECRET_KEY
+if settings.SECRET_KEY == "creator-tools-super-secret-key-change-in-production-2026":
+    warnings.warn(
+        "⚠️  Using default SECRET_KEY! Please set a unique SECRET_KEY in .env for production.",
+        stacklevel=2
+    )
