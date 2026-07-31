@@ -22,10 +22,9 @@ function AppContent() {
       if (res.authenticated) {
         setAuthUser(res.user);
         return res.user;
-      } else {
-        setAuthUser(null);
-        return null;
       }
+      setAuthUser(null);
+      return null;
     } catch (err) {
       console.error('Failed to fetch user status:', err);
       setAuthUser(null);
@@ -38,7 +37,6 @@ function AppContent() {
       const data = await api.getSettings();
       setSysSettings(data || {});
     } catch (err) {
-      // Settings require auth — may fail when not logged in
       console.error('Failed to fetch system settings:', err);
     }
   };
@@ -47,16 +45,13 @@ function AppContent() {
     const init = async () => {
       setLoading(true);
       const user = await fetchUser();
-
-      // Check location hash for OAuth callback return
       const hash = window.location.hash;
+
       if (hash.includes('auth_success=1')) {
         toast.success('Google 帳號連線成功！');
         window.location.hash = '';
         const updatedUser = await fetchUser();
-        if (updatedUser) {
-          await fetchSettings();
-        }
+        if (updatedUser) await fetchSettings();
       } else if (hash.includes('auth_error=')) {
         const errorText = decodeURIComponent(hash.split('auth_error=')[1] || '');
         setAuthError(`Google 帳號連線失敗：${errorText}`);
@@ -83,62 +78,23 @@ function AppContent() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="loading-center">
-        系統初始化中...
-      </div>
-    );
-  }
-
-  // Require Google Authentication before displaying app content
-  if (!authUser) {
-    return <LoginPage initialError={authError} />;
-  }
+  if (loading) return <div className="loading-center">系統初始化中...</div>;
+  if (!authUser) return <LoginPage initialError={authError} />;
 
   return (
     <div className="app-container">
-      <Navbar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        authUser={authUser}
-        onLogout={handleLogout}
-      />
-
+      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} />
       <main className="main-content">
-        {activeTab === 'dashboard' && (
-          <DashboardPage
-            authUser={authUser}
-            sysSettings={sysSettings}
-            setActiveTab={setActiveTab}
-          />
-        )}
-        {activeTab === 'batch_update' && (
-          <BatchUpdatePage
-            sysSettings={sysSettings}
-            authUser={authUser}
-          />
-        )}
-        {activeTab === 'publish_clean' && (
-          <PublishCleanerPage
-            sysSettings={sysSettings}
-            authUser={authUser}
-          />
-        )}
-        {activeTab === 'settings' && (
-          <SettingsPage
-            authUser={authUser}
-            sysSettings={sysSettings}
-            refreshSettings={fetchSettings}
-            refreshUser={fetchUser}
-          />
-        )}
+        {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
+        {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
+        {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
+        {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+        {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshUser={fetchUser} />}
       </main>
     </div>
   );
 }
 
-// Error Boundary class component
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -158,12 +114,8 @@ class ErrorBoundary extends React.Component {
       return (
         <div className="loading-center" style={{ flexDirection: 'column', gap: '16px' }}>
           <h2 style={{ color: '#f87171' }}>⚠️ 應用程式發生錯誤</h2>
-          <p style={{ color: 'var(--text-muted)', maxWidth: '500px', textAlign: 'center' }}>
-            {this.state.error?.message || '發生未預期的錯誤。'}
-          </p>
-          <button className="btn btn-primary" onClick={() => window.location.reload()}>
-            重新載入頁面
-          </button>
+          <p style={{ color: 'var(--text-muted)', maxWidth: '500px', textAlign: 'center' }}>{this.state.error?.message || '發生未預期的錯誤。'}</p>
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>重新載入頁面</button>
         </div>
       );
     }
@@ -174,9 +126,7 @@ class ErrorBoundary extends React.Component {
 export default function App() {
   return (
     <ErrorBoundary>
-      <ToastProvider>
-        <AppContent />
-      </ToastProvider>
+      <ToastProvider><AppContent /></ToastProvider>
     </ErrorBoundary>
   );
 }
