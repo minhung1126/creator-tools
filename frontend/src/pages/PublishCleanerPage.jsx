@@ -14,6 +14,20 @@ import {
   Trash2,
 } from 'lucide-react';
 
+function sortVideosByUploadTime(videos) {
+  return [...videos].sort((a, b) => {
+    const aTime = Date.parse(a.published_at || '');
+    const bTime = Date.parse(b.published_at || '');
+    const aHasTime = Number.isFinite(aTime);
+    const bHasTime = Number.isFinite(bTime);
+
+    if (aHasTime && bHasTime) return aTime - bTime || (a.sequence ?? 0) - (b.sequence ?? 0);
+    if (aHasTime) return -1;
+    if (bHasTime) return 1;
+    return (a.sequence ?? 0) - (b.sequence ?? 0);
+  });
+}
+
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
@@ -37,7 +51,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     setResult(null);
     try {
       const res = await api.getPlaylistVideos(playlistId);
-      setVideos(res.videos || []);
+      setVideos(sortVideosByUploadTime(res.videos || []));
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
       setQuotaRefreshKey((key) => key + 1);
@@ -67,18 +81,20 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     }
   };
 
-  const sourceLabel = playlistSource === 'yt-dlp'
-    ? 'yt-dlp（預覽不耗 API 配額）'
-    : playlistSource === 'youtube-api'
-      ? 'YouTube API（yt-dlp 無法讀取時回退）'
-      : '';
+  const sourceLabel = playlistSource === 'yt-dlp+youtube-api'
+    ? 'yt-dlp 播放清單資料 + YouTube API 私人影片資料'
+    : playlistSource === 'yt-dlp'
+      ? 'yt-dlp（預覽不耗 API 配額）'
+      : playlistSource === 'youtube-api'
+        ? 'YouTube API（yt-dlp 無法讀取時回退）'
+        : '';
 
   return (
     <div className="section-gap">
       <ConfirmDialog
         open={confirmOpen}
         title="確認公開並清理清單"
-        message={`確定要依目前播放清單順序，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）`}
+        message={`確定要依上傳時間由最早到最晚，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）`}
         confirmText="確認公開並移出 To-Post"
         cancelText="取消"
         variant="destructive"
@@ -94,7 +110,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           <h1 style={{ fontSize: '1.8rem' }}>YouTube｜公開 To-Post 影片並清理清單</h1>
         </div>
         <p className="section-desc">
-          播放清單預覽優先使用 yt-dlp，依播放清單原始順序顯示；執行時才呼叫必要的 YouTube API 完成公開與移出清單。
+          讀取待發布影片後，依 YouTube 上傳時間由最早到最晚顯示與處理；執行時才呼叫必要的 YouTube API 完成公開與移出清單。
         </p>
       </div>
 
@@ -113,7 +129,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
         <div className="info-banner">
           <ListOrdered size={15} color="var(--secondary)" />
           <span>
-            播放清單來源：{sourceLabel}。顯示與處理順序均依播放清單原始順序。
+            播放清單來源：{sourceLabel}。顯示與實際處理都依上傳時間由最早到最晚；缺少上傳時間的影片排在最後並維持原始順序。
             {playlistFallbackReason ? ` 回退原因：${playlistFallbackReason}` : ''}
           </span>
         </div>
@@ -126,13 +142,13 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           <div className="glass-panel" style={{ padding: '24px', borderLeft: '4px solid var(--secondary)' }}>
             <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>確認公開並移除 {videos.length} 支影片</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-              系統會依下方順序逐支設為<strong>「公開（Public）」</strong>，成功後再從 To-Post 播放清單移除。移出播放清單不會刪除影片。
+              系統會依下方上傳時間順序逐支設為<strong>「公開（Public）」</strong>，成功後再從 To-Post 播放清單移除。移出播放清單不會刪除影片。
             </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <h3 style={{ fontSize: '1.1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ListOrdered size={18} /> 待處理影片清單（播放清單順序）：
+              <ListOrdered size={18} /> 待處理影片清單（上傳時間：最早 → 最晚）：
             </h3>
             {videos.map((video, index) => (
               <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
@@ -141,6 +157,9 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
                 <div style={{ flex: 1, minWidth: '220px' }}>
                   <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '4px' }}>{video.title || '無標題影片'}</h4>
                   <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {video.video_id}</span>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginLeft: '12px' }}>
+                    上傳時間：{video.published_at ? new Date(video.published_at).toLocaleString() : '未提供（排在最後）'}
+                  </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span className="badge badge-info"><Globe size={12} /> 將設為公開</span>
@@ -151,7 +170,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           </div>
 
           <div className="glass-panel execution-bar">
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認順序無誤後，啟動發布流程：</span>
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認上傳時間順序無誤後，啟動發布流程：</span>
             <button className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={executing} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
               <Send size={18} /> {executing ? '逐支發布並清理中...' : '確認公開並移出 To-Post'}
             </button>
