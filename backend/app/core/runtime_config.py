@@ -17,9 +17,10 @@ from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Resolve config file path relative to project root
-_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent.parent  # creator-tools/
-_CONFIG_FILE = _CONFIG_DIR / "runtime_config.json"
+# Resolve persistent data directory relative to project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent  # creator-tools/
+_DATA_DIR = _PROJECT_ROOT / "data"
+_CONFIG_FILE = _DATA_DIR / "runtime_config.json"
 
 # Fields that can be persisted via the Settings UI
 _PERSISTABLE_FIELDS = {
@@ -39,11 +40,24 @@ class RuntimeConfig:
         self._path = config_path
         self._lock = Lock()
         self._data: Dict[str, str] = {}
+        self._migrate_legacy_config()
         self._load()
+
+    def _migrate_legacy_config(self):
+        """Migrate legacy root runtime_config.json to data/ directory if present."""
+        legacy_root_config = _PROJECT_ROOT / "runtime_config.json"
+        if not self._path.exists() and legacy_root_config.is_file():
+            try:
+                self._path.parent.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.move(str(legacy_root_config), str(self._path))
+                logger.info("Migrated legacy runtime_config.json to %s", self._path)
+            except Exception as e:
+                logger.warning("Failed to migrate legacy runtime config: %s", e)
 
     def _load(self):
         """Load saved config from JSON file, falling back to .env defaults."""
-        if self._path.exists():
+        if self._path.is_file():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
                     saved = json.load(f)
@@ -58,6 +72,7 @@ class RuntimeConfig:
     def _save(self):
         """Atomically save current config to JSON file."""
         try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self._path.with_suffix(".tmp")
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self._data, f, ensure_ascii=False, indent=2)

@@ -13,5 +13,5 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - SECRET_KEY=${SECRET_KEY:-creator-tools-super-secret-key-2026}
     volumes:
-      - ./runtime_config.json:/app/runtime_config.json
+      - ./data:/app/data
     restart: unless-stopped

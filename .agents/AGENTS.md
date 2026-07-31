@@ -26,10 +26,10 @@ YouTube Creator Tools 是一個整合 Google Sheets API 與 YouTube Data API v3 
   - 其他正式域名 → 自動使用 `https://` 協定，強制啟用安全的 OAuth 傳輸與 `secure` Cookie
 - **Credentials 管理**：Google Client ID 與 Client Secret **嚴禁** 由前端傳遞或於 UI 編輯，一律由後端 `.env` 檔案管理。
 
-### 2. 設定持久化機制 (`runtime_config.json`)
-- 使用者於「系統設定」頁面修改的預設 Sheet ID、Playlist ID、Drive Folder ID 以及 Meta API 設定，會由 `RuntimeConfig` 自動寫入根目錄下的 `runtime_config.json`。
-- 啟動優先順序：`runtime_config.json` > `.env` 預設值。
-- 在 Docker / Compose 環境中已將 `runtime_config.json` 設定為 Volume 進行持久化。
+### 2. 設定持久化機制 (`data/runtime_config.json`)
+- 使用者於「系統設定」頁面修改的預設 Sheet ID、Playlist ID、Drive Folder ID 以及 Meta API 設定，會由 `RuntimeConfig` 自動寫入 `data/runtime_config.json`。
+- 啟動優先順序：`data/runtime_config.json` > `.env` 預設值。
+- 在 Docker / Compose 環境中已將 `./data` 資料夾設定為 Volume (`./data:/app/data`) 進行持久化。
 
 ### 3. API 認證與安全規範
 - 統一使用 `backend.app.core.dependencies.require_credentials` 作為 FastAPI Dependency。

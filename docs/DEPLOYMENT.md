@@ -28,7 +28,7 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 # 3. Session 加密 Secret Key
 SECRET_KEY=generate-a-secure-random-key-here
 
-# 4. 預設資源 IDs (選填，亦可於 Web UI「系統設定」頁面配置並持久化至 runtime_config.json)
+# 4. 預設資源 IDs (選填，亦可於 Web UI「系統設定」頁面配置並持久化至 data/runtime_config.json)
 DEFAULT_SPREADSHEET_ID=1xsxDJ80-TOQs3d3ecHALEbyMlxxEkwXNjHaW7yA8wVs
 DEFAULT_PLAYLIST_ID=PLhu1MP3FpZmHar5qPZJkl6zCqXzddF4nC
 ```
