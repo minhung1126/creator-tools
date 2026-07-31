@@ -2,27 +2,30 @@ import React, { useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
+import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import {
-  Send,
+  AlertTriangle,
+  CheckCircle2,
+  Globe,
+  ListOrdered,
   PlaySquare,
   RefreshCw,
-  CheckCircle2,
-  AlertTriangle,
-  Globe,
+  Send,
   Trash2,
-  ListOrdered
 } from 'lucide-react';
 
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
-
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
+  const [playlistSource, setPlaylistSource] = useState('');
+  const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
@@ -35,16 +38,14 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     try {
       const res = await api.getPlaylistVideos(playlistId);
       setVideos(res.videos || []);
+      setPlaylistSource(res.source || '');
+      setPlaylistFallbackReason(res.fallback_reason || '');
+      setQuotaRefreshKey((key) => key + 1);
     } catch (err) {
       setErrorMsg(`讀取 To-Post 播放清單失敗：${err.message}`);
     } finally {
       setLoading(false);
     }
-  };
-
-  const handlePublishAndClean = () => {
-    if (videos.length === 0) return;
-    setConfirmOpen(true);
   };
 
   const doPublish = async () => {
@@ -56,6 +57,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       const res = await api.publishAndCleanup(playlistId);
       setResult(res);
       setVideos([]);
+      setQuotaRefreshKey((key) => key + 1);
       toast.success(`已完成 ${res.total_processed} 支影片的發布與清理！`);
     } catch (err) {
       setErrorMsg(`發布與清理執行失敗：${err.message}`);
@@ -65,12 +67,18 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     }
   };
 
+  const sourceLabel = playlistSource === 'yt-dlp'
+    ? 'yt-dlp（預覽不耗 API 配額）'
+    : playlistSource === 'youtube-api'
+      ? 'YouTube API（yt-dlp 無法讀取時回退）'
+      : '';
+
   return (
     <div className="section-gap">
       <ConfirmDialog
         open={confirmOpen}
         title="確認公開並清理清單"
-        message={`確定要將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）`}
+        message={`確定要依目前播放清單順序，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）`}
         confirmText="確認公開並移出 To-Post"
         cancelText="取消"
         variant="destructive"
@@ -78,124 +86,87 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
         onCancel={() => setConfirmOpen(false)}
       />
 
+      <YouTubeQuotaBanner refreshKey={quotaRefreshKey} />
+
       <div>
         <div className="section-header">
           <Send size={24} color="var(--secondary)" />
           <h1 style={{ fontSize: '1.8rem' }}>YouTube｜公開 To-Post 影片並清理清單</h1>
         </div>
         <p className="section-desc">
-          讀取待發布 (To-Post) 播放清單中的全部影片，依發布時間由舊到新排序。確認後將公開狀態設為「公開」，成功後自動自清單移除。
+          播放清單預覽優先使用 yt-dlp，依播放清單原始順序顯示；執行時才呼叫必要的 YouTube API 完成公開與移出清單。
         </p>
       </div>
 
-      {/* Input Control Bar */}
       <div className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ flex: 1, minWidth: '280px' }}>
-          <label className="form-label"><PlaySquare size={14}/> To-Post 播放清單 ID</label>
-          <input className="form-input" type="text" value={playlistId}
-            onChange={(e) => setPlaylistId(e.target.value)}
-            placeholder="e.g. PLhu1MP3FpZmHar5qPZJkl6zCqXzddF4nC" />
+          <label className="form-label"><PlaySquare size={14} /> To-Post 播放清單 ID</label>
+          <input className="form-input" type="text" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} placeholder="YouTube Playlist ID" />
         </div>
-        <button className="btn btn-primary" onClick={handleLoadPlaylist} disabled={loading}
-          style={{ marginTop: 'auto', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+        <button className="btn btn-primary" onClick={handleLoadPlaylist} disabled={loading} style={{ marginTop: 'auto', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
           <RefreshCw size={16} className={loading ? 'spin' : ''} />
           {loading ? '讀取中...' : '讀取 To-Post 播放清單'}
         </button>
       </div>
 
-      {/* Error Alert */}
-      {errorMsg && (
-        <div className="glass-panel error-alert">
-          <AlertTriangle size={20} />
-          <span>{errorMsg}</span>
+      {sourceLabel && (
+        <div className="info-banner">
+          <ListOrdered size={15} color="var(--secondary)" />
+          <span>
+            播放清單來源：{sourceLabel}。顯示與處理順序均依播放清單原始順序。
+            {playlistFallbackReason ? ` 回退原因：${playlistFallbackReason}` : ''}
+          </span>
         </div>
       )}
 
-      {/* Video List & Summary View */}
+      {errorMsg && <div className="glass-panel error-alert"><AlertTriangle size={20} /><span>{errorMsg}</span></div>}
+
       {videos.length > 0 && (
         <div className="section-gap" style={{ gap: '20px' }}>
           <div className="glass-panel" style={{ padding: '24px', borderLeft: '4px solid var(--secondary)' }}>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>
-              確認公開並移除 {videos.length} 支影片
-            </h2>
+            <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>確認公開並移除 {videos.length} 支影片</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-              按下「確認公開並移出 To-Post」後，系統會逐支將公開狀態設為<strong>「公開 (Public)」</strong>，並在成功後從 To-Post 播放清單移除。從播放清單移除不會刪除 YouTube 影片；影片仍會保留在 YouTube 頻道中。
+              系統會依下方順序逐支設為<strong>「公開（Public）」</strong>，成功後再從 To-Post 播放清單移除。移出播放清單不會刪除影片。
             </p>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <h3 style={{ fontSize: '1.1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ListOrdered size={18}/> 待處理影片清單 (依發布時間由舊到新排列)：
+              <ListOrdered size={18} /> 待處理影片清單（播放清單順序）：
             </h3>
-
-            {videos.map((v, idx) => (
-              <div key={v.video_id} className="glass-panel"
-                style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px' }}>
-                  #{idx + 1}
-                </span>
-
-                {v.thumbnail_url && (
-                  <img src={v.thumbnail_url} alt={v.title}
-                    style={{ width: '120px', aspectRatio: '16/9', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />
-                )}
-
+            {videos.map((video, index) => (
+              <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px' }}>#{index + 1}</span>
+                {video.thumbnail_url && <img src={video.thumbnail_url} alt={video.title} style={{ width: '120px', aspectRatio: '16/9', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />}
                 <div style={{ flex: 1, minWidth: '220px' }}>
-                  <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '4px' }}>{v.title || '無標題影片'}</h4>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {v.video_id}</span>
-                  {v.published_at && (
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginLeft: '12px' }}>
-                      發布時間: {new Date(v.published_at).toLocaleString()}
-                    </span>
-                  )}
+                  <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '4px' }}>{video.title || '無標題影片'}</h4>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {video.video_id}</span>
                 </div>
-
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span className="badge badge-info"><Globe size={12}/> 將設為公開</span>
-                  <span className="badge badge-info" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', borderColor: 'rgba(236, 72, 153, 0.3)' }}>
-                    <Trash2 size={12}/> 移出清單
-                  </span>
+                  <span className="badge badge-info"><Globe size={12} /> 將設為公開</span>
+                  <span className="badge badge-info" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', borderColor: 'rgba(236, 72, 153, 0.3)' }}><Trash2 size={12} /> 移出清單</span>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Action Bar */}
           <div className="glass-panel execution-bar">
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>
-              確認無誤後，請點擊右側按鈕啟動發布流程：
-            </span>
-            <button className="btn btn-primary" onClick={handlePublishAndClean} disabled={executing}
-              style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認順序無誤後，啟動發布流程：</span>
+            <button className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={executing} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
               <Send size={18} /> {executing ? '逐支發布並清理中...' : '確認公開並移出 To-Post'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Completion Result */}
       {result && (
         <div className="glass-panel" style={{ padding: '24px', border: '1px solid rgba(236, 72, 153, 0.4)', background: 'rgba(15, 23, 42, 0.95)' }}>
-          <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-            <CheckCircle2 size={22}/> To-Post 影片已公開並完成清理！
-          </h3>
-          <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
-            本次清單中的 {result.total_processed} 支影片已逐支設為公開，並從 To-Post 播放清單移除。影片仍保留在 YouTube 頻道中。
-          </p>
-
+          <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> To-Post 影片已完成處理</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {result.results.map((r, idx) => (
-              <div key={idx} className="result-item" style={{
-                background: r.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)',
-                border: `1px solid ${r.status === 'failed' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(236, 72, 153, 0.2)'}`
-              }}>
-                <div>
-                  <strong style={{ color: '#fff' }}>#{idx + 1} {r.title}</strong> (ID: {r.video_id})
-                  {r.reason && <div style={{ color: '#f87171', fontSize: '0.8rem', marginTop: '2px' }}>原因: {r.reason}</div>}
-                </div>
-                <span className={`badge ${r.status === 'failed' ? 'badge-disconnected' : 'badge-connected'}`}>
-                  {r.status === 'failed' ? '失敗' : '公開並移出清單完成'}
-                </span>
+            {result.results.map((item, index) => (
+              <div key={`${item.video_id}-${index}`} className="result-item" style={{ background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
+                <div><strong style={{ color: '#fff' }}>#{index + 1} {item.title}</strong>（ID: {item.video_id}）{item.reason && <div style={{ color: '#f87171', fontSize: '0.8rem' }}>原因：{item.reason}</div>}</div>
+                <span className={`badge ${item.status === 'failed' ? 'badge-disconnected' : 'badge-connected'}`}>{item.status === 'failed' ? '失敗' : '公開並移出清單完成'}</span>
               </div>
             ))}
           </div>

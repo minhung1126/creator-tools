@@ -38,6 +38,8 @@ export const api = {
     request('/sheets/people', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, video_type: videoType, team }) }),
 
   // YouTube
+  getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
+
   getPlaylistVideos: (playlistId) =>
     request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
 
