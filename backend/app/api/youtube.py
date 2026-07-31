@@ -317,15 +317,24 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
         for video_id in ordered_ids:
             detail = details_map.get(video_id)
             title = title_map.get(video_id) or (detail or {}).get("snippet", {}).get("title", "")
+            display_title = title or "無標題影片"
             if not detail:
-                results.append({"video_id": video_id, "title": title, "status": "failed", "reason": "YouTube 找不到此影片或目前帳號無權存取。"})
-                continue
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"發布流程已暫停：找不到影片「{display_title}」（ID: {video_id}）或目前帳號無權存取。此前已完成 {len(results)} 支影片，後續影片尚未處理。",
+                )
             try:
                 response = publish_and_remove_playlist_item(creds, video_id, playlist_item_map.get(video_id), current_video=detail)
+                cleanup_error = (response.get("playlist_cleanup") or {}).get("error")
+                if cleanup_error:
+                    raise RuntimeError(f"影片已公開，但移出 To-Post 播放清單失敗：{cleanup_error}")
                 results.append({"video_id": video_id, "title": title, "status": "published_and_cleaned", "details": response})
             except Exception as publish_error:
                 logger.error("Failed to publish video %s: %s", video_id, publish_error, exc_info=True)
-                results.append({"video_id": video_id, "title": title, "status": "failed", "reason": str(publish_error)})
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"發布流程已暫停於「{display_title}」（ID: {video_id}）：{publish_error}。此前已完成 {len(results)} 支影片，後續影片尚未處理。",
+                ) from publish_error
         return {
             "playlist_id": playlist_id,
             "total_processed": len(ordered_ids),
@@ -335,6 +344,8 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
             "sort_order": "published_at_ascending",
             "quota_usage": youtube_quota_tracker.get_usage(),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Publish & Cleanup failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Publish & Cleanup failed: {str(exc)}") from exc
