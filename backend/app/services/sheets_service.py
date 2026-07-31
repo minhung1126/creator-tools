@@ -7,6 +7,8 @@ from google.oauth2.credentials import Credentials
 
 logger = logging.getLogger(__name__)
 
+TEAM_OPTION_SUFFIX = "（全隊）"
+
 
 def extract_spreadsheet_id(url_or_id: str) -> str:
     """Extract spreadsheet ID from a Google Sheets URL, or return as-is if already an ID."""
@@ -29,6 +31,11 @@ def quote_sheet_name(sheet_name: str) -> str:
 def normalize_cell_value(value: Any) -> Any:
     """Trim string cells so UI options and batch matching use identical values."""
     return value.strip() if isinstance(value, str) else value
+
+
+def team_option_label(team: str) -> str:
+    """Return the UI label used for a team's whole-team Sheet row."""
+    return f"{team}{TEAM_OPTION_SUFFIX}"
 
 
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
@@ -89,15 +96,15 @@ def parse_options_from_sheets(
     spreadsheet_id_or_url: str,
     worksheet_name: str,
 ) -> Dict[str, Any]:
-    """Parse team options from one selected worksheet."""
+    """Parse team options in their first-appearance order in the selected worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
-    teams = sorted({str(row.get("所屬團體")).strip() for row in rows if row.get("所屬團體")})
+    teams = [str(row.get("所屬團體")).strip() for row in rows if row.get("所屬團體")]
     return {
         "spreadsheet_id": spreadsheet_id,
         "worksheet_name": worksheet_name,
-        "teams": teams,
+        "teams": list(dict.fromkeys(teams)),
         "row_count": len(rows),
     }
 
@@ -108,17 +115,18 @@ def get_people_for_team(
     worksheet_name: str,
     team: str,
 ) -> List[str]:
-    """Get unique people names for a team from the selected worksheet."""
+    """Return person and whole-team options in the worksheet's exact row order."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
     normalized_team = team.strip()
-    people = [
-        str(row.get("人")).strip()
-        for row in rows
-        if row.get("所屬團體") == normalized_team and row.get("人")
-    ]
-    return list(dict.fromkeys(people))
+    options = []
+    for row in rows:
+        if row.get("所屬團體") != normalized_team:
+            continue
+        person = str(row.get("人") or "").strip()
+        options.append(person or team_option_label(normalized_team))
+    return list(dict.fromkeys(options))
 
 
 def get_all_rows_for_sheet(
