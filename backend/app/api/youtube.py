@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
-from backend.app.services.sheets_service import get_all_rows_for_sheet
+from backend.app.services.sheets_service import get_all_rows_for_sheet, team_option_label
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_entries_ytdlp,
@@ -46,6 +46,16 @@ class PublishCleanupInput(BaseModel):
     playlist_id: Optional[str] = ""
 
 
+def assignment_matches_row(row, team: str, assignment_value: str) -> bool:
+    """Match either a named person row or the selected team's blank-person whole-team row."""
+    if row.get("所屬團體") != team:
+        return False
+    row_person = str(row.get("人") or "").strip()
+    if assignment_value == team_option_label(team):
+        return not row_person
+    return row_person == assignment_value
+
+
 @router.get("/quota-usage")
 def get_quota_usage():
     return youtube_quota_tracker.get_usage()
@@ -80,21 +90,25 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
         raise HTTPException(status_code=400, detail="Title and description columns must be different.")
 
     try:
+        normalized_team = payload.team.strip()
         sheet_rows = get_all_rows_for_sheet(creds, spreadsheet_id, payload.worksheet_name)
         prepared = []
         for assignment in payload.assignments:
             video_id = assignment.video_id
-            person = assignment.person
+            person = assignment.person.strip()
             if not person or person == "不編輯":
                 prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": "使用者選擇不編輯"})
                 continue
 
-            matches = [row for row in sheet_rows if row.get("所屬團體") == payload.team and row.get("人") == person]
+            matches = [
+                row for row in sheet_rows
+                if assignment_matches_row(row, normalized_team, person)
+            ]
             if len(matches) == 0:
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {payload.team} 的人物 {person} 資料"})
+                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料"})
                 continue
             if len(matches) > 1:
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"團體 {payload.team} 的人物 {person} 有多筆 ({len(matches)} 筆) 資料，為避免誤更新已略過"})
+                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"團體 {normalized_team} 的選項 {person} 有多筆 ({len(matches)} 筆) 資料，為避免誤更新已略過"})
                 continue
 
             row = matches[0]
