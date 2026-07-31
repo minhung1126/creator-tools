@@ -125,6 +125,7 @@ def fetch_playlist_entries_ytdlp(playlist_id: str) -> List[Dict[str, Any]]:
             "video_id": video_id,
             "playlist_item_id": "",
             "title": str(entry.get("title") or ""),
+            "description": str(entry.get("description") or ""),
             "thumbnail_url": _entry_thumbnail(entry, video_id),
             "published_at": _entry_published_at(entry),
             "category_id": "",
@@ -197,6 +198,7 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
             "video_id": video_id,
             "playlist_item_id": item.get("id"),
             "title": snippet.get("title", ""),
+            "description": snippet.get("description", ""),
             "thumbnail_url": _snippet_thumbnail(snippet, video_id),
             "published_at": snippet.get("publishedAt", ""),
             "category_id": snippet.get("categoryId", ""),
@@ -220,6 +222,7 @@ def _enrich_ytdlp_preview(credentials: Credentials, videos: List[Dict[str, Any]]
         enriched.append({
             **video,
             "title": snippet.get("title") or video.get("title", ""),
+            "description": snippet.get("description") or video.get("description", ""),
             "thumbnail_url": _snippet_thumbnail(snippet, video.get("video_id", "")),
             "published_at": snippet.get("publishedAt") or video.get("published_at", ""),
             "category_id": snippet.get("categoryId") or video.get("category_id", ""),
