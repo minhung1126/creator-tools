@@ -48,6 +48,17 @@ export const api = {
       body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName, team }),
     }),
 
+  getRandomMemberPreview: (spreadsheetUrlOrId, worksheetName, team, columns) =>
+    request('/sheets/random-member-preview', {
+      method: 'POST',
+      body: JSON.stringify({
+        spreadsheet_url_or_id: spreadsheetUrlOrId,
+        worksheet_name: worksheetName,
+        team,
+        columns,
+      }),
+    }),
+
   getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
 
   getPlaylistVideos: (playlistId) =>

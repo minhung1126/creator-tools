@@ -1,4 +1,5 @@
 import logging
+import random
 import re
 import unicodedata
 from typing import Any, Dict, List
@@ -151,6 +152,44 @@ def get_people_for_team(
         person = normalize_text(row.get("人") or "")
         options.append(person or team_option_label(normalized_team))
     return list(dict.fromkeys(options))
+
+
+def get_random_member_preview(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+    team: str,
+    columns: List[str],
+) -> Dict[str, Any]:
+    """Pick one real member row from a team and return the requested column values."""
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
+    service = get_sheets_service(credentials)
+    rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
+    normalized_team = normalize_text(team)
+    normalized_columns = list(dict.fromkeys(
+        normalize_text(column) for column in columns if normalize_text(column)
+    ))
+
+    candidates = []
+    for row in rows:
+        if normalize_text(row.get("所屬團體") or "") != normalized_team:
+            continue
+        person = normalize_text(row.get("人") or "")
+        if not person:
+            continue
+        candidates.append((person, row))
+
+    if not candidates:
+        raise ValueError(f"工作表中找不到「{normalized_team}」的成員資料")
+
+    person, row = random.choice(candidates)
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "worksheet_name": worksheet_name,
+        "team": normalized_team,
+        "person": person,
+        "values": {column: row.get(column, "") for column in normalized_columns},
+    }
 
 
 def get_all_rows_for_sheet(
