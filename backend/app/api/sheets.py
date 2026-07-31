@@ -1,66 +1,81 @@
 import logging
-
-from fastapi import APIRouter, Request, HTTPException, Depends
-from pydantic import BaseModel
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
+from pydantic import BaseModel
 
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
-    parse_options_from_sheets,
     get_people_for_team,
-    extract_spreadsheet_id
+    get_spreadsheet_metadata,
+    parse_options_from_sheets,
 )
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/sheets", tags=["Google Sheets"])
 
 
-class ParseSheetsInput(BaseModel):
+class SpreadsheetInput(BaseModel):
     spreadsheet_url_or_id: Optional[str] = ""
 
 
-class GetPeopleInput(BaseModel):
-    spreadsheet_url_or_id: Optional[str] = ""
-    video_type: str = "Video"  # "Video" or "Shorts"
+class ParseSheetsInput(SpreadsheetInput):
+    worksheet_name: str
+
+
+class GetPeopleInput(SpreadsheetInput):
+    worksheet_name: str
     team: str
+
+
+def resolve_spreadsheet_id(value: Optional[str]) -> str:
+    target_id = value or runtime_config.get("default_spreadsheet_id")
+    if not target_id:
+        raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
+    return target_id
+
+
+@router.post("/metadata")
+def spreadsheet_metadata(
+    payload: SpreadsheetInput,
+    creds: Credentials = Depends(require_credentials),
+):
+    target_id = resolve_spreadsheet_id(payload.spreadsheet_url_or_id)
+    try:
+        return get_spreadsheet_metadata(creds, target_id)
+    except Exception as exc:
+        logger.error("Failed to read spreadsheet metadata: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to read spreadsheet metadata: {str(exc)}") from exc
 
 
 @router.post("/parse-options")
 def parse_sheet_teams(
     payload: ParseSheetsInput,
-    creds: Credentials = Depends(require_credentials)
+    creds: Credentials = Depends(require_credentials),
 ):
-    target_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
-    if not target_id:
-        raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
-
+    target_id = resolve_spreadsheet_id(payload.spreadsheet_url_or_id)
     try:
-        data = parse_options_from_sheets(creds, target_id)
-        return data
-    except Exception as e:
-        logger.error("Failed to parse Google Sheet: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to parse Google Sheet: {str(e)}")
+        return parse_options_from_sheets(creds, target_id, payload.worksheet_name)
+    except Exception as exc:
+        logger.error("Failed to parse Google Sheet: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse Google Sheet: {str(exc)}") from exc
 
 
 @router.post("/people")
 def get_team_people(
     payload: GetPeopleInput,
-    creds: Credentials = Depends(require_credentials)
+    creds: Credentials = Depends(require_credentials),
 ):
-    target_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
-    if not target_id:
-        raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
-
+    target_id = resolve_spreadsheet_id(payload.spreadsheet_url_or_id)
     try:
-        people = get_people_for_team(creds, target_id, payload.video_type, payload.team)
+        people = get_people_for_team(creds, target_id, payload.worksheet_name, payload.team)
         return {
             "team": payload.team,
-            "video_type": payload.video_type,
-            "people": people
+            "worksheet_name": payload.worksheet_name,
+            "people": people,
         }
-    except Exception as e:
-        logger.error("Failed to read people from sheet: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to read people from sheet: {str(e)}")
+    except Exception as exc:
+        logger.error("Failed to read people from sheet: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to read people from sheet: {str(exc)}") from exc
