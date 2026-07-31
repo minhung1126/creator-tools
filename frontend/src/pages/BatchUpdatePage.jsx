@@ -11,6 +11,7 @@ import {
   PlaySquare,
   RefreshCw,
   Send,
+  Shuffle,
   Users,
   Video as VideoIcon,
 } from 'lucide-react';
@@ -56,6 +57,18 @@ function sortVideosByUploadTime(videos) {
   });
 }
 
+function PreviewField({ label, value }) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
+  return (
+    <div className="glass-panel" style={{ padding: 14 }}>
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 7 }}>{label}</div>
+      <div style={{ color: hasValue ? '#fff' : '#fbbf24', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
+        {hasValue ? String(value) : '此欄位目前是空白，請記得編輯試算表'}
+      </div>
+    </div>
+  );
+}
+
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
   const defaults = DEFAULT_COLUMNS[videoType];
@@ -72,6 +85,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [teams, setTeams] = useState([]);
   const [teamPeople, setTeamPeople] = useState([]);
   const [enabledPeople, setEnabledPeople] = useState(initial.enabledPeople);
+  const [randomPreview, setRandomPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState('');
   const [videos, setVideos] = useState([]);
   const [assignments, setAssignments] = useState({});
   const [selectedVideoIds, setSelectedVideoIds] = useState([]);
@@ -106,6 +122,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setColumns([]);
     setTeams([]);
     setTeamPeople([]);
+    setRandomPreview(null);
+    setPreviewError('');
     setVideos([]);
     setAssignments({});
     setSelectedVideoIds([]);
@@ -193,6 +211,39 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     if (bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
   }, [availablePeople, bulkPerson]);
 
+  const loadRandomPreview = async () => {
+    if (!spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
+      setRandomPreview(null);
+      setPreviewError('請先選擇工作表、團體、標題欄位與描述欄位');
+      return;
+    }
+    setLoadingPreview(true);
+    setPreviewError('');
+    try {
+      const preview = await api.getRandomMemberPreview(
+        spreadsheetId,
+        worksheetName,
+        selectedTeam,
+        [titleColumn, descriptionColumn],
+      );
+      setRandomPreview(preview);
+    } catch (err) {
+      setRandomPreview(null);
+      setPreviewError(err.message);
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!hydrated || !authUser || !spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
+      setRandomPreview(null);
+      setPreviewError('');
+      return;
+    }
+    loadRandomPreview();
+  }, [hydrated, authUser, spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn]);
+
   const loadSheetResources = async ({ showToast = false } = {}) => {
     if (!spreadsheetId) {
       if (showToast) toast.warning('請先填寫主要試算表 ID / URL');
@@ -237,6 +288,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setSelectedTeam('');
     setTeamPeople([]);
     setEnabledPeople([]);
+    setRandomPreview(null);
+    setPreviewError('');
     setSelectedVideoIds([]);
     setBulkPerson('');
     if (!nextWorksheet) return;
@@ -358,6 +411,26 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
           <div className="form-group"><label className="form-label"><PlaySquare size={14} /> 目標播放清單 ID</label><input className="form-input" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} /></div>
         </div>
         <div className="info-banner"><Info size={14} color="var(--primary)" /><span>全部設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取；Video / Shorts 各自獨立。</span></div>
+      </div>
+
+      <div className="glass-panel" style={{ padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}><Shuffle size={19} /> 試算表隨機抽查</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 5 }}>從「{selectedTeam || '尚未選擇隊伍'}」隨機抽一位真實成員，顯示目前選用欄位的內容；全隊列不會被抽中。</p>
+          </div>
+          <button className="btn btn-primary" onClick={loadRandomPreview} disabled={loadingPreview || !selectedTeam}><RefreshCw size={16} className={loadingPreview ? 'spin' : ''} /> {loadingPreview ? '抽查中...' : randomPreview ? '換一位成員' : '隨機抽查'}</button>
+        </div>
+        {previewError && <div className="error-alert" style={{ marginTop: 14 }}><AlertCircle size={18} /><span>{previewError}</span></div>}
+        {randomPreview && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ color: '#fff', marginBottom: 12 }}><strong>抽中成員：{randomPreview.person}</strong></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+              <PreviewField label={`標題欄位：${titleColumn}`} value={randomPreview.values?.[titleColumn]} />
+              <PreviewField label={`描述欄位：${descriptionColumn}`} value={randomPreview.values?.[descriptionColumn]} />
+            </div>
+          </div>
+        )}
       </div>
 
       {errorMsg && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMsg}</span></div>}
