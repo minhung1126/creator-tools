@@ -26,6 +26,11 @@ def quote_sheet_name(sheet_name: str) -> str:
     return "'" + sheet_name.replace("'", "''") + "'"
 
 
+def normalize_cell_value(value: Any) -> Any:
+    """Trim string cells so UI options and batch matching use identical values."""
+    return value.strip() if isinstance(value, str) else value
+
+
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
     """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:
@@ -43,7 +48,7 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
             row_dict = {}
             for idx, cell_value in enumerate(row):
                 if idx < len(header):
-                    row_dict[header[idx]] = cell_value
+                    row_dict[header[idx]] = normalize_cell_value(cell_value)
             parsed_rows.append(row_dict)
         return parsed_rows
     except Exception as exc:
@@ -107,8 +112,13 @@ def get_people_for_team(
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
-    people = [str(row.get("人")).strip() for row in rows if row.get("所屬團體") == team and row.get("人")]
-    return sorted(set(people))
+    normalized_team = team.strip()
+    people = [
+        str(row.get("人")).strip()
+        for row in rows
+        if row.get("所屬團體") == normalized_team and row.get("人")
+    ]
+    return list(dict.fromkeys(people))
 
 
 def get_all_rows_for_sheet(
