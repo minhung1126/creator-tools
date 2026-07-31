@@ -32,9 +32,7 @@ def _playlist_url(playlist_id_or_url: str) -> str:
 
 
 def _entry_thumbnail(entry: Dict[str, Any], video_id: str) -> str:
-    """Return a stable YouTube thumbnail URL instead of yt-dlp placeholder images."""
-    if video_id:
-        return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+    """Return the best thumbnail exposed by yt-dlp, with a stable URL fallback."""
     if entry.get("thumbnail"):
         return str(entry["thumbnail"])
     thumbnails = entry.get("thumbnails") or []
@@ -42,7 +40,19 @@ def _entry_thumbnail(entry: Dict[str, Any], video_id: str) -> str:
         for thumbnail in reversed(thumbnails):
             if isinstance(thumbnail, dict) and thumbnail.get("url"):
                 return str(thumbnail["url"])
-    return ""
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
+
+
+def _snippet_thumbnail(snippet: Dict[str, Any], video_id: str) -> str:
+    thumbnails = snippet.get("thumbnails") or {}
+    return (
+        thumbnails.get("maxres", {}).get("url")
+        or thumbnails.get("standard", {}).get("url")
+        or thumbnails.get("high", {}).get("url")
+        or thumbnails.get("medium", {}).get("url")
+        or thumbnails.get("default", {}).get("url")
+        or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "")
+    )
 
 
 def _entry_published_at(entry: Dict[str, Any]) -> str:
@@ -59,7 +69,7 @@ def _entry_published_at(entry: Dict[str, Any]) -> str:
 
 
 def fetch_playlist_entries_ytdlp(playlist_id: str) -> List[Dict[str, Any]]:
-    """Read playlist metadata without consuming YouTube Data API quota."""
+    """Read playlist order and public metadata without consuming YouTube API quota."""
     options = {
         "quiet": True,
         "no_warnings": True,
@@ -152,33 +162,48 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
         video_id = item.get("contentDetails", {}).get("videoId")
         detail = details_map.get(video_id, {})
         snippet = detail.get("snippet", item.get("snippet", {}))
-        thumbnails = snippet.get("thumbnails", {})
-        thumbnail_url = (
-            thumbnails.get("maxres", {}).get("url")
-            or thumbnails.get("high", {}).get("url")
-            or thumbnails.get("medium", {}).get("url")
-            or thumbnails.get("default", {}).get("url")
-            or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "")
-        )
         parsed_videos.append({
             "sequence": index,
             "video_id": video_id,
             "playlist_item_id": item.get("id"),
             "title": snippet.get("title", ""),
-            "thumbnail_url": thumbnail_url,
+            "thumbnail_url": _snippet_thumbnail(snippet, video_id),
             "published_at": snippet.get("publishedAt", ""),
             "category_id": snippet.get("categoryId", ""),
         })
     return parsed_videos
 
 
+def _enrich_ytdlp_preview(credentials: Credentials, videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Preserve yt-dlp order while replacing private placeholders with owner-visible metadata."""
+    video_ids = [video["video_id"] for video in videos if video.get("video_id")]
+    details_map = {
+        item["id"]: item
+        for item in fetch_video_details(credentials, video_ids)
+        if item.get("id")
+    }
+    enriched = []
+    for video in videos:
+        detail = details_map.get(video.get("video_id"), {})
+        snippet = detail.get("snippet") or {}
+        enriched.append({
+            **video,
+            "title": snippet.get("title") or video.get("title", ""),
+            "thumbnail_url": _snippet_thumbnail(snippet, video.get("video_id", "")),
+            "published_at": snippet.get("publishedAt") or video.get("published_at", ""),
+            "category_id": snippet.get("categoryId") or video.get("category_id", ""),
+        })
+    return enriched
+
+
 def fetch_playlist_preview(
     credentials: Credentials,
     playlist_id: str,
 ) -> Tuple[List[Dict[str, Any]], str, Optional[str]]:
-    """Prefer yt-dlp for quota-free previews, then fall back to the API."""
+    """Use yt-dlp for ordering, then one authenticated API lookup for private metadata."""
     try:
-        return fetch_playlist_entries_ytdlp(playlist_id), "yt-dlp", None
+        ytdlp_videos = fetch_playlist_entries_ytdlp(playlist_id)
+        return _enrich_ytdlp_preview(credentials, ytdlp_videos), "yt-dlp+youtube-api", None
     except Exception as exc:
         logger.warning("yt-dlp playlist preview failed; using YouTube API: %s", exc)
         return _api_playlist_preview(credentials, playlist_id), "youtube-api", str(exc)
