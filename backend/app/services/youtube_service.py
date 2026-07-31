@@ -32,6 +32,9 @@ def _playlist_url(playlist_id_or_url: str) -> str:
 
 
 def _entry_thumbnail(entry: Dict[str, Any], video_id: str) -> str:
+    """Return a stable YouTube thumbnail URL instead of yt-dlp placeholder images."""
+    if video_id:
+        return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
     if entry.get("thumbnail"):
         return str(entry["thumbnail"])
     thumbnails = entry.get("thumbnails") or []
@@ -39,7 +42,7 @@ def _entry_thumbnail(entry: Dict[str, Any], video_id: str) -> str:
         for thumbnail in reversed(thumbnails):
             if isinstance(thumbnail, dict) and thumbnail.get("url"):
                 return str(thumbnail["url"])
-    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else ""
+    return ""
 
 
 def _entry_published_at(entry: Dict[str, Any]) -> str:
