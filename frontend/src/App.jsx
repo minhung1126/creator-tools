@@ -5,6 +5,7 @@ import DashboardPage from './pages/DashboardPage';
 import BatchUpdatePage from './pages/BatchUpdatePage';
 import PublishCleanerPage from './pages/PublishCleanerPage';
 import SettingsPage from './pages/SettingsPage';
+import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
 
 function AppContent() {
@@ -12,6 +13,7 @@ function AppContent() {
   const [authUser, setAuthUser] = useState(null);
   const [sysSettings, setSysSettings] = useState({});
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(null);
   const toast = useToast();
 
   const fetchUser = async () => {
@@ -19,12 +21,15 @@ function AppContent() {
       const res = await api.getUserStatus();
       if (res.authenticated) {
         setAuthUser(res.user);
+        return res.user;
       } else {
         setAuthUser(null);
+        return null;
       }
     } catch (err) {
       console.error('Failed to fetch user status:', err);
       setAuthUser(null);
+      return null;
     }
   };
 
@@ -41,21 +46,26 @@ function AppContent() {
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      await fetchUser();
+      const user = await fetchUser();
 
       // Check location hash for OAuth callback return
       const hash = window.location.hash;
       if (hash.includes('auth_success=1')) {
         toast.success('Google 帳號連線成功！');
         window.location.hash = '';
-        await fetchUser();
+        const updatedUser = await fetchUser();
+        if (updatedUser) {
+          await fetchSettings();
+        }
       } else if (hash.includes('auth_error=')) {
         const errorText = decodeURIComponent(hash.split('auth_error=')[1] || '');
+        setAuthError(`Google 帳號連線失敗：${errorText}`);
         toast.error(`Google 帳號連線失敗：${errorText}`);
         window.location.hash = '';
+      } else if (user) {
+        await fetchSettings();
       }
 
-      await fetchSettings();
       setLoading(false);
     };
 
@@ -73,6 +83,19 @@ function AppContent() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="loading-center">
+        系統初始化中...
+      </div>
+    );
+  }
+
+  // Require Google Authentication before displaying app content
+  if (!authUser) {
+    return <LoginPage initialError={authError} />;
+  }
+
   return (
     <div className="app-container">
       <Navbar
@@ -83,40 +106,32 @@ function AppContent() {
       />
 
       <main className="main-content">
-        {loading ? (
-          <div className="loading-center">
-            系統初始化中...
-          </div>
-        ) : (
-          <>
-            {activeTab === 'dashboard' && (
-              <DashboardPage
-                authUser={authUser}
-                sysSettings={sysSettings}
-                setActiveTab={setActiveTab}
-              />
-            )}
-            {activeTab === 'batch_update' && (
-              <BatchUpdatePage
-                sysSettings={sysSettings}
-                authUser={authUser}
-              />
-            )}
-            {activeTab === 'publish_clean' && (
-              <PublishCleanerPage
-                sysSettings={sysSettings}
-                authUser={authUser}
-              />
-            )}
-            {activeTab === 'settings' && (
-              <SettingsPage
-                authUser={authUser}
-                sysSettings={sysSettings}
-                refreshSettings={fetchSettings}
-                refreshUser={fetchUser}
-              />
-            )}
-          </>
+        {activeTab === 'dashboard' && (
+          <DashboardPage
+            authUser={authUser}
+            sysSettings={sysSettings}
+            setActiveTab={setActiveTab}
+          />
+        )}
+        {activeTab === 'batch_update' && (
+          <BatchUpdatePage
+            sysSettings={sysSettings}
+            authUser={authUser}
+          />
+        )}
+        {activeTab === 'publish_clean' && (
+          <PublishCleanerPage
+            sysSettings={sysSettings}
+            authUser={authUser}
+          />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsPage
+            authUser={authUser}
+            sysSettings={sysSettings}
+            refreshSettings={fetchSettings}
+            refreshUser={fetchUser}
+          />
         )}
       </main>
     </div>
