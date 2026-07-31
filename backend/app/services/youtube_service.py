@@ -31,6 +31,34 @@ def _playlist_url(playlist_id_or_url: str) -> str:
     return f"https://www.youtube.com/playlist?list={value}"
 
 
+def _deduplicate_videos(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Keep the first occurrence of each video ID while preserving source order."""
+    unique_videos: List[Dict[str, Any]] = []
+    seen_video_ids = set()
+
+    for video in videos:
+        video_id = str(video.get("video_id") or "").strip()
+        if not video_id or video_id in seen_video_ids:
+            continue
+        seen_video_ids.add(video_id)
+        unique_videos.append({
+            **video,
+            "sequence": len(unique_videos) + 1,
+            "video_id": video_id,
+        })
+
+    return unique_videos
+
+
+def _deduplicate_video_ids(video_ids: List[str]) -> List[str]:
+    """Return non-empty video IDs in first-appearance order without duplicates."""
+    return list(dict.fromkeys(
+        str(video_id).strip()
+        for video_id in video_ids
+        if str(video_id or "").strip()
+    ))
+
+
 def _entry_thumbnail(entry: Dict[str, Any], video_id: str) -> str:
     """Return the best thumbnail exposed by yt-dlp, with a stable URL fallback."""
     if entry.get("thumbnail"):
@@ -101,6 +129,7 @@ def fetch_playlist_entries_ytdlp(playlist_id: str) -> List[Dict[str, Any]]:
             "published_at": _entry_published_at(entry),
             "category_id": "",
         })
+    parsed = _deduplicate_videos(parsed)
     if not parsed:
         raise RuntimeError("yt-dlp 未取得任何播放清單項目，可能是私人播放清單或 YouTube 暫時限制存取。")
     return parsed
@@ -127,7 +156,8 @@ def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dic
 
 
 def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[Dict[str, Any]]:
-    """Fetch detailed info for video IDs in batches of 50."""
+    """Fetch detailed info for unique video IDs in batches of 50."""
+    video_ids = _deduplicate_video_ids(video_ids)
     if not video_ids:
         return []
     service = get_youtube_service(credentials)
@@ -171,11 +201,12 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
             "published_at": snippet.get("publishedAt", ""),
             "category_id": snippet.get("categoryId", ""),
         })
-    return parsed_videos
+    return _deduplicate_videos(parsed_videos)
 
 
 def _enrich_ytdlp_preview(credentials: Credentials, videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Preserve yt-dlp order while replacing private placeholders with owner-visible metadata."""
+    videos = _deduplicate_videos(videos)
     video_ids = [video["video_id"] for video in videos if video.get("video_id")]
     details_map = {
         item["id"]: item
@@ -193,7 +224,7 @@ def _enrich_ytdlp_preview(credentials: Credentials, videos: List[Dict[str, Any]]
             "published_at": snippet.get("publishedAt") or video.get("published_at", ""),
             "category_id": snippet.get("categoryId") or video.get("category_id", ""),
         })
-    return enriched
+    return _deduplicate_videos(enriched)
 
 
 def fetch_playlist_preview(
@@ -203,10 +234,12 @@ def fetch_playlist_preview(
     """Use yt-dlp for ordering, then one authenticated API lookup for private metadata."""
     try:
         ytdlp_videos = fetch_playlist_entries_ytdlp(playlist_id)
-        return _enrich_ytdlp_preview(credentials, ytdlp_videos), "yt-dlp+youtube-api", None
+        videos = _enrich_ytdlp_preview(credentials, ytdlp_videos)
+        return _deduplicate_videos(videos), "yt-dlp+youtube-api", None
     except Exception as exc:
         logger.warning("yt-dlp playlist preview failed; using YouTube API: %s", exc)
-        return _api_playlist_preview(credentials, playlist_id), "youtube-api", str(exc)
+        videos = _api_playlist_preview(credentials, playlist_id)
+        return _deduplicate_videos(videos), "youtube-api", str(exc)
 
 
 def update_single_video_metadata(
