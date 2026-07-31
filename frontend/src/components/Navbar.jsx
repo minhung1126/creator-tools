@@ -1,30 +1,56 @@
-import React from 'react';
-import { 
-  LayoutDashboard, 
-  Settings, 
-  Layers, 
-  Send, 
-  Youtube, 
-  CheckCircle2, 
+import React, { useEffect, useState } from 'react';
+import {
+  LayoutDashboard,
+  Settings,
+  Layers,
+  Send,
+  Youtube,
+  CheckCircle2,
   XCircle,
-  Video
+  Video,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 
+const youtubeItems = [
+  { id: 'batch_update', label: '批次更新草稿資訊', icon: Layers },
+  { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send },
+];
+
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) {
-  const navItems = [
-    { id: 'dashboard', label: '儀表板總覽', icon: LayoutDashboard },
-    { id: 'batch_update', label: '批次更新草稿資訊', icon: Layers },
-    { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send },
-    { id: 'settings', label: '系統與帳號設定', icon: Settings },
-  ];
+  const isYoutubeTab = youtubeItems.some((item) => item.id === activeTab);
+  const [isYoutubeOpen, setIsYoutubeOpen] = useState(isYoutubeTab);
+
+  useEffect(() => {
+    if (isYoutubeTab) {
+      setIsYoutubeOpen(true);
+    }
+  }, [isYoutubeTab]);
+
+  const renderNavItem = (item, isChild = false) => {
+    const Icon = item.icon;
+    const isActive = activeTab === item.id;
+
+    return (
+      <div
+        key={item.id}
+        className={`nav-item ${isActive ? 'active' : ''}`}
+        onClick={() => setActiveTab(item.id)}
+        style={isChild ? { marginLeft: '22px', padding: '10px 14px', fontSize: '0.9rem' } : undefined}
+      >
+        <Icon size={isChild ? 16 : 18} />
+        <span>{item.label}</span>
+      </div>
+    );
+  };
 
   return (
     <aside className="sidebar">
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-          <div style={{ 
-            background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)', 
-            padding: '8px', 
+          <div style={{
+            background: 'linear-gradient(135deg, #6366f1 0%, #ec4899 100%)',
+            padding: '8px',
             borderRadius: '10px',
             display: 'flex',
             alignItems: 'center',
@@ -34,26 +60,47 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
           </div>
           <div>
             <h2 style={{ fontSize: '1.15rem', color: '#fff' }}>Creator Tools</h2>
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>YouTube 自動化控制台</p>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>創作者自動化控制台</p>
           </div>
         </div>
       </div>
 
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = activeTab === item.id;
-          return (
+        {renderNavItem({ id: 'dashboard', label: '儀表板總覽', icon: LayoutDashboard })}
+
+        <div>
+          <button
+            type="button"
+            className={`nav-item ${isYoutubeTab ? 'active' : ''}`}
+            onClick={() => setIsYoutubeOpen((open) => !open)}
+            aria-expanded={isYoutubeOpen}
+            aria-controls="youtube-nav-items"
+            style={{ width: '100%', border: 'none', font: 'inherit', textAlign: 'left' }}
+          >
+            <Youtube size={18} />
+            <span style={{ flex: 1 }}>YouTube</span>
+            {isYoutubeOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
+
+          {isYoutubeOpen && (
             <div
-              key={item.id}
-              className={`nav-item ${isActive ? 'active' : ''}`}
-              onClick={() => setActiveTab(item.id)}
+              id="youtube-nav-items"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                marginTop: '4px',
+                marginLeft: '8px',
+                paddingLeft: '8px',
+                borderLeft: '1px solid var(--border-color)'
+              }}
             >
-              <Icon size={18} />
-              <span>{item.label}</span>
+              {youtubeItems.map((item) => renderNavItem(item, true))}
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        {renderNavItem({ id: 'settings', label: '系統與帳號設定', icon: Settings })}
       </nav>
 
       <div className="glass-panel" style={{ padding: '14px', fontSize: '0.85rem' }}>
@@ -74,7 +121,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
             <p style={{ fontSize: '0.8rem', color: '#fff', wordBreak: 'break-all', fontWeight: 500 }}>
               {authUser.email || 'Google User'}
             </p>
-            <button 
+            <button
               onClick={onLogout}
               style={{
                 marginTop: '8px',
