@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
@@ -9,6 +9,7 @@ from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
     get_people_for_team,
+    get_random_member_preview,
     get_spreadsheet_metadata,
     parse_options_from_sheets,
 )
@@ -28,6 +29,10 @@ class ParseSheetsInput(SpreadsheetInput):
 class GetPeopleInput(SpreadsheetInput):
     worksheet_name: str
     team: str
+
+
+class RandomMemberPreviewInput(GetPeopleInput):
+    columns: List[str]
 
 
 def resolve_spreadsheet_id(value: Optional[str]) -> str:
@@ -79,3 +84,24 @@ def get_team_people(
     except Exception as exc:
         logger.error("Failed to read people from sheet: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to read people from sheet: {str(exc)}") from exc
+
+
+@router.post("/random-member-preview")
+def random_member_preview(
+    payload: RandomMemberPreviewInput,
+    creds: Credentials = Depends(require_credentials),
+):
+    target_id = resolve_spreadsheet_id(payload.spreadsheet_url_or_id)
+    try:
+        return get_random_member_preview(
+            creds,
+            target_id,
+            payload.worksheet_name,
+            payload.team,
+            payload.columns,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Failed to build random member preview: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to build random member preview: {str(exc)}") from exc
