@@ -1,5 +1,6 @@
 import logging
 import re
+import unicodedata
 from typing import Any, Dict, List
 
 import googleapiclient.discovery
@@ -8,6 +9,14 @@ from google.oauth2.credentials import Credentials
 logger = logging.getLogger(__name__)
 
 TEAM_OPTION_SUFFIX = "（全隊）"
+_INVISIBLE_TEXT_CHARS = str.maketrans("", "", "\u200b\u200c\u200d\u2060\ufeff")
+
+
+def normalize_text(value: Any) -> Any:
+    """Normalize Sheet/UI text for stable matching without changing non-string values."""
+    if not isinstance(value, str):
+        return value
+    return unicodedata.normalize("NFKC", value).translate(_INVISIBLE_TEXT_CHARS).strip()
 
 
 def extract_spreadsheet_id(url_or_id: str) -> str:
@@ -17,7 +26,7 @@ def extract_spreadsheet_id(url_or_id: str) -> str:
     match = re.search(r"/d/([0-9a-zA-Z\-_]+)", url_or_id)
     if match:
         return match.group(1)
-    return url_or_id.strip()
+    return normalize_text(url_or_id)
 
 
 def get_sheets_service(credentials: Credentials):
@@ -29,13 +38,13 @@ def quote_sheet_name(sheet_name: str) -> str:
 
 
 def normalize_cell_value(value: Any) -> Any:
-    """Trim string cells so UI options and batch matching use identical values."""
-    return value.strip() if isinstance(value, str) else value
+    """Normalize string cells so UI options and batch matching use identical values."""
+    return normalize_text(value)
 
 
 def team_option_label(team: str) -> str:
     """Return the UI label used for a team's whole-team Sheet row."""
-    return f"{team}{TEAM_OPTION_SUFFIX}"
+    return f"{normalize_text(team)}{TEAM_OPTION_SUFFIX}"
 
 
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
@@ -49,18 +58,33 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
         if not rows or len(rows) < 2:
             return []
 
-        header = [str(col).strip() for col in rows[0]]
+        header = [normalize_text(col) for col in rows[0]]
         parsed_rows = []
         for row in rows[1:]:
             row_dict = {}
             for idx, cell_value in enumerate(row):
-                if idx < len(header):
+                if idx < len(header) and header[idx]:
                     row_dict[header[idx]] = normalize_cell_value(cell_value)
             parsed_rows.append(row_dict)
         return parsed_rows
     except Exception as exc:
         logger.error("Error reading sheet range '%s': %s", range_name, exc, exc_info=True)
-        return []
+        raise RuntimeError(f"無法讀取工作表範圍 {range_name}: {exc}") from exc
+
+
+def get_sheet_headers(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+) -> List[str]:
+    """Return normalized first-row headers for one worksheet."""
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
+    service = get_sheets_service(credentials)
+    values = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=f"{quote_sheet_name(worksheet_name)}!1:1",
+    ).execute().get("values", [])
+    return [normalize_text(value) for value in (values[0] if values else []) if normalize_text(value)]
 
 
 def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: str) -> Dict[str, Any]:
@@ -81,7 +105,7 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
             spreadsheetId=spreadsheet_id,
             range=f"{quote_sheet_name(title)}!1:1",
         ).execute().get("values", [])
-        columns = [str(value).strip() for value in (values[0] if values else []) if str(value).strip()]
+        columns = [normalize_text(value) for value in (values[0] if values else []) if normalize_text(value)]
         worksheets.append({"title": title, "columns": columns})
 
     return {
@@ -100,7 +124,7 @@ def parse_options_from_sheets(
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
-    teams = [str(row.get("所屬團體")).strip() for row in rows if row.get("所屬團體")]
+    teams = [normalize_text(row.get("所屬團體")) for row in rows if row.get("所屬團體")]
     return {
         "spreadsheet_id": spreadsheet_id,
         "worksheet_name": worksheet_name,
@@ -119,12 +143,12 @@ def get_people_for_team(
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
-    normalized_team = team.strip()
+    normalized_team = normalize_text(team)
     options = []
     for row in rows:
-        if row.get("所屬團體") != normalized_team:
+        if normalize_text(row.get("所屬團體") or "") != normalized_team:
             continue
-        person = str(row.get("人") or "").strip()
+        person = normalize_text(row.get("人") or "")
         options.append(person or team_option_label(normalized_team))
     return list(dict.fromkeys(options))
 

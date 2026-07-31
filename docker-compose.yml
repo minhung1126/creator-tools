@@ -1,6 +1,7 @@
 services:
   creator-tools:
     image: ghcr.io/minhung1126/creator-tools:latest
+    pull_policy: always
     container_name: creator_tools
     ports:
       - "8000:8000"
@@ -9,3 +10,9 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

@@ -1,4 +1,5 @@
 import logging
+from collections import Counter
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,12 @@ from pydantic import BaseModel
 
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
-from backend.app.services.sheets_service import get_all_rows_for_sheet, team_option_label
+from backend.app.services.sheets_service import (
+    get_all_rows_for_sheet,
+    get_sheet_headers,
+    normalize_text,
+    team_option_label,
+)
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_entries_ytdlp,
@@ -48,9 +54,9 @@ class PublishCleanupInput(BaseModel):
 
 def assignment_matches_row(row, team: str, assignment_value: str) -> bool:
     """Match either a named person row or the selected team's blank-person whole-team row."""
-    if str(row.get("所屬團體") or "").strip() != team:
+    if normalize_text(row.get("所屬團體") or "") != team:
         return False
-    row_person = str(row.get("人") or "").strip()
+    row_person = normalize_text(row.get("人") or "")
     if assignment_value == team_option_label(team):
         return not row_person
     return row_person == assignment_value
@@ -63,13 +69,34 @@ def resolve_assignment_row(matches, title_column: str, description_column: str):
 
     distinct_values = {}
     for row in matches:
-        title = str(row.get(title_column) or "").strip()
+        title = normalize_text(row.get(title_column) or "")
         description = str(row.get(description_column) or "")
         distinct_values.setdefault((title, description), row)
 
     if len(distinct_values) > 1:
         return None, "conflict"
     return next(iter(distinct_values.values())), None
+
+
+def skip_reason_counts(items):
+    counts = Counter(item.get("reason_code", "other") for item in items if item.get("status") == "skipped")
+    return dict(counts)
+
+
+def all_skipped_message(items, attempted_count: int) -> str:
+    labels = {
+        "not_found": "找不到所選團體／人物資料",
+        "conflict": "同一選項有互相衝突的多筆資料",
+        "blank_title": "所選標題欄為空白",
+        "other": "其他原因",
+    }
+    counts = skip_reason_counts(items)
+    summary = "、".join(f"{labels.get(code, code)} {count} 支" for code, count in counts.items())
+    examples = "；".join(
+        f"{item.get('person') or '未指定'}：{item.get('reason')}"
+        for item in items[:3]
+    )
+    return f"所有已指定人物的 {attempted_count} 支影片都被略過。{summary}。範例：{examples}"
 
 
 @router.get("/quota-usage")
@@ -102,51 +129,70 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
     spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
     if not spreadsheet_id:
         raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
-    if payload.title_column == payload.description_column:
+
+    normalized_team = normalize_text(payload.team)
+    title_column = normalize_text(payload.title_column)
+    description_column = normalize_text(payload.description_column)
+    if title_column == description_column:
         raise HTTPException(status_code=400, detail="Title and description columns must be different.")
 
-    try:
-        normalized_team = payload.team.strip()
-        sheet_rows = get_all_rows_for_sheet(creds, spreadsheet_id, payload.worksheet_name)
-        prepared = []
-        for assignment in payload.assignments:
-            video_id = assignment.video_id
-            person = assignment.person.strip()
-            if not person or person == "不編輯":
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": "使用者選擇不編輯"})
-                continue
+    active_assignments = []
+    for assignment in payload.assignments:
+        person = normalize_text(assignment.person)
+        if person and person != "不編輯":
+            active_assignments.append((assignment.video_id, person))
+    if not active_assignments:
+        raise HTTPException(status_code=400, detail="目前沒有任何影片被指定人物；請先選擇人物或套用批量編輯後再執行。")
 
+    try:
+        headers = get_sheet_headers(creds, spreadsheet_id, payload.worksheet_name)
+        required_headers = ["所屬團體", "人", title_column, description_column]
+        missing_headers = [header for header in required_headers if header not in headers]
+        if missing_headers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"工作表「{payload.worksheet_name}」缺少欄位：{', '.join(missing_headers)}。請重新刷新並選擇正確欄位。",
+            )
+
+        sheet_rows = get_all_rows_for_sheet(creds, spreadsheet_id, payload.worksheet_name)
+        if not sheet_rows:
+            raise HTTPException(status_code=400, detail=f"工作表「{payload.worksheet_name}」沒有可用資料列。")
+
+        prepared = []
+        for video_id, person in active_assignments:
             matches = [
                 row for row in sheet_rows
                 if assignment_matches_row(row, normalized_team, person)
             ]
-            row, match_error = resolve_assignment_row(
-                matches,
-                payload.title_column,
-                payload.description_column,
-            )
+            row, match_error = resolve_assignment_row(matches, title_column, description_column)
             if match_error == "not_found":
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料"})
+                prepared.append({
+                    "video_id": video_id,
+                    "person": person,
+                    "status": "skipped",
+                    "reason_code": "not_found",
+                    "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料",
+                })
                 continue
             if match_error == "conflict":
                 prepared.append({
                     "video_id": video_id,
                     "person": person,
                     "status": "skipped",
-                    "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同，為避免誤更新已略過",
+                    "reason_code": "conflict",
+                    "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同",
                 })
                 continue
 
-            new_title = str(row.get(payload.title_column) or "").strip()
-            # Google Sheets omits trailing blank cells from a row. An omitted description
-            # therefore means an intentionally blank description, not a missing column.
-            new_description = str(row.get(payload.description_column) or "")
+            new_title = normalize_text(row.get(title_column) or "")
+            new_description = str(row.get(description_column) or "")
             if not new_title:
                 prepared.append({
                     "video_id": video_id,
                     "person": person,
                     "status": "skipped",
-                    "reason": f"工作表的 {payload.title_column} 為空白",
+                    "reason_code": "blank_title",
+                    "reason": f"工作表的 {title_column} 為空白",
                 })
                 continue
             prepared.append({
@@ -158,6 +204,12 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             })
 
         pending_ids = [item["video_id"] for item in prepared if item["status"] == "pending"]
+        if not pending_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=all_skipped_message(prepared, len(active_assignments)),
+            )
+
         details_map = {item["id"]: item for item in fetch_video_details(creds, pending_ids) if item.get("id")}
         results = []
         for item in prepared:
@@ -189,19 +241,22 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                 results.append({"video_id": video_id, "person": item["person"], "status": "failed", "reason": str(update_error)})
 
         return {
-            "total_processed": len(payload.assignments),
+            "total_processed": len(active_assignments),
             "updated_count": sum(1 for item in results if item["status"] == "updated"),
             "skipped_count": sum(1 for item in results if item["status"] == "skipped"),
             "failed_count": sum(1 for item in results if item["status"] == "failed"),
+            "skip_reason_counts": skip_reason_counts(results),
             "worksheet_name": payload.worksheet_name,
-            "title_column": payload.title_column,
-            "description_column": payload.description_column,
+            "title_column": title_column,
+            "description_column": description_column,
             "results": results,
             "quota_usage": youtube_quota_tracker.get_usage(),
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Batch update failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Batch update failed: {str(exc)}") from exc
+        raise HTTPException(status_code=500, detail=f"批次更新失敗：{str(exc)}") from exc
 
 
 @router.post("/publish-and-cleanup")
