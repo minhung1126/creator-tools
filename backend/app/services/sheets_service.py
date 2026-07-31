@@ -1,6 +1,6 @@
-import re
 import logging
-from typing import List, Dict, Any
+import re
+from typing import Any, Dict, List
 
 import googleapiclient.discovery
 from google.oauth2.credentials import Credentials
@@ -22,11 +22,17 @@ def get_sheets_service(credentials: Credentials):
     return googleapiclient.discovery.build("sheets", "v4", credentials=credentials)
 
 
+def quote_sheet_name(sheet_name: str) -> str:
+    return "'" + sheet_name.replace("'", "''") + "'"
+
+
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
-    """Read a named range/sheet and return rows as list of dicts keyed by header."""
+    """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:
-        sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
+        result = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+        ).execute()
         rows = result.get("values", [])
         if not rows or len(rows) < 2:
             return []
@@ -40,51 +46,76 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
                     row_dict[header[idx]] = cell_value
             parsed_rows.append(row_dict)
         return parsed_rows
-    except Exception as e:
-        logger.error("Error reading sheet range '%s': %s", range_name, e, exc_info=True)
+    except Exception as exc:
+        logger.error("Error reading sheet range '%s': %s", range_name, exc, exc_info=True)
         return []
 
 
-def parse_options_from_sheets(credentials: Credentials, spreadsheet_id_or_url: str) -> Dict[str, Any]:
-    """Parse team/group options from both Video and Shorts worksheets."""
+def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: str) -> Dict[str, Any]:
+    """Return worksheet titles and the first-row column names for each worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
+    metadata = service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="properties.title,sheets.properties.title",
+    ).execute()
 
-    video_rows = read_sheet_data(service, spreadsheet_id, "Youtube Video")
-    shorts_rows = read_sheet_data(service, spreadsheet_id, "Youtube Shorts")
-
-    video_teams = [r.get("所屬團體") for r in video_rows if r.get("所屬團體")]
-    shorts_teams = [r.get("所屬團體") for r in shorts_rows if r.get("所屬團體")]
-
-    teams = sorted(list(set(video_teams + shorts_teams)))
+    worksheets = []
+    for sheet in metadata.get("sheets", []):
+        title = sheet.get("properties", {}).get("title")
+        if not title:
+            continue
+        values = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=f"{quote_sheet_name(title)}!1:1",
+        ).execute().get("values", [])
+        columns = [str(value).strip() for value in (values[0] if values else []) if str(value).strip()]
+        worksheets.append({"title": title, "columns": columns})
 
     return {
         "spreadsheet_id": spreadsheet_id,
-        "teams": teams,
-        "video_count": len(video_rows),
-        "shorts_count": len(shorts_rows)
+        "spreadsheet_title": metadata.get("properties", {}).get("title", ""),
+        "worksheets": worksheets,
     }
 
 
-def get_people_for_team(credentials: Credentials, spreadsheet_id_or_url: str, video_type: str, team: str) -> List[str]:
-    """Get list of people names for a specific team and video type."""
+def parse_options_from_sheets(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+) -> Dict[str, Any]:
+    """Parse team options from one selected worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-
-    sheet_name = "Youtube Video" if video_type.lower() == "video" else "Youtube Shorts"
-    rows = read_sheet_data(service, spreadsheet_id, sheet_name)
-
-    people = []
-    for r in rows:
-        if r.get("所屬團體") == team and r.get("人"):
-            people.append(r.get("人"))
-
-    return sorted(list(set(people)))
+    rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
+    teams = sorted({str(row.get("所屬團體")).strip() for row in rows if row.get("所屬團體")})
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "worksheet_name": worksheet_name,
+        "teams": teams,
+        "row_count": len(rows),
+    }
 
 
-def get_all_rows_for_type(credentials: Credentials, spreadsheet_id_or_url: str, video_type: str) -> List[Dict[str, Any]]:
-    """Get all data rows for a specific video type worksheet."""
+def get_people_for_team(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+    team: str,
+) -> List[str]:
+    """Get unique people names for a team from the selected worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-    sheet_name = "Youtube Video" if video_type.lower() == "video" else "Youtube Shorts"
-    return read_sheet_data(service, spreadsheet_id, sheet_name)
+    rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
+    people = [str(row.get("人")).strip() for row in rows if row.get("所屬團體") == team and row.get("人")]
+    return sorted(set(people))
+
+
+def get_all_rows_for_sheet(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+) -> List[Dict[str, Any]]:
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
+    service = get_sheets_service(credentials)
+    return read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
