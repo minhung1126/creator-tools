@@ -27,6 +27,11 @@ export const api = {
 
   getSettings: () => request('/settings'),
   updateSettings: (payload) => request('/settings', { method: 'POST', body: JSON.stringify(payload) }),
+  getYoutubeDraftSettings: () => request('/settings/youtube-drafts'),
+  updateYoutubeDraftSettings: (videoType, config) => request('/settings/youtube-drafts', {
+    method: 'PUT',
+    body: JSON.stringify({ video_type: videoType, config }),
+  }),
 
   getSpreadsheetMetadata: (spreadsheetUrlOrId) =>
     request('/sheets/metadata', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId }) }),
