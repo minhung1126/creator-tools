@@ -30,6 +30,8 @@ _PERSISTABLE_FIELDS = {
     "meta_app_id",
     "meta_app_secret",
     "meta_access_token",
+    "youtube_draft_video_config",
+    "youtube_draft_shorts_config",
 }
 
 

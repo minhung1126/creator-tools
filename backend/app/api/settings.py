@@ -1,8 +1,9 @@
+import json
 import logging
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Dict, List, Literal, Optional
 from google.oauth2.credentials import Credentials
 
 from backend.app.core.config import settings
@@ -26,6 +27,37 @@ class ResourceSettingsModel(BaseModel):
     meta_access_token: Optional[str] = ""
 
 
+class YouTubeDraftConfigModel(BaseModel):
+    spreadsheet_id: str = ""
+    playlist_id: str = ""
+    worksheet_name: str = ""
+    title_column: str = ""
+    description_column: str = ""
+    team: str = ""
+    enabled_people: List[str] = Field(default_factory=list)
+
+
+class YouTubeDraftConfigUpdateModel(BaseModel):
+    video_type: Literal["Video", "Shorts"]
+    config: YouTubeDraftConfigModel
+
+
+def _draft_config_key(video_type: str) -> str:
+    return f"youtube_draft_{video_type.lower()}_config"
+
+
+def _read_draft_config(video_type: str) -> Dict:
+    raw = runtime_config.get(_draft_config_key(video_type), "")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except (TypeError, json.JSONDecodeError):
+        logger.warning("Ignoring invalid persisted %s draft config", video_type)
+        return {}
+
+
 @router.get("")
 def get_system_settings(creds: Credentials = Depends(require_credentials)):
     """Get current system settings (requires authentication)."""
@@ -38,8 +70,6 @@ def get_system_settings(creds: Credentials = Depends(require_credentials)):
         "default_spreadsheet_id": rc.get("default_spreadsheet_id", ""),
         "default_playlist_id": rc.get("default_playlist_id", ""),
         "default_drive_folder_id": rc.get("default_drive_folder_id", ""),
-
-        # Meta API Integration Status
         "meta_app_id": rc.get("meta_app_id", ""),
         "meta_configured": bool(rc.get("meta_app_id") and rc.get("meta_access_token"))
     }
@@ -72,4 +102,30 @@ def update_system_settings(
         "status": "success",
         "message": "Settings updated and saved successfully",
         "settings": get_system_settings(creds)
+    }
+
+
+@router.get("/youtube-drafts")
+def get_youtube_draft_settings(creds: Credentials = Depends(require_credentials)):
+    """Return separately persisted Video and Shorts draft-page settings."""
+    return {
+        "video": _read_draft_config("Video"),
+        "shorts": _read_draft_config("Shorts"),
+    }
+
+
+@router.put("/youtube-drafts")
+def update_youtube_draft_settings(
+    payload: YouTubeDraftConfigUpdateModel,
+    creds: Credentials = Depends(require_credentials),
+):
+    """Persist one draft-page configuration on the server."""
+    key = _draft_config_key(payload.video_type)
+    value = payload.config.model_dump()
+    runtime_config.set(key, json.dumps(value, ensure_ascii=False))
+    logger.info("YouTube %s draft settings updated", payload.video_type)
+    return {
+        "status": "success",
+        "video_type": payload.video_type,
+        "config": value,
     }
