@@ -17,24 +17,26 @@
 請在專案根目錄建立 `.env` 檔案，填入以下必要設定：
 
 ```env
-# 1. 伺服器網址 (包含 Port)
-HOST=http://your-domain.com:8000
+# 1. 伺服器主機名稱與通訊埠
+HOST=localhost
+PORT=8000
 
-# 2. Google OAuth 2.0 Client 金鑰
+# 2. Google OAuth 2.0 Client 金鑰 (必須於後端 .env 集中管理)
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
-GOOGLE_REDIRECT_URI=${HOST}/api/v1/auth/callback
 
 # 3. Session 加密 Secret Key
 SECRET_KEY=generate-a-secure-random-key-here
 
-# 4. 預設資源 IDs (選填)
+# 4. 預設資源 IDs (選填，亦可於 Web UI「系統設定」頁面配置並持久化至 runtime_config.json)
 DEFAULT_SPREADSHEET_ID=1xsxDJ80-TOQs3d3ecHALEbyMlxxEkwXNjHaW7yA8wVs
 DEFAULT_PLAYLIST_ID=PLhu1MP3FpZmHar5qPZJkl6zCqXzddF4nC
 ```
 
 > ⚠️ **重點注意事項：**
-> 請將 `${HOST}/api/v1/auth/callback`（例如 `http://your-domain.com:8000/api/v1/auth/callback`）新增至 Google Cloud Console 的 **「已授權的重導向 URI (Authorized redirect URIs)」**。詳細教學請參考 `docs/GOOGLE_API_SETUP.md`。
+> - **HOST 與 PORT 分離**：`HOST` 僅需指定主機名稱（例如 `localhost` 或 `your-domain.com`），無須前綴 `http://`。當 `HOST` 為 `localhost` 或 `127.0.0.1` 時，系統會自動選用 `http://` 協定；於正式域名環境則自動使用 `https://` 協定並啟用安全 Cookie。
+> - **OAuth 重導向網址 (Authorized Redirect URIs)**：請將 `http://<HOST>:<PORT>/api/v1/auth/callback`（例如 `http://localhost:8000/api/v1/auth/callback` 或 `https://your-domain.com:8000/api/v1/auth/callback`）填入 Google Cloud Console 的 **「已授權的重導向 URI」** 設定中。
+> - **Credentials 管理**：Google Client ID 與 Client Secret 屬於敏感憑證，**嚴禁** 由前端 UI 編輯或傳輸，必須由後端 `.env` 檔案管理。
 
 ---
 

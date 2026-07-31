@@ -69,18 +69,21 @@
 
 ---
 
-## 第五步：填入系統設定
+## 第五步：將憑證寫入後端 `.env` 檔案
 
-取得 Client ID 與 Client Secret 後，您可以透過以下兩種方式套用：
+取得 Client ID 與 Client Secret 後，出於資安防護考量，**敏感憑證嚴禁由前端傳輸或於 Web UI 中編輯**，請統一於專案根目錄下的 `.env` 檔案進行設定：
 
-### 方法 1：填入 `.env` 檔案（推薦）
 在專案根目錄 `.env` 檔案中填入：
 ```env
-HOST=http://localhost:8000
+# 伺服器主機名稱與通訊埠
+HOST=localhost
+PORT=8000
+
+# Google OAuth 2.0 Client 憑證
 GOOGLE_CLIENT_ID=1234567890-xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxx
-GOOGLE_REDIRECT_URI=http://localhost:8000/api/v1/auth/callback
 ```
 
-### 方法 2：於系統 Web UI 中輸入
-開啟 Creator Tools Web 介面，進入 **「系統與帳號設定」** 頁面，直接在 `Google Client ID` 與 `Google Client Secret` 欄位輸入並儲存，然後點擊 **「開始 Google 帳號授權連線」** 即可。
+> 💡 **小貼士：**
+> - **持久化設定 (`runtime_config.json`)**：其他的業務預設值（例如預設 Google Sheet ID、Playlist ID、Drive Folder ID 以及 Meta API 金鑰），則可以隨時於系統 Web UI 的 **「系統與帳號設定」** 頁面進行動態修改，系統會自動將設定持久化儲存至根目錄的 `runtime_config.json` 中。
+> - 修改 `.env` 設定檔後，請重新啟動後端服務或 Docker 容器以確保新環境變數生效。
