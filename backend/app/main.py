@@ -11,7 +11,6 @@ from backend.app.api.router import api_router
 
 logger = logging.getLogger(__name__)
 
-# Configure root logger
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -23,16 +22,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS Configuration
 origins = [
-    f"http://localhost:3000",
-    f"http://localhost:5173",
-    f"http://127.0.0.1:3000",
-    f"http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",
     settings.frontend_url,
     settings.base_url,
 ]
-# Deduplicate
 origins = list(set(origins))
 
 app.add_middleware(
@@ -43,7 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API Router
 app.include_router(api_router)
 
 
@@ -53,11 +49,11 @@ def health_check():
         "status": "healthy",
         "service": "YouTube Creator Tools Backend",
         "host": settings.base_url,
-        "redirect_uri": settings.get_redirect_uri()
+        "redirect_uri": settings.get_redirect_uri(),
+        "commit_sha": os.getenv("APP_COMMIT_SHA", "development"),
     }
 
 
-# Serve Frontend static files if dist folder exists (for production/Docker)
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
