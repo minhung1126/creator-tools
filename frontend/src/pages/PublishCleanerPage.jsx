@@ -68,8 +68,16 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     setErrorMsg(null);
     setResult(null);
     try {
+      const metadataByVideoId = Object.fromEntries(videos.map((video) => [video.video_id, video]));
       const res = await api.publishAndCleanup(playlistId);
-      setResult(res);
+      setResult({
+        ...res,
+        results: (res.results || []).map((item) => ({
+          ...item,
+          title: item.title || metadataByVideoId[item.video_id]?.title || '',
+          description: item.description ?? metadataByVideoId[item.video_id]?.description ?? '',
+        })),
+      });
       setVideos([]);
       setQuotaRefreshKey((key) => key + 1);
       toast.success(`已完成 ${res.total_processed} 支影片的發布與清理！`);
@@ -88,6 +96,21 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       : playlistSource === 'youtube-api'
         ? 'YouTube API（yt-dlp 無法讀取時回退）'
         : '';
+
+  const metadataBlock = (title, description) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '3px' }}>標題</div>
+        <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>{title || '無標題影片'}</div>
+      </div>
+      <div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '3px' }}>描述</div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.55 }}>
+          {description || '（無描述）'}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="section-gap">
@@ -151,17 +174,19 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
               <ListOrdered size={18} /> 待處理影片清單（上傳時間：最早 → 最晚）：
             </h3>
             {videos.map((video, index) => (
-              <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px' }}>#{index + 1}</span>
+              <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px', paddingTop: '4px' }}>#{index + 1}</span>
                 {video.thumbnail_url && <img src={video.thumbnail_url} alt={video.title} style={{ width: '120px', aspectRatio: '16/9', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />}
-                <div style={{ flex: 1, minWidth: '220px' }}>
-                  <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '4px' }}>{video.title || '無標題影片'}</h4>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {video.video_id}</span>
-                  <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginLeft: '12px' }}>
-                    上傳時間：{video.published_at ? new Date(video.published_at).toLocaleString() : '未提供（排在最後）'}
-                  </span>
+                <div style={{ flex: 1, minWidth: '260px' }}>
+                  {metadataBlock(video.title, video.description)}
+                  <div style={{ marginTop: '8px' }}>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {video.video_id}</span>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginLeft: '12px' }}>
+                      上傳時間：{video.published_at ? new Date(video.published_at).toLocaleString() : '未提供（排在最後）'}
+                    </span>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px' }}>
                   <span className="badge badge-info"><Globe size={12} /> 將設為公開</span>
                   <span className="badge badge-info" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', borderColor: 'rgba(236, 72, 153, 0.3)' }}><Trash2 size={12} /> 移出清單</span>
                 </div>
@@ -170,7 +195,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           </div>
 
           <div className="glass-panel execution-bar">
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認上傳時間順序無誤後，啟動發布流程：</span>
+            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認上傳時間、標題與描述無誤後，啟動發布流程：</span>
             <button className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={executing} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
               <Send size={18} /> {executing ? '逐支發布並清理中...' : '確認公開並移出 To-Post'}
             </button>
@@ -183,8 +208,13 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> To-Post 影片已完成處理</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {result.results.map((item, index) => (
-              <div key={`${item.video_id}-${index}`} className="result-item" style={{ background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
-                <div><strong style={{ color: '#fff' }}>#{index + 1} {item.title}</strong>（ID: {item.video_id}）{item.reason && <div style={{ color: '#f87171', fontSize: '0.8rem' }}>原因：{item.reason}</div>}</div>
+              <div key={`${item.video_id}-${index}`} className="result-item" style={{ alignItems: 'flex-start', background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <strong style={{ color: '#fff' }}>#{index + 1}</strong>
+                  <div style={{ marginTop: '6px' }}>{metadataBlock(item.title, item.description)}</div>
+                  <div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: '8px' }}>ID: {item.video_id}</div>
+                  {item.reason && <div style={{ color: '#f87171', fontSize: '0.8rem', marginTop: '4px' }}>原因：{item.reason}</div>}
+                </div>
                 <span className={`badge ${item.status === 'failed' ? 'badge-disconnected' : 'badge-connected'}`}>{item.status === 'failed' ? '失敗' : '公開並移出清單完成'}</span>
               </div>
             ))}
