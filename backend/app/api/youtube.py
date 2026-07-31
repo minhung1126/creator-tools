@@ -48,12 +48,28 @@ class PublishCleanupInput(BaseModel):
 
 def assignment_matches_row(row, team: str, assignment_value: str) -> bool:
     """Match either a named person row or the selected team's blank-person whole-team row."""
-    if row.get("所屬團體") != team:
+    if str(row.get("所屬團體") or "").strip() != team:
         return False
     row_person = str(row.get("人") or "").strip()
     if assignment_value == team_option_label(team):
         return not row_person
     return row_person == assignment_value
+
+
+def resolve_assignment_row(matches, title_column: str, description_column: str):
+    """Accept duplicate matching rows when the selected output values are identical."""
+    if not matches:
+        return None, "not_found"
+
+    distinct_values = {}
+    for row in matches:
+        title = str(row.get(title_column) or "").strip()
+        description = str(row.get(description_column) or "")
+        distinct_values.setdefault((title, description), row)
+
+    if len(distinct_values) > 1:
+        return None, "conflict"
+    return next(iter(distinct_values.values())), None
 
 
 @router.get("/quota-usage")
@@ -104,22 +120,33 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                 row for row in sheet_rows
                 if assignment_matches_row(row, normalized_team, person)
             ]
-            if len(matches) == 0:
+            row, match_error = resolve_assignment_row(
+                matches,
+                payload.title_column,
+                payload.description_column,
+            )
+            if match_error == "not_found":
                 prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料"})
                 continue
-            if len(matches) > 1:
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"團體 {normalized_team} 的選項 {person} 有多筆 ({len(matches)} 筆) 資料，為避免誤更新已略過"})
-                continue
-
-            row = matches[0]
-            new_title = str(row.get(payload.title_column) or "").strip()
-            new_description = row.get(payload.description_column)
-            if not new_title or new_description is None:
+            if match_error == "conflict":
                 prepared.append({
                     "video_id": video_id,
                     "person": person,
                     "status": "skipped",
-                    "reason": f"工作表缺少 {payload.title_column} 或 {payload.description_column} 的內容",
+                    "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同，為避免誤更新已略過",
+                })
+                continue
+
+            new_title = str(row.get(payload.title_column) or "").strip()
+            # Google Sheets omits trailing blank cells from a row. An omitted description
+            # therefore means an intentionally blank description, not a missing column.
+            new_description = str(row.get(payload.description_column) or "")
+            if not new_title:
+                prepared.append({
+                    "video_id": video_id,
+                    "person": person,
+                    "status": "skipped",
+                    "reason": f"工作表的 {payload.title_column} 為空白",
                 })
                 continue
             prepared.append({
@@ -127,7 +154,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                 "person": person,
                 "status": "pending",
                 "new_title": new_title,
-                "new_description": str(new_description),
+                "new_description": new_description,
             })
 
         pending_ids = [item["video_id"] for item in prepared if item["status"] == "pending"]
