@@ -317,7 +317,7 @@ export default function InstagramReelsPage() {
   return <div className="section-gap">
     <div>
       <h1>Instagram Reels 自動發布</h1>
-      <p className="section-desc">先設定 Reels 的工作表與內文欄，再在獨立區塊篩選團體和人物。Drive 影片依建立時間由舊到新處理。</p>
+      <p className="section-desc">先設定 Reels 的工作表與內文欄，再在獨立區塊篩選團體和人物。Drive 影片依檔名由 A 到 Z 顯示與處理。</p>
     </div>
 
     <section className="top-filter-bar">
@@ -370,8 +370,8 @@ export default function InstagramReelsPage() {
 
       <div className="video-card-grid">{videos.map((video, index) => <div key={video.id} className={`glass-panel video-card ${assignments[video.id] ? 'video-card-assigned' : 'video-card-skipped'}`} style={{ borderColor: selectedVideoIds.includes(video.id) ? 'var(--primary)' : undefined }}>
         <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.includes(video.id)} onChange={() => toggleVideoSelection(video.id)} /> 加入批量指定</label>
-        <div className="video-thumbnail-wrapper" style={{ aspectRatio: video.width && video.height ? `${video.width} / ${video.height}` : '9 / 16', maxHeight: 380 }}>
-          {video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={`${index + 1}. ${video.name}`} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.name })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.name }); }} role="button" tabIndex={0} /> : <div className="section-desc">Drive 沒有提供縮圖</div>}
+        <div className="reels-video-thumbnail-wrapper">
+          {video.thumbnail_url ? <img className="reels-video-thumbnail" src={video.thumbnail_url} alt={`${index + 1}. ${video.name}`} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.name })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.name }); }} role="button" tabIndex={0} /> : <div className="section-desc">Drive 沒有提供縮圖</div>}
         </div>
         <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{index + 1}. {video.name || '未命名影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>{formatVideoMeta(video)}</p></div>
         <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.id] || ''} onChange={(event) => setAssignments((current) => ({ ...current, [video.id]: event.target.value }))}><option value="">不發布</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
@@ -380,7 +380,7 @@ export default function InstagramReelsPage() {
     </div>}
 
     {job && <section className="glass-panel card-padding" style={{ display: 'grid', gap: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}><div><h2>發布工作 {job.status === 'paused' ? '已暫停' : '結果'}</h2><p className="section-desc">Job ID：{job.id}</p>{job.r2_cleanup_failed_count > 0 && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.r2_cleanup_failed_count} 支影片尚未從 R2 清理，可重試清理。</p>}</div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary" onClick={reloadJob}><RefreshCw size={16} />重新讀取</button>{(job.status === 'paused' || job.r2_cleanup_failed_count > 0) && <button className="btn btn-primary" onClick={retryJob} disabled={publishing}><Send size={16} />重試未完成項目</button>}</div></div>{job.results?.map((item) => <div key={`${item.file_id}-${item.sequence}`} className="glass-panel" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}><div><strong>{item.sequence}. {item.file_name || item.file_id}</strong><p className="section-desc">{item.person} · {STATUS_LABELS[item.status] || item.status}</p>{item.error && <p style={{ color: '#f87171' }}>錯誤：{item.error}</p>}{item.r2_delete_error && <p style={{ color: '#fbbf24' }}>R2：{item.r2_delete_error}</p>}{item.r2_deleted && <p className="section-desc">R2 暫存影片已刪除</p>}{item.preflight && <p className="section-desc">{item.preflight.width || '?'}×{item.preflight.height || '?'} · {item.preflight.duration_seconds ? `${item.preflight.duration_seconds} 秒` : 'duration 未提供'} · {item.preflight.size_bytes || 0} bytes</p>}</div><span className={`badge ${item.status === 'published' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-info'}`}>{STATUS_LABELS[item.status] || item.status}</span></div>)}</section>}
-    <ConfirmDialog open={confirmPublish} title="建立 Instagram 發布工作" message={`將依 Drive 建立時間由舊到新處理 ${assignedCount} 支 Reels，確定繼續？`} confirmText="開始處理" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
+    <ConfirmDialog open={confirmPublish} title="建立 Instagram 發布工作" message={`將依 Drive 檔名由 A 到 Z 處理 ${assignedCount} 支 Reels，確定繼續？`} confirmText="開始處理" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
     <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
   </div>;
 }
