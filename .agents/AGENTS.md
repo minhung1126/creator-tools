@@ -1,7 +1,7 @@
 # 🤖 Project Guidelines & Agent Instructions
 
 ## 📋 專案概述 (Project Overview)
-YouTube Creator Tools 是一個整合 Google Sheets API 與 YouTube Data API v3 的自動化控制台系統。
+Creator Tools 是一個整合 Google Sheets、YouTube、Instagram 與 Drive 的自動化控制台系統。
 本專案採用 Python FastAPI 後端 + React Vite 前端 + Docker 容器化部署。
 
 ---
@@ -20,20 +20,18 @@ YouTube Creator Tools 是一個整合 Google Sheets API 與 YouTube Data API v3 
 ## ⚠️ 開發與架構注意事項 (Developer Notice & Conventions)
 
 ### 1. 伺服器與 OAuth 設定 (`.env` & Config)
-- **HOST 與 PORT 分離**：`.env` 只需指定 `HOST`（如 `localhost` 或域名）與 `PORT`（如 `8000`）。
-- **網址自動計算**：後端會依據 `HOST` 自動判斷環境：
-  - `localhost` / `127.0.0.1` → 自動使用 `http://` 協定，開放 `OAUTHLIB_INSECURE_TRANSPORT`
-  - 其他正式域名 → 自動使用 `https://` 協定，強制啟用安全的 OAuth 傳輸與 `secure` Cookie
+- **bind 與 public URL 分離**：`.env` 使用 `BIND_HOST`/`PORT` bind，使用 `PUBLIC_BASE_URL`/`FRONTEND_URL` 產生 OAuth callback；cookie `secure` 依 public URL scheme 判斷。
+- **單一管理者**：正式環境必須設定 `ALLOWED_GOOGLE_EMAILS`，不在 allowlist 的 Google 帳號拒絕登入。
 - **Credentials 管理**：Google Client ID 與 Client Secret **嚴禁** 由前端傳遞或於 UI 編輯，一律由後端 `.env` 檔案管理。
 
 ### 2. 設定持久化機制 (`data/runtime_config.json`)
-- 使用者於「系統設定」頁面修改的預設 Sheet ID、Playlist ID、Drive Folder ID 以及 Meta API 設定，會由 `RuntimeConfig` 自動寫入 `data/runtime_config.json`。
+- 使用者於頁面修改的非 secret 設定會由 `RuntimeConfig` 自動寫入 `data/runtime_config.json`；Instagram Token、R2 secret 與 Google token 分別加密保存。
 - 啟動優先順序：`data/runtime_config.json` > `.env` 預設值。
 - 在 Docker / Compose 環境中已將 `./data` 資料夾設定為 Volume (`./data:/app/data`) 進行持久化。
 
 ### 3. API 認證與安全規範
 - 統一使用 `backend.app.core.dependencies.require_credentials` 作為 FastAPI Dependency。
-- Session Cookie 採用 `itsdangerous` 進行全資料加密與簽章 (`creator_tools_session`)。
+- Session Cookie 只保存 opaque session ID；Google token 加密保存於 server-side session store。OAuth state 使用分離 salt 的 timed signature。
 - Log 輸出統一使用標準 `logging` 模組，禁止於正式程式碼中使用 `print()`。
 
 ### 4. 前端 UI 規範

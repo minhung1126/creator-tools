@@ -48,6 +48,14 @@ def team_option_label(team: str) -> str:
     return f"{normalize_text(team)}{TEAM_OPTION_SUFFIX}"
 
 
+def matches_team_person(row: Dict[str, Any], team: str, person: str) -> bool:
+    """Match a named person or the selected team's whole-team row."""
+    if normalize_text(row.get("所屬團體") or "") != normalize_text(team):
+        return False
+    row_person = normalize_text(row.get("人") or "")
+    return (not row_person) if person == team_option_label(team) else row_person == normalize_text(person)
+
+
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
     """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:
@@ -73,10 +81,16 @@ def get_sheet_headers(credentials: Credentials, spreadsheet_id_or_url: str, work
     """Return normalized first-row headers for one worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-    values = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=f"{quote_sheet_name(worksheet_name)}!1:1",
-    ).execute().get("values", [])
+    values = (
+        service.spreadsheets()
+        .values()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            range=f"{quote_sheet_name(worksheet_name)}!1:1",
+        )
+        .execute()
+        .get("values", [])
+    )
     return [normalize_text(value) for value in (values[0] if values else []) if normalize_text(value)]
 
 
@@ -84,19 +98,29 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
     """Return worksheet titles and the first-row column names for each worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-    metadata = service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="properties.title,sheets.properties.title",
-    ).execute()
+    metadata = (
+        service.spreadsheets()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            fields="properties.title,sheets.properties.title",
+        )
+        .execute()
+    )
     worksheets = []
     for sheet in metadata.get("sheets", []):
         title = sheet.get("properties", {}).get("title")
         if not title:
             continue
-        values = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=f"{quote_sheet_name(title)}!1:1",
-        ).execute().get("values", [])
+        values = (
+            service.spreadsheets()
+            .values()
+            .get(
+                spreadsheetId=spreadsheet_id,
+                range=f"{quote_sheet_name(title)}!1:1",
+            )
+            .execute()
+            .get("values", [])
+        )
         columns = [normalize_text(value) for value in (values[0] if values else []) if normalize_text(value)]
         worksheets.append({"title": title, "columns": columns})
     return {
@@ -106,7 +130,9 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
     }
 
 
-def parse_options_from_sheets(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> Dict[str, Any]:
+def parse_options_from_sheets(
+    credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str
+) -> Dict[str, Any]:
     """Parse team options in their first-appearance order in the selected worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
@@ -120,7 +146,9 @@ def parse_options_from_sheets(credentials: Credentials, spreadsheet_id_or_url: s
     }
 
 
-def get_people_for_team(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str, team: str) -> List[str]:
+def get_people_for_team(
+    credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str, team: str
+) -> List[str]:
     """Return person and whole-team options in the worksheet's exact row order."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
@@ -175,12 +203,17 @@ def get_copyable_sheet_table(
     """Return displayed cell strings unchanged, plus normalized keys used only for filtering."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-    result = service.spreadsheets().values().get(
-        spreadsheetId=spreadsheet_id,
-        range=quote_sheet_name(worksheet_name),
-        valueRenderOption="FORMATTED_VALUE",
-        dateTimeRenderOption="FORMATTED_STRING",
-    ).execute()
+    result = (
+        service.spreadsheets()
+        .values()
+        .get(
+            spreadsheetId=spreadsheet_id,
+            range=quote_sheet_name(worksheet_name),
+            valueRenderOption="FORMATTED_VALUE",
+            dateTimeRenderOption="FORMATTED_STRING",
+        )
+        .execute()
+    )
     values = result.get("values", [])
     if not values:
         return {"spreadsheet_id": spreadsheet_id, "worksheet_name": worksheet_name, "columns": [], "rows": []}
@@ -198,17 +231,21 @@ def get_copyable_sheet_table(
         cells = [str(row[index]) if index < len(row) else "" for index in range(len(columns))]
         team = normalize_text(cells[team_index]) if team_index >= 0 else ""
         person = normalize_text(cells[person_index]) if person_index >= 0 else ""
-        rows.append({
-            "row_number": row_number,
-            "cells": cells,
-            "team": team,
-            "person": person,
-            "person_option": person or (team_option_label(team) if team else ""),
-        })
+        rows.append(
+            {
+                "row_number": row_number,
+                "cells": cells,
+                "team": team,
+                "person": person,
+                "person_option": person or (team_option_label(team) if team else ""),
+            }
+        )
     return {"spreadsheet_id": spreadsheet_id, "worksheet_name": worksheet_name, "columns": columns, "rows": rows}
 
 
-def get_all_rows_for_sheet(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> List[Dict[str, Any]]:
+def get_all_rows_for_sheet(
+    credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str
+) -> List[Dict[str, Any]]:
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     return read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))

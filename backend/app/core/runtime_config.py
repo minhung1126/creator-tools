@@ -23,12 +23,10 @@ _CONFIG_FILE = _DATA_DIR / "runtime_config.json"
 _PERSISTABLE_FIELDS = {
     "default_spreadsheet_id",
     "default_playlist_id",
-    "default_drive_folder_id",
     "youtube_draft_video_config",
     "youtube_draft_shorts_config",
     "instagram_drive_folder_id",
     "instagram_spreadsheet_id",
-    "instagram_api_version",
     "r2_account_id",
     "r2_access_key_id",
     "r2_bucket_name",

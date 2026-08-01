@@ -17,7 +17,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
     <div className="section-gap">
       <div className="glass-panel" style={{ padding: '32px', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(236, 72, 153, 0.1) 100%)' }}>
         <div className="badge badge-info" style={{ marginBottom: '12px' }}><Sparkles size={14} /> 創作者自動化工作流系統</div>
-        <h1 style={{ fontSize: '2.2rem', marginBottom: '8px' }}>YouTube Creator Tools 控制台</h1>
+        <h1 style={{ fontSize: '2.2rem', marginBottom: '8px' }}>Creator Tools 控制台</h1>
         <p className="section-desc" style={{ maxWidth: '680px', lineHeight: 1.6 }}>Video 與 Shorts 草稿分開管理，可各自選擇工作表、標題欄位、描述欄位與人物選項。</p>
       </div>
 

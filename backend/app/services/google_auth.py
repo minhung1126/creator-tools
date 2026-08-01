@@ -1,13 +1,15 @@
-import os
 import logging
-from typing import Dict, Any, Optional
+import os
+from datetime import datetime, timezone
+from typing import Optional
 
-from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 import googleapiclient.discovery
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 
 from backend.app.core.config import settings
+from backend.app.core.session_store import session_store
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +22,6 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# In-memory token cache (single-user design — documented limitation)
-_token_cache: Dict[str, Any] = {}
-
 
 def get_client_config() -> dict:
     """Build OAuth client config from .env settings."""
@@ -33,7 +32,7 @@ def get_client_config() -> dict:
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "redirect_uris": [settings.get_redirect_uri()]
+            "redirect_uris": [settings.get_redirect_uri()],
         }
     }
 
@@ -62,11 +61,7 @@ def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
 def get_auth_url() -> tuple[str, str, str]:
     """Generate the Google OAuth consent URL and return its PKCE state."""
     flow = create_oauth_flow()
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
-    )
+    auth_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
     if not flow.code_verifier:
         raise RuntimeError("Google OAuth PKCE code verifier was not generated.")
     return auth_url, state, flow.code_verifier
@@ -84,15 +79,14 @@ def exchange_code_for_tokens(code: str, code_verifier: str) -> dict:
         "token_uri": creds.token_uri,
         "client_id": creds.client_id,
         "client_secret": creds.client_secret,
-        "scopes": list(creds.scopes) if creds.scopes else []
+        "scopes": list(creds.scopes) if creds.scopes else [],
+        "expiry": creds.expiry.isoformat() if creds.expiry else None,
     }
 
     # Fetch user profile using credentials
     user_info = get_user_profile(creds)
     token_dict["user"] = user_info
 
-    # Cache locally
-    _token_cache["current"] = token_dict
     return token_dict
 
 
@@ -104,48 +98,52 @@ def get_user_profile(credentials: Credentials) -> dict:
         return {
             "email": user_info.get("email", ""),
             "name": user_info.get("name", ""),
-            "picture": user_info.get("picture", "")
+            "picture": user_info.get("picture", ""),
         }
     except Exception as e:
         logger.error("Error fetching user profile: %s", e, exc_info=True)
         return {"email": "Connected Account", "name": "", "picture": ""}
 
 
-def build_credentials_from_dict(token_dict: dict) -> Credentials:
+def build_credentials_from_dict(token_dict: dict, session_id: Optional[str] = None) -> Credentials:
     """Reconstruct Credentials object from a serialized token dict."""
+    expiry = token_dict.get("expiry")
+    parsed_expiry = None
+    if expiry:
+        try:
+            parsed_expiry = datetime.fromisoformat(expiry)
+            if parsed_expiry.tzinfo:
+                parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
+        except (TypeError, ValueError):
+            parsed_expiry = None
     creds = Credentials(
         token=token_dict.get("token"),
         refresh_token=token_dict.get("refresh_token"),
         token_uri=token_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
         client_id=token_dict.get("client_id") or settings.GOOGLE_CLIENT_ID,
         client_secret=token_dict.get("client_secret") or settings.GOOGLE_CLIENT_SECRET,
-        scopes=token_dict.get("scopes", SCOPES)
+        scopes=token_dict.get("scopes", SCOPES),
+        expiry=parsed_expiry,
     )
     if creds and creds.expired and creds.refresh_token:
         try:
             creds.refresh(Request())
-            # Update cache with refreshed token
-            if "current" in _token_cache:
-                _token_cache["current"]["token"] = creds.token
-        except Exception as e:
-            logger.error("Failed to refresh token: %s", e, exc_info=True)
+            if session_id:
+                refreshed = dict(token_dict)
+                refreshed["token"] = creds.token
+                refreshed["refresh_token"] = creds.refresh_token or token_dict.get("refresh_token")
+                refreshed["expiry"] = creds.expiry.isoformat() if creds.expiry else None
+                session_store.update(session_id, refreshed)
+        except Exception as exc:
+            logger.error("Failed to refresh Google token: %s", type(exc).__name__)
     return creds
 
 
-def get_current_credentials(stored_tokens: Optional[dict] = None) -> Optional[Credentials]:
-    """
-    Retrieve current valid Google credentials.
-    Priority: cookie-stored tokens > in-memory cache.
-    Note: This is a single-user design. In multi-user scenarios,
-    credentials are isolated by the session cookie per browser.
-    """
-    if stored_tokens and stored_tokens.get("token"):
-        return build_credentials_from_dict(stored_tokens)
-    if "current" in _token_cache and _token_cache["current"].get("token"):
-        return build_credentials_from_dict(_token_cache["current"])
-    return None
-
-
-def clear_current_credentials():
-    """Clear the in-memory token cache."""
-    _token_cache.pop("current", None)
+def get_current_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
+    """Load credentials for exactly one server-side session."""
+    if not session_id:
+        return None
+    token_dict = session_store.get(session_id)
+    if not token_dict or not token_dict.get("token"):
+        return None
+    return build_credentials_from_dict(token_dict, session_id=session_id)

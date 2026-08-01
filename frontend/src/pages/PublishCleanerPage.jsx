@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
+import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -13,20 +14,6 @@ import {
   Send,
   Trash2,
 } from 'lucide-react';
-
-function sortVideosByUploadTime(videos) {
-  return [...videos].sort((a, b) => {
-    const aTime = Date.parse(a.published_at || '');
-    const bTime = Date.parse(b.published_at || '');
-    const aHasTime = Number.isFinite(aTime);
-    const bHasTime = Number.isFinite(bTime);
-
-    if (aHasTime && bHasTime) return aTime - bTime || (a.sequence ?? 0) - (b.sequence ?? 0);
-    if (aHasTime) return -1;
-    if (bHasTime) return 1;
-    return (a.sequence ?? 0) - (b.sequence ?? 0);
-  });
-}
 
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
@@ -89,13 +76,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     }
   };
 
-  const sourceLabel = playlistSource === 'yt-dlp+youtube-api'
-    ? 'yt-dlp 播放清單資料 + YouTube API 私人影片資料'
-    : playlistSource === 'yt-dlp'
-      ? 'yt-dlp（預覽不耗 API 配額）'
-      : playlistSource === 'youtube-api'
-        ? 'YouTube API（yt-dlp 無法讀取時回退）'
-        : '';
+  const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
 
   const metadataBlock = (title, description) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

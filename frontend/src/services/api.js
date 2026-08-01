@@ -35,5 +35,7 @@ export const api = {
   getInstagramConnectionStatus: () => request('/instagram/connection-status'),
   testInstagramR2: () => request('/instagram/r2/test', { method: 'POST' }),
   getInstagramDriveVideos: (folderUrlOrId) => request('/instagram/drive-videos', { method: 'POST', body: JSON.stringify({ folder_url_or_id: folderUrlOrId }) }),
-  publishInstagramReels: (payload) => request('/instagram/publish-reels', { method: 'POST', body: JSON.stringify(payload) }),
+  createInstagramPublishJob: (payload) => request('/instagram/publish-jobs', { method: 'POST', body: JSON.stringify(payload) }),
+  getInstagramPublishJob: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}`),
+  retryInstagramPublishJob: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' }),
 };

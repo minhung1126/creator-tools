@@ -1,25 +1,22 @@
-import os
 import logging
+import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
-from backend.app.core.config import settings
 from backend.app.api.router import api_router
+from backend.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 app = FastAPI(
-    title="YouTube Creator Tools Dashboard API",
-    description="Python FastAPI backend for managing Google OAuth, YouTube Draft Batch Metadata Updates, and Publish Playlist Cleanups.",
-    version="1.0.0"
+    title="Creator Tools Dashboard API",
+    description="FastAPI backend for Google OAuth, YouTube workflows, and Instagram Reels publish jobs.",
+    version="1.0.0",
 )
 
 origins = [
@@ -47,7 +44,7 @@ app.include_router(api_router)
 def health_check():
     return {
         "status": "healthy",
-        "service": "YouTube Creator Tools Backend",
+        "service": "Creator Tools Backend",
         "host": settings.base_url,
         "redirect_uri": settings.get_redirect_uri(),
         "commit_sha": os.getenv("APP_COMMIT_SHA", "development"),
@@ -70,9 +67,5 @@ if os.path.exists(frontend_dist):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "backend.app.main:app",
-        host="0.0.0.0",
-        port=settings.PORT,
-        reload=True
-    )
+
+    uvicorn.run("backend.app.main:app", host=settings.BIND_HOST, port=settings.PORT, reload=True)

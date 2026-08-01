@@ -10,6 +10,7 @@ import InstagramReelsPage from './pages/InstagramReelsPage';
 import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
+import { clearAuthHash, parseAuthHash } from './utils/authHash';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -17,6 +18,7 @@ function AppContent() {
   const [sysSettings, setSysSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
+  const [instagramStatusVersion, setInstagramStatusVersion] = useState(0);
   const toast = useToast();
 
   const fetchUser = async () => {
@@ -36,18 +38,28 @@ function AppContent() {
     const init = async () => {
       setLoading(true);
       const user = await fetchUser();
-      const hash = window.location.hash;
-      if (hash.includes('auth_success=1')) {
-        toast.success('Google 帳號連線成功！'); window.location.hash = '';
+      const authResult = parseAuthHash();
+      if (authResult?.type === 'google_success') {
+        toast.success('Google 帳號連線成功！');
+        clearAuthHash();
         const updatedUser = await fetchUser(); if (updatedUser) await fetchSettings();
-      } else if (hash.includes('auth_error=')) {
-        const errorText = decodeURIComponent(hash.split('auth_error=')[1] || '');
-        setAuthError(`Google 帳號連線失敗：${errorText}`); toast.error(`Google 帳號連線失敗：${errorText}`); window.location.hash = '';
-      } else if (hash.includes('instagram_auth_success=1')) {
-        setActiveTab('instagram_settings'); toast.success('Instagram 帳號連線成功，帳號 ID 與 Token 已安全儲存。'); window.location.hash = ''; if (user) await fetchSettings();
-      } else if (hash.includes('instagram_auth_error=')) {
-        const errorText = decodeURIComponent(hash.split('instagram_auth_error=')[1] || '');
-        setActiveTab('instagram_settings'); toast.error(`Instagram 帳號連線失敗：${errorText}`); window.location.hash = ''; if (user) await fetchSettings();
+      } else if (authResult?.type === 'google_error') {
+        const message = 'Google 帳號連線失敗，請重新嘗試。';
+        setAuthError(message); toast.error(message); clearAuthHash();
+      } else if (authResult?.type === 'instagram_success') {
+        setActiveTab('instagram_settings');
+        toast.success('Instagram 帳號連線成功。');
+        clearAuthHash();
+        setInstagramStatusVersion((version) => version + 1);
+        if (user) {
+          await api.getInstagramAuthStatus().catch(() => null);
+          await fetchSettings();
+        }
+      } else if (authResult?.type === 'instagram_error') {
+        setActiveTab('instagram_settings');
+        toast.error('Instagram 帳號連線失敗，請重新嘗試。');
+        clearAuthHash();
+        setInstagramStatusVersion((version) => version + 1);
       } else if (user) await fetchSettings();
       setLoading(false);
     };
@@ -69,8 +81,8 @@ function AppContent() {
     {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'instagram_reels' && <InstagramReelsPage />}
-    {activeTab === 'instagram_settings' && <InstagramSettingsPage />}
-    {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshUser={fetchUser} />}
+    {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
+    {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main></div>;
 }
 

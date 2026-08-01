@@ -82,7 +82,9 @@ def exchange_long_lived_token(short_lived_token: str, app_secret: str) -> Dict[s
             },
         )
     if response.is_error:
-        raise RuntimeError(_error_message(response, f"Instagram long-lived token exchange failed: HTTP {response.status_code}"))
+        raise RuntimeError(
+            _error_message(response, f"Instagram long-lived token exchange failed: HTTP {response.status_code}")
+        )
     payload = response.json()
     if not isinstance(payload, dict) or not payload.get("access_token"):
         raise RuntimeError("Instagram long-lived token exchange did not return an access token")

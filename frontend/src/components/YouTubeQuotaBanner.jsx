@@ -85,7 +85,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0 }) {
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <Clock3 size={14} /> 太平洋時間重設：{resetPacificText}（本地：{resetLocalText}）
         </span>
-        <span>播放清單排序使用 yt-dlp；私人資料補齊仍可能使用 videos.list。</span>
+        <span>播放清單與影片資料均由已授權的 YouTube API 取得。</span>
       </div>
 
       {usage?.methods?.length > 0 && (

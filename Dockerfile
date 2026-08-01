@@ -22,7 +22,7 @@ COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 ARG APP_COMMIT_SHA=development
 ENV APP_COMMIT_SHA=${APP_COMMIT_SHA}
-ENV HOST=0.0.0.0
+ENV BIND_HOST=0.0.0.0
 ENV PORT=8000
 
 EXPOSE 8000

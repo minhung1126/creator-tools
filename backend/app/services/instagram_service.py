@@ -37,6 +37,11 @@ class InstagramClient:
         return self.request("GET", "me", params={"fields": "id,username,account_type"})
 
     def publish_reel(self, video_url: str, caption: str, share_to_feed: bool = True):
+        creation_id = self.create_reel_container(video_url, caption, share_to_feed)
+        self.wait_for_container(creation_id)
+        return {"creation_id": creation_id, "media_id": self.publish_container(creation_id)}
+
+    def create_reel_container(self, video_url: str, caption: str, share_to_feed: bool = True) -> str:
         container = self.request(
             "POST",
             f"{self.user_id}/media",
@@ -47,7 +52,9 @@ class InstagramClient:
                 "share_to_feed": "true" if share_to_feed else "false",
             },
         )
-        creation_id = container["id"]
+        return container["id"]
+
+    def wait_for_container(self, creation_id: str):
         for _ in range(120):
             status = self.request(
                 "GET",
@@ -63,9 +70,10 @@ class InstagramClient:
         else:
             raise RuntimeError("等待 Instagram 處理影片逾時")
 
+    def publish_container(self, creation_id: str) -> str:
         published = self.request(
             "POST",
             f"{self.user_id}/media_publish",
             data={"creation_id": creation_id},
         )
-        return {"creation_id": creation_id, "media_id": published.get("id")}
+        return published.get("id")
