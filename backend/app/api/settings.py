@@ -15,8 +15,22 @@ router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
 
 
 class ResourceSettingsModel(BaseModel):
-    default_spreadsheet_id: Optional[str] = ""
-    default_playlist_id: Optional[str] = ""
+    """Legacy aggregate payload kept for backwards compatibility."""
+
+    default_spreadsheet_id: Optional[str] = None
+    default_playlist_id: Optional[str] = None
+
+
+class SharedResourceSettingsModel(BaseModel):
+    """Settings shared by Sheet and platform workflows unless overridden."""
+
+    default_spreadsheet_id: str = ""
+
+
+class YouTubeResourceSettingsModel(BaseModel):
+    """YouTube-only fallback resources."""
+
+    default_playlist_id: str = ""
 
 
 class YouTubeDraftConfigModel(BaseModel):
@@ -82,6 +96,40 @@ def update_system_settings(payload: ResourceSettingsModel, creds: Credentials = 
         "message": "Settings updated and saved successfully",
         "settings": get_system_settings(creds),
     }
+
+
+@router.get("/shared")
+def get_shared_settings(creds: Credentials = Depends(require_credentials)):
+    del creds
+    return {
+        "default_spreadsheet_id": runtime_config.get("default_spreadsheet_id", ""),
+    }
+
+
+@router.put("/shared")
+def update_shared_settings(
+    payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_credentials)
+):
+    runtime_config.update({"default_spreadsheet_id": payload.default_spreadsheet_id.strip()})
+    logger.info("Shared resource settings updated: default_spreadsheet_id")
+    return {"status": "success", "settings": get_shared_settings(creds)}
+
+
+@router.get("/youtube")
+def get_youtube_settings(creds: Credentials = Depends(require_credentials)):
+    del creds
+    return {
+        "default_playlist_id": runtime_config.get("default_playlist_id", ""),
+    }
+
+
+@router.put("/youtube")
+def update_youtube_settings(
+    payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_credentials)
+):
+    runtime_config.update({"default_playlist_id": payload.default_playlist_id.strip()})
+    logger.info("YouTube resource settings updated: default_playlist_id")
+    return {"status": "success", "settings": get_youtube_settings(creds)}
 
 
 @router.get("/youtube-drafts")

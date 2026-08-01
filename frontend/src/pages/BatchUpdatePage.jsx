@@ -398,7 +398,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
           <div className="form-group"><label className="form-label"><Users size={14} /> 所屬團體</label><select className="form-select" value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)}>{teams.length ? teams.map((team) => <option key={team} value={team}>{team}</option>) : <option value="">請先選擇工作表</option>}</select></div>
           <div className="form-group"><label className="form-label"><PlaySquare size={14} /> 目標播放清單 ID</label><input className="form-input" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} /></div>
         </div>
-        <div className="info-banner"><Info size={14} color="var(--primary)" /><span>全部設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取；Video / Shorts 各自獨立。</span></div>
+          <div className="info-banner"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作流設定；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取。</span></div>
       </div>
 
       <div className="glass-panel" style={{ padding: 20 }}>

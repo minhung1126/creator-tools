@@ -33,7 +33,7 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時會拒絕登入。Google client secret 只放後端 `.env`，不得傳給前端。
 
-登入後的預設 Google Sheet 與 YouTube 播放清單不放在 `.env`；請到網頁的「Google / YouTube 設定」頁輸入並儲存。這些值會保存於伺服器的 `data/runtime_config.json`。
+登入後的預設 Google Sheet 與 YouTube 播放清單不放在 `.env`；請到「全域與 Google 設定」設定共用 Sheet，並到 YouTube 分組中的「YouTube 設定」設定播放清單。這些值會保存於伺服器的 `data/runtime_config.json`。
 
 ## 3. 驗證
 

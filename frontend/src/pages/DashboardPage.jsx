@@ -59,7 +59,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="icon-box icon-box-accent"><Settings size={28} /></div>
-          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>系統設定</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>設定主要試算表與預設播放清單。</p></div>
+          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>全域與 Google 設定</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>管理登入授權、共用試算表與系統資訊；YouTube 設定位於 YouTube 分組中。</p></div>
           <button className="btn btn-secondary" onClick={() => setActiveTab('settings')} style={{ marginTop: 'auto' }}>進入系統設定 <ArrowRight size={16} /></button>
         </div>
       </div>
