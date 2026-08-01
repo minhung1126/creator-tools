@@ -21,7 +21,7 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.services.drive_service import list_drive_videos
+from backend.app.services.drive_service import get_drive_video_thumbnail, list_drive_videos
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -381,10 +381,34 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
         raise HTTPException(status_code=400, detail="請輸入 Google Drive 資料夾")
     try:
         videos = list_drive_videos(creds, folder)
+        for video in videos:
+            thumbnail_link = video.pop("thumbnail_link", "")
+            video["thumbnail_url"] = (
+                f"/api/v1/instagram/drive-videos/{quote(video['id'], safe='')}/thumbnail"
+                if video.get("id") and thumbnail_link
+                else ""
+            )
         return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc
+
+
+@router.get("/drive-videos/{file_id}/thumbnail")
+def drive_video_thumbnail(file_id: str, creds: Credentials = Depends(require_credentials)):
+    try:
+        thumbnail = get_drive_video_thumbnail(creds, file_id)
+    except Exception as exc:
+        logger.warning("Failed to fetch Drive thumbnail for %s: %s", file_id, type(exc).__name__)
+        raise HTTPException(status_code=404, detail="找不到影片縮圖") from exc
+    if not thumbnail:
+        raise HTTPException(status_code=404, detail="此影片沒有可用縮圖")
+    content, media_type = thumbnail
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/publish-jobs", status_code=201)

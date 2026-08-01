@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 
+from google.auth.transport.requests import AuthorizedSession
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -21,7 +22,7 @@ def list_drive_videos(credentials, folder_url_or_id: str):
             service.files()
             .list(
                 q=f"'{folder_id}' in parents and trashed = false and mimeType contains 'video/'",
-                fields="nextPageToken,files(id,name,mimeType,size,createdTime,videoMediaMetadata,webViewLink)",
+                fields="nextPageToken,files(id,name,mimeType,size,createdTime,videoMediaMetadata,webViewLink,thumbnailLink)",
                 orderBy="createdTime asc",
                 pageSize=100,
                 pageToken=page_token,
@@ -47,12 +48,29 @@ def list_drive_videos(credentials, folder_url_or_id: str):
                     "width": width,
                     "height": height,
                     "web_view_link": item.get("webViewLink", ""),
+                    "thumbnail_link": item.get("thumbnailLink", ""),
                 }
             )
         page_token = response.get("nextPageToken")
         if not page_token:
             break
     return items
+
+
+def get_drive_video_thumbnail(credentials, file_id: str):
+    """Fetch a Drive-generated video thumbnail through the authenticated API client."""
+    service = build("drive", "v3", credentials=credentials)
+    metadata = service.files().get(fileId=file_id, fields="thumbnailLink").execute()
+    thumbnail_link = metadata.get("thumbnailLink")
+    if not thumbnail_link:
+        return None
+
+    response = AuthorizedSession(credentials).get(thumbnail_link, timeout=20)
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0].strip()
+    if not content_type.startswith("image/"):
+        content_type = "image/jpeg"
+    return response.content, content_type
 
 
 def download_drive_file(credentials, file_id: str, destination: Path):
