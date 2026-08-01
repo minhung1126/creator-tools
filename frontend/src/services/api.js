@@ -36,6 +36,7 @@ export const api = {
   disconnectInstagram: () => request('/instagram/auth/connection', { method: 'DELETE' }),
   getInstagramSettings: () => request('/instagram/settings'),
   updateInstagramSettings: (payload) => request('/instagram/settings', { method: 'PUT', body: JSON.stringify(payload) }),
+  getInstagramApiUsage: () => request('/instagram/api-usage'),
   getInstagramConnectionStatus: () => request('/instagram/connection-status'),
   testInstagramR2: () => request('/instagram/r2/test', { method: 'POST' }),
   getInstagramDriveVideos: (folderUrlOrId) => request('/instagram/drive-videos', { method: 'POST', body: JSON.stringify({ folder_url_or_id: folderUrlOrId }) }),

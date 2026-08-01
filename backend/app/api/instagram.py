@@ -36,6 +36,7 @@ from backend.app.services.instagram_oauth_service import (
     normalize_permissions,
     refresh_long_lived_token,
 )
+from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
 from backend.app.services.instagram_publish_queue import instagram_publish_queue
 from backend.app.services.instagram_publish_service import (
     mark_job_failed,
@@ -485,6 +486,14 @@ def get_instagram_settings(creds: Credentials = Depends(require_credentials)):
         "r2_public_base_url": cfg("r2_public_base_url"),
         "r2_secret_access_key_configured": credential_store.has_secret("r2_secret_access_key"),
     }
+
+
+@router.get("/api-usage")
+def get_instagram_api_usage(creds: Credentials = Depends(require_credentials)):
+    """Return locally observed Meta usage without making another Instagram request."""
+
+    del creds
+    return instagram_api_usage_tracker.get_usage()
 
 
 @router.put("/settings")

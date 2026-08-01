@@ -1,7 +1,13 @@
+import logging
 import time
 from typing import Callable, Optional
 
 import httpx
+
+from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
+
+
+logger = logging.getLogger(__name__)
 
 
 class InstagramClient:
@@ -38,6 +44,10 @@ class InstagramClient:
             data = response.json()
         except ValueError:
             data = {}
+        try:
+            instagram_api_usage_tracker.record_response(method, path, response, data)
+        except Exception:  # Tracking must never turn a successful API call into a failure.
+            logger.warning("Failed to record Instagram API usage", exc_info=True)
         if response.is_error or data.get("error"):
             error = data.get("error") or {}
             if isinstance(error, dict):
