@@ -1,21 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  LayoutDashboard,
-  Settings,
-  Send,
-  Youtube,
+  AlertTriangle,
+  Bell,
+  CheckCheck,
   CheckCircle2,
-  XCircle,
-  Video,
-  Clapperboard,
-  Smartphone,
   ChevronDown,
   ChevronRight,
-  Bell,
-  Trash2,
-  CheckCheck,
-  AlertTriangle,
+  Clapperboard,
+  Copy,
+  FileSpreadsheet,
   Info,
+  LayoutDashboard,
+  Send,
+  Settings,
+  Smartphone,
+  Trash2,
+  Video,
+  XCircle,
+  Youtube,
 } from 'lucide-react';
 import { useToast } from './Toast';
 
@@ -23,6 +25,10 @@ const youtubeItems = [
   { id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard },
   { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone },
   { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send },
+];
+
+const sheetItems = [
+  { id: 'sheet_copy', label: '內容複製', icon: Copy },
 ];
 
 const NOTIFICATION_ICONS = {
@@ -47,7 +53,9 @@ function formatNotificationTime(createdAt) {
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) {
   const isYoutubeTab = youtubeItems.some((item) => item.id === activeTab);
+  const isSheetTab = sheetItems.some((item) => item.id === activeTab);
   const [isYoutubeOpen, setIsYoutubeOpen] = useState(isYoutubeTab);
+  const [isSheetOpen, setIsSheetOpen] = useState(isSheetTab);
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
   const notificationRef = useRef(null);
   const {
@@ -60,21 +68,17 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
 
   useEffect(() => {
     if (isYoutubeTab) setIsYoutubeOpen(true);
-  }, [isYoutubeTab]);
+    if (isSheetTab) setIsSheetOpen(true);
+  }, [isYoutubeTab, isSheetTab]);
 
   useEffect(() => {
     if (!isNotificationOpen) return undefined;
-
     const handlePointerDown = (event) => {
-      if (!notificationRef.current?.contains(event.target)) {
-        setIsNotificationOpen(false);
-      }
+      if (!notificationRef.current?.contains(event.target)) setIsNotificationOpen(false);
     };
-
     const handleKeyDown = (event) => {
       if (event.key === 'Escape') setIsNotificationOpen(false);
     };
-
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -85,11 +89,10 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
 
   const renderNavItem = (item, isChild = false) => {
     const Icon = item.icon;
-    const isActive = activeTab === item.id;
     return (
       <div
         key={item.id}
-        className={`nav-item ${isActive ? 'active' : ''}`}
+        className={`nav-item ${activeTab === item.id ? 'active' : ''}`}
         onClick={() => setActiveTab(item.id)}
         style={isChild ? { marginLeft: '22px', padding: '10px 14px', fontSize: '0.9rem' } : undefined}
       >
@@ -99,9 +102,27 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
     );
   };
 
-  const handleNotificationToggle = () => {
-    setIsNotificationOpen((open) => !open);
-  };
+  const renderGroup = ({ label, icon: Icon, items, open, setOpen, active, id }) => (
+    <div>
+      <button
+        type="button"
+        className={`nav-item ${active ? 'active' : ''}`}
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        aria-controls={id}
+        style={{ width: '100%', border: 'none', font: 'inherit', textAlign: 'left' }}
+      >
+        <Icon size={18} />
+        <span style={{ flex: 1 }}>{label}</span>
+        {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+      </button>
+      {open && (
+        <div id={id} style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px', marginLeft: '8px', paddingLeft: '8px', borderLeft: '1px solid var(--border-color)' }}>
+          {items.map((item) => renderNavItem(item, true))}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <aside className="sidebar">
@@ -119,26 +140,8 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
 
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {renderNavItem({ id: 'dashboard', label: '儀表板總覽', icon: LayoutDashboard })}
-        <div>
-          <button
-            type="button"
-            className={`nav-item ${isYoutubeTab ? 'active' : ''}`}
-            onClick={() => setIsYoutubeOpen((open) => !open)}
-            aria-expanded={isYoutubeOpen}
-            aria-controls="youtube-nav-items"
-            style={{ width: '100%', border: 'none', font: 'inherit', textAlign: 'left' }}
-          >
-            <Youtube size={18} />
-            <span style={{ flex: 1 }}>YouTube</span>
-            {isYoutubeOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </button>
-
-          {isYoutubeOpen && (
-            <div id="youtube-nav-items" style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px', marginLeft: '8px', paddingLeft: '8px', borderLeft: '1px solid var(--border-color)' }}>
-              {youtubeItems.map((item) => renderNavItem(item, true))}
-            </div>
-          )}
-        </div>
+        {renderGroup({ label: 'YouTube', icon: Youtube, items: youtubeItems, open: isYoutubeOpen, setOpen: setIsYoutubeOpen, active: isYoutubeTab, id: 'youtube-nav-items' })}
+        {renderGroup({ label: 'Sheet', icon: FileSpreadsheet, items: sheetItems, open: isSheetOpen, setOpen: setIsSheetOpen, active: isSheetTab, id: 'sheet-nav-items' })}
         {renderNavItem({ id: 'settings', label: '系統與帳號設定', icon: Settings })}
       </nav>
 
@@ -152,33 +155,14 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
                   <p>{unreadCount > 0 ? `${unreadCount} 則未讀` : '目前沒有未讀通知'}</p>
                 </div>
                 <div className="notification-panel-actions">
-                  <button
-                    type="button"
-                    onClick={markAllRead}
-                    disabled={unreadCount === 0}
-                    title="全部標為已讀"
-                    aria-label="全部標為已讀"
-                  >
-                    <CheckCheck size={16} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={clearNotifications}
-                    disabled={notifications.length === 0}
-                    title="清除全部通知"
-                    aria-label="清除全部通知"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <button type="button" onClick={markAllRead} disabled={unreadCount === 0} title="全部標為已讀" aria-label="全部標為已讀"><CheckCheck size={16} /></button>
+                  <button type="button" onClick={clearNotifications} disabled={notifications.length === 0} title="清除全部通知" aria-label="清除全部通知"><Trash2 size={16} /></button>
                 </div>
               </header>
 
               <div className="notification-list">
                 {notifications.length === 0 ? (
-                  <div className="notification-empty">
-                    <Bell size={22} />
-                    <span>系統通知會顯示在這裡</span>
-                  </div>
+                  <div className="notification-empty"><Bell size={22} /><span>系統通知會顯示在這裡</span></div>
                 ) : notifications.map((notification) => {
                   const Icon = NOTIFICATION_ICONS[notification.type] || Info;
                   return (
@@ -204,7 +188,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
           <button
             type="button"
             className={`notification-button ${isNotificationOpen ? 'active' : ''}`}
-            onClick={handleNotificationToggle}
+            onClick={() => setIsNotificationOpen((open) => !open)}
             aria-expanded={isNotificationOpen}
             aria-label={`系統通知${unreadCount > 0 ? `，${unreadCount} 則未讀` : ''}`}
           >
