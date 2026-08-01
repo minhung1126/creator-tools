@@ -430,8 +430,9 @@ Invoke-WebRequest `
 2. 只選一位 Instagram 測試帳號／人物。
 3. 開始發布工作。
 4. 確認工作結果依序出現 `uploaded`、`container_created`、`published`。
-5. 確認 `R2 暫存影片已刪除`，或在 R2 bucket 中確認對應 `instagram-reels/YYYY/MM/DD/` object 已消失。
-6. 若刪除失敗，使用工作頁的重試功能；不要因為 R2 清理失敗就重新建立 Instagram container，避免重複發布。
+5. 確認影片已移入來源資料夾下的 `Published` 子資料夾。
+6. 確認 `R2 暫存影片已刪除`，或在 R2 bucket 中確認對應 `instagram-reels/YYYY/MM/DD/` object 已消失。
+7. 若 Drive 搬移或 R2 刪除失敗，使用工作頁的重試功能；不要重新建立 Instagram container，避免重複發布。
 
 ### 2.9 R2 設定完成檢查表
 
@@ -458,12 +459,14 @@ Cloudflare R2: instagram-reels/YYYY/MM/DD/...
     ↓ 公開 HTTPS URL + Range GET 驗證
 Instagram Graph API 讀取影片並建立 Reel
     ↓ 發布成功
+Creator Tools 建立／使用來源資料夾下的 Published 子資料夾並移入原始影片
+    ↓
 Creator Tools 立即刪除 R2 object
     ↓ 若中斷或刪除失敗
 R2 lifecycle 在 3 天後清理 instagram-reels/ 暫存物件
 ```
 
-Reel 成功發布後，工作流程會立即刪除該支影片的 R2 object；lifecycle 仍作為清理失敗或中斷工作的後備保護。若刪除暫時失敗，工作會保留 `published` 狀態並提供重試清理，不會重複發布 Instagram 影片。
+Reel 成功發布後，工作流程會先保存 Instagram `media_id`，再把 Google Drive 原始影片移入來源資料夾下的 `Published` 子資料夾，最後立即刪除 R2 object；lifecycle 仍作為清理失敗或中斷工作的後備保護。若 Drive 搬移或 R2 刪除暫時失敗，工作會保留 `published` 狀態並只重試後續清理，不會重複發布 Instagram 影片。
 
 ## 3. Reels 工作流程
 
@@ -475,7 +478,7 @@ GET  /api/v1/instagram/publish-jobs/{id}
 POST /api/v1/instagram/publish-jobs/{id}/retry
 ```
 
-每片會保存 `queued`、`uploaded`、`container_created`、`published`、`failed`、`paused` 與 creation/media ID。第一片失敗會暫停後續；retry 會沿用已保存的 creation ID。結果保存於 `data/instagram_publish_jobs.json`。
+每片會保存 `file_id`、來源資料夾 ID、`queued`、`uploaded`、`container_created`、`published`、`failed`、`paused`、creation/media ID，以及 `drive_moved`、`drive_move_error`、R2 清理狀態。第一片失敗會暫停後續；retry 會沿用已保存的 creation ID。結果保存於 `data/instagram_publish_jobs.json`；同一來源資料夾中的同一個 Drive `file_id` 若已有發布中或已發布紀錄，新的工作會略過以避免重複上傳。既有 `published` 紀錄若尚未有搬移欄位，按該工作的 retry 也會只補做 Drive 搬移。
 
 Reels preflight 只採用 Meta 官方列出的限制：MOV/MP4、AAC 48 kHz、H.264/HEVC、23–60 FPS、水平寬度最多 1920 pixels、影片 bitrate 最多 25 Mbps、音訊 bitrate 128 kbps、3 秒至 15 分鐘、檔案最多 1 GB。9:16 是 Meta 的建議比例，不會被本專案當成硬限制；若 Drive 缺少 metadata，會保留影片並在下載後檢查，最終仍以 Meta API 的實際驗證結果為準。規格來源：[Meta 官方 Instagram API Reels Publishing collection](https://www.postman.com/meta/instagram/folder/23987686-8cdc2637-eebc-4770-aa59-7b0a0bba5a64)。
 

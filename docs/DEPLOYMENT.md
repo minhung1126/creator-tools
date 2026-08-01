@@ -40,6 +40,7 @@ docker compose logs -f creator-tools
 ## 3. 持久化與驗證
 
 - `./data:/app/data` 保存加密 credential store、server-side sessions、runtime config 與 Instagram publish jobs。
+- `data/instagram_publish_jobs.json` 是目前的 Instagram 發布紀錄與防重依據；升級 container 或搬移主機時必須保留並備份整個 `data/` volume，不要清空這個檔案。
 - 不要把 `.env`、`data/credential_store.json` 或 `data/sessions.json` 提交到 Git。
 - Health check：`https://creator-tools.ymin.io/api/v1/health`。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
