@@ -209,6 +209,16 @@ def mark_job_failed(job: dict[str, Any], error: Exception) -> dict[str, Any]:
 
 def _error_text(exc: Exception) -> str:
     message = str(exc).strip() or type(exc).__name__
+    response = getattr(exc, "resp", None)
+    reason_getter = getattr(exc, "_get_reason", None)
+    status = getattr(response, "status", None)
+    if status and callable(reason_getter):
+        try:
+            reason = str(reason_getter()).strip()
+        except Exception:
+            reason = ""
+        if reason:
+            message = f"外部 API HTTP {status}：{reason}"
     lowered = message.casefold()
     if len(message) > 200 or any(
         marker in lowered for marker in ("access_token", "client_secret", "authorization", "bearer ", "response body")
@@ -638,6 +648,7 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
                 _set_item_stage(item, "publishing")
                 _save_job(job)
                 item["media_id"] = client.publish_container(item["creation_id"])
+                item["published_at"] = _now()
             item["error"] = None
             _set_item_stage(item, "moving_drive", status="published")
             _save_job(job)

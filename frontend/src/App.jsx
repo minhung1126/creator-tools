@@ -8,6 +8,7 @@ import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
 import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
 import InstagramReelsPage from './pages/InstagramReelsPage';
+import InstagramHistoryPage from './pages/InstagramHistoryPage';
 import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
@@ -92,6 +93,7 @@ function AppContent() {
     {activeTab === 'youtube_settings' && <YouTubeSettingsPage sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'instagram_reels' && <InstagramReelsPage />}
+    {activeTab === 'instagram_history' && <InstagramHistoryPage />}
     {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main></div>;

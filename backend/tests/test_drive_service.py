@@ -48,6 +48,8 @@ def test_list_drive_videos_requests_drive_thumbnail_link(monkeypatch):
     assert videos[0]["thumbnail_link"] == "https://drive.example/thumbnail"
     assert "thumbnailLink" in service.file_api.list_kwargs["fields"]
     assert service.file_api.list_kwargs["orderBy"] == "name asc"
+    assert service.file_api.list_kwargs["supportsAllDrives"] is True
+    assert service.file_api.list_kwargs["includeItemsFromAllDrives"] is True
 
 
 def test_get_drive_video_thumbnail_uses_authorized_session(monkeypatch):
@@ -156,6 +158,8 @@ def test_ensure_published_folder_creates_once_and_move_is_idempotent(monkeypatch
 
     assert folder_id == "published-1"
     assert files.create_kwargs["body"]["name"] == "Published"
+    assert files.list_kwargs["supportsAllDrives"] is True
+    assert files.list_kwargs["includeItemsFromAllDrives"] is True
     assert files.update_kwargs["removeParents"] == "source-1"
     assert first_move["parents"] == ["published-1"]
     assert second_move["parents"] == ["published-1"]
