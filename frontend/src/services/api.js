@@ -59,6 +59,12 @@ export const api = {
       }),
     }),
 
+  getCopyableSheetTable: (spreadsheetUrlOrId, worksheetName) =>
+    request('/sheets/copy-table', {
+      method: 'POST',
+      body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName }),
+    }),
+
   getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
 
   getPlaylistVideos: (playlistId) =>
