@@ -30,7 +30,14 @@ from backend.app.services.instagram_oauth_service import (
     normalize_permissions,
     refresh_long_lived_token,
 )
-from backend.app.services.instagram_publish_service import prepare_job, process_job, public_job
+from backend.app.services.instagram_publish_queue import instagram_publish_queue
+from backend.app.services.instagram_publish_service import (
+    mark_job_failed,
+    prepare_job,
+    process_job,
+    public_job,
+    reset_item_for_retry,
+)
 from backend.app.services.instagram_service import InstagramClient
 from backend.app.services.r2_service import R2Config, test_r2_connection
 from backend.app.services.sheets_service import normalize_text
@@ -177,6 +184,23 @@ def get_r2() -> R2Config:
     if not all(values.values()):
         raise RuntimeError("Cloudflare R2 設定不完整")
     return R2Config(**values)
+
+
+def _run_publish_job(job_id: str, credentials: Credentials) -> None:
+    """Run one queued batch outside the HTTP request and persist terminal errors."""
+    job = instagram_publish_store.get(job_id)
+    if not job:
+        return
+    try:
+        process_job(
+            job=job,
+            credentials=credentials,
+            client=get_connected_client(refresh_if_needed=True),
+            r2=get_r2(),
+        )
+    except Exception as exc:
+        logger.error("Instagram publish queue job failed: %s", type(exc).__name__, exc_info=True)
+        mark_job_failed(job, exc)
 
 
 @router.get("/auth/url")
@@ -432,9 +456,7 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
         )
         job = instagram_publish_store.create(job)
         if any(item.get("status") == "queued" for item in job.get("items", [])):
-            job = process_job(
-                job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2()
-            )
+            instagram_publish_queue.submit(job["id"], _run_publish_job, creds)
         else:
             job["status"] = "completed"
             job = instagram_publish_store.save(job)
@@ -460,18 +482,20 @@ def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credenti
     job = instagram_publish_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="找不到 Instagram 發布工作")
+    if job.get("status") in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="此發布工作仍在處理中，請等待目前隊列完成。")
+    retryable = False
     for item in job.get("items", []):
-        if item.get("status") in {"failed", "paused"}:
-            item.update(status="queued", error=None)
+        if item.get("status") in {"failed", "paused"} or item.get("r2_delete_error"):
+            reset_item_for_retry(item)
+            retryable = True
+    if not retryable:
+        raise HTTPException(status_code=400, detail="目前沒有需要重試的影片")
     job["status"] = "queued"
+    job.pop("error", None)
     job = instagram_publish_store.save(job)
-    try:
-        job = process_job(job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2())
-        return public_job(job)
-    except Exception:
-        job["status"] = "failed"
-        job["error"] = "Instagram 發布工作重試失敗，請檢查設定。"
-        return public_job(instagram_publish_store.save(job))
+    instagram_publish_queue.submit(job["id"], _run_publish_job, creds)
+    return public_job(job)
 
 
 @router.post("/publish-reels")

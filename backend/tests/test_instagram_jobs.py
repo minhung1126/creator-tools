@@ -141,6 +141,9 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     assert len(deleted) == 2
     assert all(item["r2_deleted"] for item in second["items"])
     assert all(item["public_url"] is None for item in second["items"])
+    assert [item["stage"] for item in second["items"]] == ["completed", "completed"]
+    assert second["progress"]["completed_count"] == 2
+    assert second["progress"]["percent"] == 100
 
 
 def test_r2_cleanup_failure_does_not_republish(monkeypatch):
@@ -191,3 +194,61 @@ def test_r2_public_url_rejects_http_and_private_ip():
         except ValueError:
             continue
         raise AssertionError(f"accepted unsafe URL: {value}")
+
+
+def test_public_job_reports_current_child_task_stage():
+    job = {
+        "id": "job",
+        "status": "running",
+        "items": [
+            {
+                "sequence": 1,
+                "file_id": "1",
+                "file_name": "one.mp4",
+                "status": "queued",
+                "stage": "uploading_r2",
+                "stage_label": "上傳到 Cloudflare R2",
+                "progress_percent": 38,
+            },
+            {
+                "sequence": 2,
+                "file_id": "2",
+                "file_name": "two.mp4",
+                "status": "queued",
+                "stage": "queued",
+                "stage_label": "排隊中",
+                "progress_percent": 0,
+            },
+        ],
+    }
+    result = service.public_job(job)
+    assert result["progress"] == {
+        "total": 2,
+        "completed_count": 0,
+        "failed_count": 0,
+        "paused_count": 0,
+        "percent": 19,
+        "current_item_sequence": 1,
+        "current_file_name": "one.mp4",
+        "current_stage": "uploading_r2",
+        "current_stage_label": "上傳到 Cloudflare R2",
+        "current_item_percent": 38,
+    }
+    assert result["results"][0]["stage"] == "uploading_r2"
+
+
+def test_retry_resets_only_the_child_task_checkpoint():
+    item = {
+        "status": "failed",
+        "stage": "creating_container",
+        "progress_percent": 60,
+        "error": "Meta API error",
+        "public_url": "https://cdn.example/reel.mp4",
+        "creation_id": "creation-1",
+    }
+    service.reset_item_for_retry(item)
+    assert item["status"] == "queued"
+    assert item["stage"] == "queued"
+    assert item["error"] is None
+    assert item["public_url"] == "https://cdn.example/reel.mp4"
+    assert item["creation_id"] == "creation-1"
