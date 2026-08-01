@@ -1,6 +1,7 @@
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from threading import RLock
 from typing import Optional
 
 import googleapiclient.discovery
@@ -9,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 
 from backend.app.core.config import settings
+from backend.app.core.credential_store import credential_store
 from backend.app.core.session_store import session_store
 
 logger = logging.getLogger(__name__)
@@ -21,6 +23,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/youtube",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
+GOOGLE_TOKEN_REFRESH_WINDOW = timedelta(minutes=5)
+_google_refresh_lock = RLock()
 
 
 def get_client_config() -> dict:
@@ -105,8 +109,7 @@ def get_user_profile(credentials: Credentials) -> dict:
         return {"email": "Connected Account", "name": "", "picture": ""}
 
 
-def build_credentials_from_dict(token_dict: dict, session_id: Optional[str] = None) -> Credentials:
-    """Reconstruct Credentials object from a serialized token dict."""
+def _build_credentials(token_dict: dict) -> Credentials:
     expiry = token_dict.get("expiry")
     parsed_expiry = None
     if expiry:
@@ -116,7 +119,7 @@ def build_credentials_from_dict(token_dict: dict, session_id: Optional[str] = No
                 parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
         except (TypeError, ValueError):
             parsed_expiry = None
-    creds = Credentials(
+    return Credentials(
         token=token_dict.get("token"),
         refresh_token=token_dict.get("refresh_token"),
         token_uri=token_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
@@ -125,25 +128,99 @@ def build_credentials_from_dict(token_dict: dict, session_id: Optional[str] = No
         scopes=token_dict.get("scopes", SCOPES),
         expiry=parsed_expiry,
     )
-    if creds and creds.expired and creds.refresh_token:
+
+
+def _needs_refresh(credentials: Credentials) -> bool:
+    if not credentials.refresh_token:
+        return False
+    if credentials.expired:
+        return True
+    if not credentials.expiry:
+        return False
+    expiry = credentials.expiry
+    if expiry.tzinfo:
+        now = datetime.now(timezone.utc)
+    else:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return expiry - now <= GOOGLE_TOKEN_REFRESH_WINDOW
+
+
+def _refresh_credentials(
+    token_dict: dict,
+    *,
+    session_id: Optional[str],
+    persistent: bool,
+) -> Credentials:
+    """Refresh under one process-wide lock and persist the rotated token atomically."""
+    with _google_refresh_lock:
+        # Another request may have refreshed the persistent record while this
+        # request was waiting for the lock. Always use the newest record.
+        latest = credential_store.get_google_credentials() if persistent else None
+        active_dict = latest or token_dict
+        credentials = _build_credentials(active_dict)
+        if not _needs_refresh(credentials):
+            return credentials
+
         try:
-            creds.refresh(Request())
-            if session_id:
-                refreshed = dict(token_dict)
-                refreshed["token"] = creds.token
-                refreshed["refresh_token"] = creds.refresh_token or token_dict.get("refresh_token")
-                refreshed["expiry"] = creds.expiry.isoformat() if creds.expiry else None
+            credentials.refresh(Request())
+            refreshed = dict(active_dict)
+            refreshed["token"] = credentials.token
+            refreshed["refresh_token"] = credentials.refresh_token or active_dict.get("refresh_token")
+            refreshed["expiry"] = credentials.expiry.isoformat() if credentials.expiry else None
+            if persistent:
+                credential_store.save_google_connection(refreshed)
+            elif session_id:
+                # Backward compatibility for sessions created before the
+                # persistent credential store was introduced.
                 session_store.update(session_id, refreshed)
+            return credentials
         except Exception as exc:
+            message = str(exc) or type(exc).__name__
+            requires_reauthorization = any(
+                marker in message.lower() for marker in ("invalid_grant", "invalid client", "revoked")
+            )
+            if persistent:
+                credential_store.mark_google_refresh_failed(message, requires_reauthorization)
             logger.error("Failed to refresh Google token: %s", type(exc).__name__)
-    return creds
+            return credentials
+
+
+def build_credentials_from_dict(
+    token_dict: dict,
+    session_id: Optional[str] = None,
+    *,
+    persistent: bool = False,
+) -> Credentials:
+    """Reconstruct credentials and proactively refresh them before expiry."""
+    credentials = _build_credentials(token_dict)
+    if _needs_refresh(credentials):
+        return _refresh_credentials(token_dict, session_id=session_id, persistent=persistent)
+    return credentials
 
 
 def get_current_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
-    """Load credentials for exactly one server-side session."""
+    """Load the persistent Google credentials for exactly one server session."""
     if not session_id:
         return None
-    token_dict = session_store.get(session_id)
-    if not token_dict or not token_dict.get("token"):
+    session_data = session_store.get(session_id)
+    if not session_data:
         return None
-    return build_credentials_from_dict(token_dict, session_id=session_id)
+
+    # New sessions contain only an account reference. OAuth credentials live in
+    # the encrypted persistent credential store and survive session rotation or
+    # a backend restart.
+    if session_data.get("credential_provider") == "google":
+        token_dict = credential_store.get_google_credentials()
+        if not token_dict or not token_dict.get("token"):
+            return None
+        session_email = str((session_data.get("user") or {}).get("email") or "").casefold()
+        credential_email = str((token_dict.get("user") or {}).get("email") or "").casefold()
+        if session_email and credential_email and session_email != credential_email:
+            return None
+        return build_credentials_from_dict(token_dict, persistent=True)
+
+    # Read old sessions during migration. They are refreshed in place and will
+    # continue to work until the user signs in again.
+    if not session_data.get("token"):
+        return None
+    return build_credentials_from_dict(session_data, session_id=session_id)

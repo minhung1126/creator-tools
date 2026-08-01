@@ -1,15 +1,30 @@
 import time
+from typing import Callable, Optional
 
 import httpx
 
 
 class InstagramClient:
-    def __init__(self, user_id: str, access_token: str, api_version: str = "v25.0"):
+    def __init__(
+        self,
+        user_id: str,
+        access_token: str,
+        api_version: str = "v25.0",
+        on_token_refresh: Optional[Callable[[], str]] = None,
+    ):
         self.user_id = str(user_id)
         self.access_token = access_token
         self.base_url = f"https://graph.instagram.com/{api_version}"
+        self._on_token_refresh = on_token_refresh
 
-    def request(self, method: str, path: str, **kwargs):
+    @staticmethod
+    def _is_token_error(response: httpx.Response, data: dict) -> bool:
+        if response.status_code == 401:
+            return True
+        error = data.get("error") if isinstance(data, dict) else None
+        return isinstance(error, dict) and str(error.get("code")) == "190"
+
+    def _request_once(self, method: str, path: str, **kwargs):
         headers = {"Authorization": f"Bearer {self.access_token}"}
         headers.update(kwargs.pop("headers", {}))
         with httpx.Client(timeout=60, follow_redirects=True) as client:
@@ -29,8 +44,24 @@ class InstagramClient:
                 message = error.get("message") or error.get("error_user_msg")
             else:
                 message = str(error)
-            raise RuntimeError(message or f"Instagram API HTTP {response.status_code}")
+            error = data.get("error") or {}
+            error_message = message or f"Instagram API HTTP {response.status_code}"
+            error = RuntimeError(error_message)
+            error.token_error = self._is_token_error(response, data)
+            raise error
         return data
+
+    def request(self, method: str, path: str, **kwargs):
+        try:
+            return self._request_once(method, path, **kwargs)
+        except RuntimeError as exc:
+            if not getattr(exc, "token_error", False) or not self._on_token_refresh:
+                raise
+            refreshed_token = self._on_token_refresh()
+            if not refreshed_token:
+                raise
+            self.access_token = refreshed_token
+            return self._request_once(method, path, **kwargs)
 
     def profile(self):
         # /me avoids trusting a separately supplied account ID during verification.
