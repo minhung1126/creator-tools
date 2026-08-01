@@ -39,6 +39,8 @@ def list_drive_videos(credentials, folder_url_or_id: str):
                 orderBy="name asc",
                 pageSize=100,
                 pageToken=page_token,
+                includeItemsFromAllDrives=True,
+                supportsAllDrives=True,
             )
             .execute()
         )
@@ -67,6 +69,7 @@ def list_drive_videos(credentials, folder_url_or_id: str):
         page_token = response.get("nextPageToken")
         if not page_token:
             break
+    items.sort(key=lambda item: (str(item.get("name") or "").casefold(), str(item.get("id") or "")))
     return items
 
 
@@ -92,6 +95,8 @@ def ensure_published_folder(
             fields="files(id,name,parents)",
             orderBy="createdTime asc",
             pageSize=100,
+            includeItemsFromAllDrives=True,
+            supportsAllDrives=True,
         )
         .execute()
     )

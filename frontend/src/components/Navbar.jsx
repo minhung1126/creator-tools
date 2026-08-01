@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ChevronDown, ChevronRight, Clapperboard, Copy, FileSpreadsheet, Instagram, LayoutDashboard, Send, Settings, Smartphone, Video, Youtube } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronRight, Clapperboard, Copy, FileSpreadsheet, History, Instagram, LayoutDashboard, Send, Settings, Smartphone, Video, Youtube } from 'lucide-react';
 
 const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
-const instagramItems = [{ id: 'instagram_reels', label: 'Reels 自動發布', icon: Send }, { id: 'instagram_settings', label: 'Instagram / R2 設定', icon: Settings }];
+const instagramItems = [{ id: 'instagram_reels', label: 'Reels 自動發布', icon: Send }, { id: 'instagram_history', label: '發布歷史紀錄', icon: History }, { id: 'instagram_settings', label: 'Instagram / R2 設定', icon: Settings }];
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) {
   const [youtubeOpen, setYoutubeOpen] = useState(youtubeItems.some((i) => i.id === activeTab));
