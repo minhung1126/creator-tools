@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from backend.app.core.config import settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.dependencies import require_credentials
+from backend.app.core.instagram_publish_store import instagram_publish_store
 from backend.app.core.runtime_config import runtime_config
 from backend.app.core.security import (
     INSTAGRAM_OAUTH_STATE_SALT,
@@ -35,6 +36,7 @@ from backend.app.services.instagram_oauth_service import (
 )
 from backend.app.services.instagram_service import InstagramClient
 from backend.app.services.r2_service import R2Config, test_r2_connection, upload_public_file
+from backend.app.services.instagram_publish_service import process_job, prepare_job, public_job
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
@@ -349,6 +351,66 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
         return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"讀取 Drive 影片失敗：{exc}") from exc
+
+
+@router.post("/publish-jobs", status_code=201)
+def create_publish_job(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
+    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID
+    folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
+    if not spreadsheet or not folder:
+        raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
+    if not any(normalize_text(item.person) for item in payload.assignments):
+        raise HTTPException(status_code=400, detail="請至少為一支影片指定人物")
+    try:
+        job = prepare_job(
+            credentials=creds,
+            spreadsheet=spreadsheet,
+            folder=folder,
+            worksheet_name=payload.worksheet_name,
+            caption_column=payload.caption_column,
+            team=payload.team,
+            assignments=[item.model_dump() for item in payload.assignments],
+            share_to_feed=payload.share_to_feed,
+        )
+        job = instagram_publish_store.create(job)
+        if any(item.get("status") == "queued" for item in job.get("items", [])):
+            job = process_job(job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2())
+        else:
+            job["status"] = "completed"
+            job = instagram_publish_store.save(job)
+        return public_job(job)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"建立 Instagram 發布工作失敗：{exc}") from exc
+
+
+@router.get("/publish-jobs/{job_id}")
+def get_publish_job(job_id: str, creds: Credentials = Depends(require_credentials)):
+    del creds
+    job = instagram_publish_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 發布工作")
+    return public_job(job)
+
+
+@router.post("/publish-jobs/{job_id}/retry")
+def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credentials)):
+    job = instagram_publish_store.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 發布工作")
+    for item in job.get("items", []):
+        if item.get("status") in {"failed", "paused"}:
+            item.update(status="queued", error=None)
+    job["status"] = "queued"
+    job = instagram_publish_store.save(job)
+    try:
+        job = process_job(job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2())
+        return public_job(job)
+    except Exception as exc:
+        job["status"] = "failed"
+        job["error"] = str(exc)[:500]
+        return public_job(instagram_publish_store.save(job))
 
 
 @router.post("/publish-reels")

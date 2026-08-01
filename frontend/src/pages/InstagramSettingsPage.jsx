@@ -14,18 +14,21 @@ function formatDate(value) {
 export default function InstagramSettingsPage({ refreshKey = 0 }) {
   const toast = useToast();
   const [form, setForm] = useState({});
+  const [savedForm, setSavedForm] = useState({});
   const [authStatus, setAuthStatus] = useState({ connected: false, account: null });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testingR2, setTestingR2] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [confirmR2Save, setConfirmR2Save] = useState(false);
 
   const load = async () => {
     setLoading(true);
     try {
       const [settings, status] = await Promise.all([api.getInstagramSettings(), api.getInstagramAuthStatus()]);
       setForm(settings || {});
+      setSavedForm(settings || {});
       setAuthStatus(status || { connected: false, account: null });
     } catch (error) { toast.error(error.message); } finally { setLoading(false); }
   };
@@ -56,13 +59,28 @@ export default function InstagramSettingsPage({ refreshKey = 0 }) {
     try {
       const result = await api.updateInstagramSettings(form);
       setForm((current) => ({ ...current, ...result, r2_secret_access_key: '' }));
+      setSavedForm((current) => ({ ...current, ...result, r2_secret_access_key: '' }));
       toast.success('Instagram 工作流程與 R2 設定已儲存');
-    } catch (error) { toast.error(error.message); } finally { setSaving(false); }
+      return true;
+    } catch (error) { toast.error(error.message); return false; } finally { setSaving(false); }
   };
-  const testR2 = async () => {
+  const runR2Test = async () => {
     setTestingR2(true);
     try { const result = await api.testInstagramR2(); toast.success(`R2 連線成功：${result.bucket_name}`); }
     catch (error) { toast.error(error.message); } finally { setTestingR2(false); }
+  };
+  const testR2 = () => {
+    const current = { ...form, r2_secret_access_key: form.r2_secret_access_key || '' };
+    const saved = { ...savedForm, r2_secret_access_key: savedForm.r2_secret_access_key || '' };
+    if (JSON.stringify(current) !== JSON.stringify(saved)) {
+      setConfirmR2Save(true);
+      return;
+    }
+    runR2Test();
+  };
+  const saveAndTestR2 = async () => {
+    setConfirmR2Save(false);
+    if (await save()) runR2Test();
   };
 
   const account = authStatus.account;
@@ -88,5 +106,6 @@ export default function InstagramSettingsPage({ refreshKey = 0 }) {
     <section className="glass-panel card-padding" style={{ display: 'grid', gap: 16 }}><div><h2>Cloudflare R2</h2><p className="section-desc">R2 Secret Access Key 會加密儲存，不會由 API 回傳。</p></div><label className="form-group"><span className="form-label">R2 Account ID</span><input className="form-input" value={form.r2_account_id || ''} onChange={(e) => setForm({ ...form, r2_account_id: e.target.value })} /></label><label className="form-group"><span className="form-label">R2 Access Key ID</span><input className="form-input" value={form.r2_access_key_id || ''} onChange={(e) => setForm({ ...form, r2_access_key_id: e.target.value })} /></label><label className="form-group"><span className="form-label">R2 Secret Access Key</span><input className="form-input" type="password" value={form.r2_secret_access_key || ''} placeholder={form.r2_secret_access_key_configured ? '已設定；留空保留原值' : ''} onChange={(e) => setForm({ ...form, r2_secret_access_key: e.target.value })} /></label><label className="form-group"><span className="form-label">R2 Bucket 名稱</span><input className="form-input" value={form.r2_bucket_name || ''} onChange={(e) => setForm({ ...form, r2_bucket_name: e.target.value })} /></label><label className="form-group"><span className="form-label">R2 公開網址／Custom Domain</span><input className="form-input" value={form.r2_public_base_url || ''} onChange={(e) => setForm({ ...form, r2_public_base_url: e.target.value })} /></label><div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}><button className="btn btn-success" onClick={save} disabled={saving}><Save size={17} />{saving ? '儲存中…' : '儲存設定'}</button><button className="btn btn-primary" onClick={testR2} disabled={testingR2}><TestTube2 size={17} />{testingR2 ? '測試中…' : '測試 R2'}</button></div></section>
     <div className="info-banner"><CheckCircle2 size={16} />完整申請與登入流程請看 docs/INSTAGRAM_R2_SETUP.md。</div>
     <ConfirmDialog open={confirmDisconnect} title="中斷 Instagram 連線" message="確定要刪除目前儲存的 Instagram Token？" confirmText="中斷連線" variant="destructive" onConfirm={disconnect} onCancel={() => setConfirmDisconnect(false)} />
+    <ConfirmDialog open={confirmR2Save} title="先儲存 R2 修改？" message="目前表單有尚未儲存的 R2 設定。測試前先儲存這些修改，確定繼續？" confirmText="儲存並測試" onConfirm={saveAndTestR2} onCancel={() => setConfirmR2Save(false)} />
   </div>;
 }
