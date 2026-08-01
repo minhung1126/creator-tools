@@ -177,10 +177,7 @@ def _large_drive_thumbnail_link(thumbnail_link: str) -> str:
     else:
         replacement = f"=h{DRIVE_THUMBNAIL_SIZE}"
 
-    return (
-        f"{thumbnail_link[:match.start()]}{replacement}{match.group('suffix') or ''}"
-        f"{thumbnail_link[match.end():]}"
-    )
+    return f"{thumbnail_link[: match.start()]}{replacement}{match.group('suffix') or ''}{thumbnail_link[match.end() :]}"
 
 
 def _fetch_drive_thumbnail(credentials, thumbnail_link: str):

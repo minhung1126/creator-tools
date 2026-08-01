@@ -110,6 +110,8 @@ def test_get_drive_video_thumbnail_prefers_source_frame_and_caches_it(monkeypatc
     assert first == (b"high-resolution-frame", "image/jpeg")
     assert second == first
     assert downloaded == [("credentials", "file-1")]
+
+
 class _PublishedFolderFiles:
     def __init__(self, existing=None, parents=None):
         self.existing = existing or []
