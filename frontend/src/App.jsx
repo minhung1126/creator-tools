@@ -5,6 +5,8 @@ import DashboardPage from './pages/DashboardPage';
 import BatchUpdatePage from './pages/BatchUpdatePage';
 import PublishCleanerPage from './pages/PublishCleanerPage';
 import SettingsPage from './pages/SettingsPage';
+import InstagramReelsPage from './pages/InstagramReelsPage';
+import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
 
@@ -57,13 +59,22 @@ function AppContent() {
         setAuthError(`Google 帳號連線失敗：${errorText}`);
         toast.error(`Google 帳號連線失敗：${errorText}`);
         window.location.hash = '';
+      } else if (hash.includes('instagram_auth_success=1')) {
+        setActiveTab('instagram_settings');
+        toast.success('Instagram 帳號連線成功，帳號 ID 與 Token 已安全儲存。');
+        window.location.hash = '';
+        if (user) await fetchSettings();
+      } else if (hash.includes('instagram_auth_error=')) {
+        const errorText = decodeURIComponent(hash.split('instagram_auth_error=')[1] || '');
+        setActiveTab('instagram_settings');
+        toast.error(`Instagram 帳號連線失敗：${errorText}`);
+        window.location.hash = '';
+        if (user) await fetchSettings();
       } else if (user) {
         await fetchSettings();
       }
-
       setLoading(false);
     };
-
     init();
   }, []);
 
@@ -89,6 +100,8 @@ function AppContent() {
         {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
         {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
         {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+        {activeTab === 'instagram_reels' && <InstagramReelsPage />}
+        {activeTab === 'instagram_settings' && <InstagramSettingsPage />}
         {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshUser={fetchUser} />}
       </main>
     </div>
@@ -100,33 +113,16 @@ class ErrorBoundary extends React.Component {
     super(props);
     this.state = { hasError: false, error: null };
   }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    console.error('ErrorBoundary caught:', error, errorInfo);
-  }
-
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, errorInfo) { console.error('ErrorBoundary caught:', error, errorInfo); }
   render() {
     if (this.state.hasError) {
-      return (
-        <div className="loading-center" style={{ flexDirection: 'column', gap: '16px' }}>
-          <h2 style={{ color: '#f87171' }}>⚠️ 應用程式發生錯誤</h2>
-          <p style={{ color: 'var(--text-muted)', maxWidth: '500px', textAlign: 'center' }}>{this.state.error?.message || '發生未預期的錯誤。'}</p>
-          <button className="btn btn-primary" onClick={() => window.location.reload()}>重新載入頁面</button>
-        </div>
-      );
+      return <div className="loading-center" style={{ flexDirection: 'column', gap: '16px' }}><h2 style={{ color: '#f87171' }}>⚠️ 應用程式發生錯誤</h2><p style={{ color: 'var(--text-muted)', maxWidth: '500px', textAlign: 'center' }}>{this.state.error?.message || '發生未預期的錯誤。'}</p><button className="btn btn-primary" onClick={() => window.location.reload()}>重新載入頁面</button></div>;
     }
     return this.props.children;
   }
 }
 
 export default function App() {
-  return (
-    <ErrorBoundary>
-      <ToastProvider><AppContent /></ToastProvider>
-    </ErrorBoundary>
-  );
+  return <ErrorBoundary><ToastProvider><AppContent /></ToastProvider></ErrorBoundary>;
 }
