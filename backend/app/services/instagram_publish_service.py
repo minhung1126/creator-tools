@@ -521,6 +521,8 @@ def _cleanup_r2_file(item: dict[str, Any], r2: R2Config) -> None:
         item["r2_delete_error"] = None
         item["public_url"] = None
         _set_item_stage(item, "completed")
+
+
 def _move_drive_item_to_published(job: dict[str, Any], item: dict[str, Any], credentials) -> None:
     """Move a successfully published source file without ever republishing it."""
     if item.get("drive_moved"):
