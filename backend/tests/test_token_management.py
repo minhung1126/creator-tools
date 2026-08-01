@@ -25,12 +25,8 @@ def google_token_payload(expiry: datetime, token: str = "access-token"):
 def test_google_credentials_are_persistent_and_proactively_refreshed(monkeypatch, tmp_path: Path):
     credentials_store = CredentialStore(tmp_path / "credentials.json")
     sessions = SessionStore(tmp_path / "sessions.json")
-    credentials_store.save_google_connection(
-        google_token_payload(datetime.now(timezone.utc) + timedelta(minutes=1))
-    )
-    session_id = sessions.create(
-        {"credential_provider": "google", "user": {"email": "admin@example.test"}}
-    )
+    credentials_store.save_google_connection(google_token_payload(datetime.now(timezone.utc) + timedelta(minutes=1)))
+    session_id = sessions.create({"credential_provider": "google", "user": {"email": "admin@example.test"}})
     monkeypatch.setattr(google_auth, "credential_store", credentials_store)
     monkeypatch.setattr(google_auth, "session_store", sessions)
 

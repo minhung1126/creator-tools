@@ -118,9 +118,7 @@ def refresh_connection(*, force: bool = True) -> dict:
             refreshed = refresh_long_lived_token(token)
             credential_store.update_instagram_token(refreshed["access_token"], refreshed.get("expires_in"))
         except Exception as exc:
-            requires_reauthorization = any(
-                marker in str(exc).lower() for marker in ("expired", "invalid", "oauth")
-            )
+            requires_reauthorization = any(marker in str(exc).lower() for marker in ("expired", "invalid", "oauth"))
             credential_store.mark_instagram_refresh_failed(str(exc) or type(exc).__name__, requires_reauthorization)
             logger.error("Instagram token refresh failed: %s", type(exc).__name__)
             raise
