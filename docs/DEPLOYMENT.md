@@ -20,8 +20,8 @@ CREDENTIAL_ENCRYPTION_KEY=請固定保存的加密金鑰
 ALLOWED_GOOGLE_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=你的 Google OAuth Client ID
 GOOGLE_CLIENT_SECRET=你的 Google OAuth Client Secret
-INSTAGRAM_APP_ID=你的 Instagram 應用程式編號
-INSTAGRAM_APP_SECRET=你的 Instagram 應用程式密鑰
+INSTAGRAM_APP_ID=Instagram API with Instagram Login 頁面的 Instagram 應用程式編號
+INSTAGRAM_APP_SECRET=Instagram API with Instagram Login 頁面的 Instagram 應用程式密鑰
 ```
 
 此 production image 已包含編譯後的前端，前端與 API 可以共用同一個公開網址：`/` 由前端提供，`/api/*` 由 API 處理。Homelab reverse proxy 應將公開網址轉發到 Creator Tools 主機的 `8000` port。
@@ -43,7 +43,11 @@ docker compose logs -f creator-tools
 - 不要把 `.env`、`data/credential_store.json` 或 `data/sessions.json` 提交到 Git。
 - Health check：`https://creator-tools.ymin.io/api/v1/health`。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
-- Meta Valid OAuth Redirect URI：`https://creator-tools.ymin.io/api/v1/instagram/auth/callback`。
+- Meta Instagram Login Redirect URI：`https://creator-tools.ymin.io/api/v1/instagram/auth/callback`。
+
+Instagram URI 必須設定在 Meta App 的 **Instagram API → 含有 Instagram 登入的 API 設定 → 第 2 步「產生存取權」→ Set up Instagram business login**。不要只設定在 **商家專用 Facebook 登入 → 設定**，也不要填在 **Webhooks → 回呼網址**；這三個欄位屬於不同流程。完整的 Meta 後台逐步位置、權限、測試帳號與部署檢查表請看 [Instagram Reels API 與 Cloudflare R2 設定教學](INSTAGRAM_R2_SETUP.md)。
+
+部署完成後，Google 登入並開啟 Instagram 設定頁，確認頁面顯示的 `redirect_uri` 與上方網址逐字一致；若 `.env` 有修改，必須重新啟動 container。
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時，Google login 會被拒絕；目前產品模式是單一管理者。
 
