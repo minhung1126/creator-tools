@@ -125,9 +125,7 @@ class CredentialStore:
         with self._lock:
             previous = self._data.get("google")
             previous_credentials = (
-                self._decrypt_json(previous.get("credentials_encrypted"))
-                if isinstance(previous, dict)
-                else None
+                self._decrypt_json(previous.get("credentials_encrypted")) if isinstance(previous, dict) else None
             )
             credentials = dict(token_dict)
             user = credentials.get("user") if isinstance(credentials.get("user"), dict) else {}

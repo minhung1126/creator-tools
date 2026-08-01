@@ -12,7 +12,7 @@ on:
       - .github/workflows/validate-container.yml
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: validate-container-${{ github.event.pull_request.number }}
@@ -23,8 +23,13 @@ jobs:
     name: Test and build container
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out PR branch
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,6 +38,10 @@ jobs:
 
       - name: Install backend dependencies and test tools
         run: python -m pip install -r backend/requirements.txt pytest ruff
+
+      - name: Format backend
+        id: format_backend
+        run: python -m ruff format backend
 
       - name: Test backend
         run: |
@@ -60,3 +69,30 @@ jobs:
           cp .env.example .env
           docker build --build-arg APP_COMMIT_SHA=audit -t creator-tools:audit .
           docker compose config
+
+      - name: Commit backend formatting changes to PR branch
+        if: >-
+          always() &&
+          steps.format_backend.outcome == 'success' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- backend; then
+            echo "No backend formatting changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend
+          git commit -m "style: format backend with Ruff"
+          gh auth setup-git
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+
+      - name: Explain skipped formatting commit for fork PR
+        if: >-
+          always() &&
+          steps.format_backend.outcome == 'success' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        run: echo "Automatic formatting commit skipped because fork PR branches cannot be written by this workflow."

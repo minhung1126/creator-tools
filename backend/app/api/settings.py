@@ -107,9 +107,7 @@ def get_shared_settings(creds: Credentials = Depends(require_credentials)):
 
 
 @router.put("/shared")
-def update_shared_settings(
-    payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_credentials)
-):
+def update_shared_settings(payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
     runtime_config.update({"default_spreadsheet_id": payload.default_spreadsheet_id.strip()})
     logger.info("Shared resource settings updated: default_spreadsheet_id")
     return {"status": "success", "settings": get_shared_settings(creds)}
@@ -124,9 +122,7 @@ def get_youtube_settings(creds: Credentials = Depends(require_credentials)):
 
 
 @router.put("/youtube")
-def update_youtube_settings(
-    payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_credentials)
-):
+def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
     runtime_config.update({"default_playlist_id": payload.default_playlist_id.strip()})
     logger.info("YouTube resource settings updated: default_playlist_id")
     return {"status": "success", "settings": get_youtube_settings(creds)}
