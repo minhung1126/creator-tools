@@ -6,6 +6,7 @@ import BatchUpdatePage from './pages/BatchUpdatePage';
 import PublishCleanerPage from './pages/PublishCleanerPage';
 import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
+import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
 import InstagramReelsPage from './pages/InstagramReelsPage';
 import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
@@ -79,6 +80,7 @@ function AppContent() {
     {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
     {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
     {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+    {activeTab === 'youtube_settings' && <YouTubeSettingsPage sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'instagram_reels' && <InstagramReelsPage />}
     {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
