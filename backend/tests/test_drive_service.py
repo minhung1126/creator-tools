@@ -19,7 +19,7 @@ class _FakeFiles:
         return _FakeRequest({"files": [self.item]})
 
     def get(self, **kwargs):
-        return _FakeRequest({"thumbnailLink": "https://drive.example/thumbnail"})
+        return _FakeRequest({"thumbnailLink": "https://drive.example/thumbnail=s220"})
 
 
 class _FakeService:
@@ -47,6 +47,7 @@ def test_list_drive_videos_requests_drive_thumbnail_link(monkeypatch):
 
     assert videos[0]["thumbnail_link"] == "https://drive.example/thumbnail"
     assert "thumbnailLink" in service.file_api.list_kwargs["fields"]
+    assert service.file_api.list_kwargs["orderBy"] == "name asc"
 
 
 def test_get_drive_video_thumbnail_uses_authorized_session(monkeypatch):
@@ -65,7 +66,7 @@ def test_get_drive_video_thumbnail_uses_authorized_session(monkeypatch):
             self.credentials = credentials
 
         def get(self, url, timeout):
-            assert url == "https://drive.example/thumbnail"
+            assert url == "https://drive.example/thumbnail=s1600"
             assert timeout == 20
             return FakeResponse()
 

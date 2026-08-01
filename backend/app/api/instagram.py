@@ -388,7 +388,7 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
                 if video.get("id") and thumbnail_link
                 else ""
             )
-        return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
+        return {"videos": videos, "total": len(videos), "sort_order": "name_ascending"}
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc

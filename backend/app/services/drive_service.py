@@ -5,6 +5,8 @@ from google.auth.transport.requests import AuthorizedSession
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
+DRIVE_THUMBNAIL_SIZE = 1600
+
 
 def extract_drive_folder_id(value: str) -> str:
     value = (value or "").strip()
@@ -23,7 +25,7 @@ def list_drive_videos(credentials, folder_url_or_id: str):
             .list(
                 q=f"'{folder_id}' in parents and trashed = false and mimeType contains 'video/'",
                 fields="nextPageToken,files(id,name,mimeType,size,createdTime,videoMediaMetadata,webViewLink,thumbnailLink)",
-                orderBy="createdTime asc",
+                orderBy="name asc",
                 pageSize=100,
                 pageToken=page_token,
             )
@@ -65,7 +67,15 @@ def get_drive_video_thumbnail(credentials, file_id: str):
     if not thumbnail_link:
         return None
 
-    response = AuthorizedSession(credentials).get(thumbnail_link, timeout=20)
+    # Drive commonly returns a link ending in ``=s220``. Request a larger
+    # rendition while keeping the original link shape for newer variants.
+    high_resolution_link = re.sub(
+        r"=s\d+(?=$|[&#])",
+        f"=s{DRIVE_THUMBNAIL_SIZE}",
+        thumbnail_link,
+        count=1,
+    )
+    response = AuthorizedSession(credentials).get(high_resolution_link, timeout=20)
     response.raise_for_status()
     content_type = response.headers.get("content-type", "image/jpeg").split(";", 1)[0].strip()
     if not content_type.startswith("image/"):

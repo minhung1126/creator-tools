@@ -281,7 +281,7 @@ def prepare_job(
         "status": "queued",
         "created_at": _now(),
         "updated_at": _now(),
-        "sort_order": "created_time_ascending",
+        "sort_order": "name_ascending",
         "worksheet_name": worksheet_name,
         "caption_column": normalized_caption_column,
         "team": normalized_team,
