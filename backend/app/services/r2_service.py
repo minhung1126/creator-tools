@@ -100,3 +100,9 @@ def upload_public_file(config: R2Config, local_path: Path, object_key: str, cont
                 raise RuntimeError(f"R2 公開網址驗證失敗：HTTP {response.status_code}")
             next(response.iter_bytes(chunk_size=1), b"")
     return url
+
+
+def delete_public_file(config: R2Config, object_key: str):
+    if not object_key:
+        raise ValueError("R2 object key 不得為空白")
+    create_client(config).delete_object(Bucket=config.bucket_name, Key=object_key)

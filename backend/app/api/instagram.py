@@ -36,7 +36,7 @@ from backend.app.services.instagram_oauth_service import (
 )
 from backend.app.services.instagram_publish_service import prepare_job, process_job, public_job
 from backend.app.services.instagram_service import InstagramClient
-from backend.app.services.r2_service import R2Config, test_r2_connection, upload_public_file
+from backend.app.services.r2_service import R2Config, delete_public_file, test_r2_connection, upload_public_file
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
@@ -509,13 +509,24 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
                         r2, local, object_key, file["mime_type"] or mimetypes.guess_type(file["name"])[0] or "video/mp4"
                     )
                     published = client.publish_reel(public_url, caption, payload.share_to_feed)
+                    r2_deleted = True
+                    r2_delete_error = None
+                    try:
+                        delete_public_file(r2, object_key)
+                    except Exception as cleanup_exc:
+                        logger.error("Legacy R2 cleanup failed: %s", type(cleanup_exc).__name__, exc_info=True)
+                        r2_deleted = False
+                        r2_delete_error = "R2 影片刪除失敗，請重試。"
                 results.append(
                     {
                         "file_id": file["id"],
                         "file_name": file["name"],
                         "person": person,
                         "status": "published",
-                        "public_url": public_url,
+                        "public_url": None if r2_deleted else public_url,
+                        "object_key": object_key,
+                        "r2_deleted": r2_deleted,
+                        "r2_delete_error": r2_delete_error,
                         **published,
                     }
                 )

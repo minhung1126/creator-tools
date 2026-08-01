@@ -10,7 +10,7 @@ from typing import Any
 from backend.app.core.instagram_publish_store import instagram_publish_store
 from backend.app.services.drive_service import download_drive_file, list_drive_videos
 from backend.app.services.instagram_service import InstagramClient
-from backend.app.services.r2_service import R2Config, ensure_lifecycle, upload_public_file
+from backend.app.services.r2_service import R2Config, delete_public_file, ensure_lifecycle, upload_public_file
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
@@ -98,6 +98,8 @@ def prepare_job(
             "error": None,
             "public_url": None,
             "object_key": None,
+            "r2_deleted": False,
+            "r2_delete_error": None,
             "creation_id": None,
             "media_id": None,
             "preflight": {},
@@ -148,10 +150,25 @@ def _counts(job: dict[str, Any]) -> dict[str, int]:
     }
 
 
+def _cleanup_r2_file(item: dict[str, Any], r2: R2Config) -> None:
+    if item.get("r2_deleted") or not item.get("object_key"):
+        return
+    try:
+        delete_public_file(r2, item["object_key"])
+    except Exception:
+        item["r2_deleted"] = False
+        item["r2_delete_error"] = "R2 影片刪除失敗，請重試。"
+    else:
+        item["r2_deleted"] = True
+        item["r2_delete_error"] = None
+        item["public_url"] = None
+
+
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
     result = {key: value for key, value in job.items() if key not in {"caption", "spreadsheet", "folder"}}
     result.pop("items", None)
     result.update(_counts(job))
+    result["r2_cleanup_failed_count"] = sum(bool(item.get("r2_delete_error")) for item in job.get("items", []))
     result["results"] = [
         {key: value for key, value in item.items() if key != "caption"} for item in job.get("items", [])
     ]
@@ -162,7 +179,12 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
     ensure_lifecycle(r2, days=3)
     failed = False
     for item in job.get("items", []):
-        if item.get("status") in {"skipped", "published"}:
+        if item.get("status") == "skipped":
+            continue
+        if item.get("status") == "published":
+            _cleanup_r2_file(item, r2)
+            job["updated_at"] = _now()
+            instagram_publish_store.save(job)
             continue
         if failed:
             item.update(status="paused", error="前一支影片發布失敗，流程已暫停")
@@ -203,6 +225,9 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
                 item["media_id"] = client.publish_container(item["creation_id"])
             item["status"] = "published"
             item["error"] = None
+            job["updated_at"] = _now()
+            instagram_publish_store.save(job)
+            _cleanup_r2_file(item, r2)
             job["updated_at"] = _now()
             instagram_publish_store.save(job)
         except Exception as exc:

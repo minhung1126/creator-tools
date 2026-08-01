@@ -58,6 +58,8 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
         lambda credentials, file_id, destination: Path(destination).write_bytes(b"video"),
     )
     monkeypatch.setattr(service, "upload_public_file", lambda *args, **kwargs: "https://cdn.example/reel.mp4")
+    deleted = []
+    monkeypatch.setattr(service, "delete_public_file", lambda config, object_key: deleted.append(object_key))
 
     class Client:
         def __init__(self):
@@ -114,6 +116,50 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     second = service.process_job(job=first, credentials=None, client=client, r2=object())
     assert [item["status"] for item in second["items"]] == ["published", "published"]
     assert client.created == ["A", "B"]
+    assert len(deleted) == 2
+    assert all(item["r2_deleted"] for item in second["items"])
+    assert all(item["public_url"] is None for item in second["items"])
+
+
+def test_r2_cleanup_failure_does_not_republish(monkeypatch):
+    store = MemoryStore()
+    monkeypatch.setattr(service, "instagram_publish_store", store)
+    monkeypatch.setattr(service, "ensure_lifecycle", lambda *args, **kwargs: None)
+
+    def fail_delete(*args, **kwargs):
+        raise RuntimeError("denied")
+
+    monkeypatch.setattr(service, "delete_public_file", fail_delete)
+
+    class Client:
+        def __init__(self):
+            self.published = 0
+
+        def publish_container(self, creation_id):
+            self.published += 1
+            return "media-1"
+
+    job = {
+        "id": "job",
+        "status": "published",
+        "items": [
+            {
+                "sequence": 1,
+                "file_id": "1",
+                "file_name": "one.mp4",
+                "status": "published",
+                "public_url": "https://cdn.example/reel.mp4",
+                "object_key": "instagram-reels/one.mp4",
+                "creation_id": "creation-1",
+                "media_id": "media-1",
+            }
+        ],
+    }
+    client = Client()
+    result = service.process_job(job=job, credentials=None, client=client, r2=object())
+    assert result["items"][0]["status"] == "published"
+    assert result["items"][0]["r2_delete_error"]
+    assert client.published == 0
 
 
 def test_r2_public_url_rejects_http_and_private_ip():

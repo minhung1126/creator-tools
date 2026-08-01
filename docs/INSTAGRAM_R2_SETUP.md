@@ -30,6 +30,8 @@ Instagram API version 由後端 release pin，不能由 UI 任意修改；callba
 4. public base URL 必須 HTTPS，系統會拒絕 localhost/private IP；建議使用 Custom Domain 或 `r2.dev`。
 5. 為 `instagram-reels/` prefix 設定 1–7 天 lifecycle，預設工作流程使用 3 天，避免影片永久堆積。
 
+Reel 成功發布後，工作流程會立即刪除該支影片的 R2 object；lifecycle 仍作為清理失敗或中斷工作的後備保護。若刪除暫時失敗，工作會保留 `published` 狀態並提供重試清理，不會重複發布 Instagram 影片。
+
 Endpoint：
 
 ```text
