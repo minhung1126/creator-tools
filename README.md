@@ -40,17 +40,17 @@
 6. **📋 統一任務隊列與通知中心**
    - Instagram Reels、YouTube metadata、YouTube 公開清理都以單支影片 task 持久化於 `data/creator_tools.db`。
    - Instagram 與 YouTube 各自有獨立的 concurrency 1 lane，支援取消、安全 checkpoint、重試、重啟恢復與持久化通知。
-   - Instagram 批次以最多 50 支影片為一個 worker claim，對齊 Meta Graph batch 上限；較大的使用者批次會保留原順序分段處理。
+   - Instagram worker 每次只 claim 並處理一支影片；使用者建立的多支影片批次仍依原順序排隊。
    - 每個成功的 container／media ID 都會先寫入 SQLite checkpoint，再處理下一階段；部分失敗或服務重啟不會從頭重複發布。
    - 任務中心會分頁載入完整持久化佇列；「未完成」包含排隊、執行、正在取消與暫停等待確認。
 
 ### 任務佇列與 Instagram 批次語意
 
 - 一個平台 lane 同一時間只執行一個 worker unit；Instagram 與 YouTube 可彼此獨立進行。
-- Instagram 的 Drive 下載與 R2 上傳逐支執行，Meta container 建立、狀態查詢與發布則使用有界 batch。
-- 建立 container 前與發布前都會讀取帳號的 `content_publishing_limit`；若 24 小時滾動額度不足，只處理仍有額度的前段項目，其餘保留現有 checkpoint 並暫停等待重試。帳號未提供此 edge 時則由 `media_publish` 回應作最終判斷。
+- Instagram 的 Drive 下載、R2 上傳、Meta container 建立、狀態查詢與發布都逐支執行，所有 Meta 呼叫皆使用一般單筆 request。
+- Instagram 會保留每支影片的發布 checkpoint；若帳號的 24 小時滾動額度不足，則以 `media_publish` 的回應為最終判斷，失敗項目可在額度恢復後重試。
 - 批次中某支失敗時，後續未執行項目會暫停；已送出取消的項目會維持取消，不會被失敗處理改回可重試狀態。
-- Meta batch 缺少 child response 或後段 HTTP chunk 失敗時，已確認成功的 child response 仍會保存；未知結果不會被誤標成功。
+- 每支影片在 container 建立與發布後立即保存 checkpoint；單支失敗不會重送先前已完成的影片。
 - API 使用量頁同時顯示 Graph 子操作數與實際 HTTP 請求數，批次不再被誤算成單一操作。
 
 ---

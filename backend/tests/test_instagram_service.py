@@ -1,9 +1,7 @@
-import json
-
 import httpx
 import pytest
 
-from backend.app.services.instagram_service import InstagramBatchError, InstagramClient
+from backend.app.services.instagram_service import InstagramClient
 
 
 class FakeHttpClient:
@@ -22,8 +20,7 @@ class FakeHttpClient:
 
     def request(self, method, url, **kwargs):
         self.__class__.calls.append((method, url, kwargs))
-        response = self.__class__.responses.pop(0)
-        return response
+        return self.__class__.responses.pop(0)
 
 
 def response(payload, status=200):
@@ -37,206 +34,46 @@ def disable_usage_tracking(monkeypatch):
         "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_batch_response",
-        lambda *args, **kwargs: None,
-    )
 
 
-def test_batch_requests_chain_children_and_preserve_input_order(monkeypatch):
+def test_reel_flow_uses_separate_normal_requests(monkeypatch):
     FakeHttpClient.calls = []
     FakeHttpClient.responses = [
-        response(
-            [
-                {"code": 200, "body": json.dumps({"id": "container-1"})},
-                {"code": 200, "body": json.dumps({"id": "container-2"})},
-            ]
-        )
+        response({"id": "container-1"}),
+        response({"status_code": "FINISHED", "status": "Finished"}),
+        response({"id": "media-1"}),
     ]
     monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
-        lambda *args, **kwargs: None,
-    )
 
     client = InstagramClient("user-1", "token-1")
-    result = client.batch_request(
-        [
-            {"method": "GET", "path": "container-1", "params": {"fields": "status_code,status"}},
-            {"method": "POST", "path": "user-1/media_publish", "data": {"creation_id": "container-1"}},
-        ]
-    )
+    result = client.publish_reel("https://cdn.example/one.mp4", "caption")
 
-    assert [item["data"] for item in result] == [{"id": "container-1"}, {"id": "container-2"}]
+    assert result == {"creation_id": "container-1", "media_id": "media-1"}
+    assert [(method, url) for method, url, _ in FakeHttpClient.calls] == [
+        ("POST", "https://graph.instagram.com/v25.0/user-1/media"),
+        ("GET", "https://graph.instagram.com/v25.0/container-1"),
+        ("POST", "https://graph.instagram.com/v25.0/user-1/media_publish"),
+    ]
+    assert all("batch" not in kwargs.get("data", {}) for _, _, kwargs in FakeHttpClient.calls)
+
+
+def test_create_reel_container_sends_one_video(monkeypatch):
+    FakeHttpClient.calls = []
+    FakeHttpClient.responses = [response({"id": "container-1"})]
+    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
+
+    client = InstagramClient("user-1", "token-1")
+    assert client.create_reel_container("https://cdn.example/one.mp4", "one", False) == "container-1"
+
     method, url, kwargs = FakeHttpClient.calls[0]
     assert method == "POST"
-    assert url == "https://graph.instagram.com/v25.0"
-    entries = json.loads(kwargs["data"]["batch"])
-    assert entries[0]["relative_url"] == "container-1?fields=status_code%2Cstatus"
-    assert "depends_on" not in entries[0]
-    assert entries[1]["depends_on"] == entries[0]["name"]
-    assert "creation_id=container-1" in entries[1]["body"]
-    assert kwargs["data"]["access_token"] == "token-1"
-
-
-def test_reel_batch_operations_do_not_chain_independent_children(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [
-        response(
-            [
-                {"code": 200, "body": json.dumps({"id": "container-1"})},
-                {"code": 200, "body": json.dumps({"id": "container-2"})},
-            ]
-        )
-    ]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
-        lambda *args, **kwargs: None,
-    )
-
-    client = InstagramClient("user-1", "token-1")
-    assert client.create_reel_containers(
-        [
-            {"video_url": "https://cdn.example/one.mp4", "caption": "one"},
-            {"video_url": "https://cdn.example/two.mp4", "caption": "two"},
-        ]
-    ) == ["container-1", "container-2"]
-
-    entries = json.loads(FakeHttpClient.calls[0][2]["data"]["batch"])
-    assert all("depends_on" not in entry for entry in entries)
-
-
-def test_reel_batch_retries_only_rejected_publish_child(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [
-        response(
-            [
-                {"code": 200, "body": json.dumps({"id": "media-1"})},
-                {"code": 400, "body": json.dumps({"error": {"message": "temporary child failure"}})},
-            ]
-        ),
-        response({"id": "media-2"}),
-    ]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
-        lambda *args, **kwargs: None,
-    )
-
-    client = InstagramClient("user-1", "token-1")
-    assert client.publish_containers(["container-1", "container-2"]) == ["media-1", "media-2"]
-    assert len(FakeHttpClient.calls) == 2
-    assert FakeHttpClient.calls[1][1].endswith("/user-1/media_publish")
-    assert FakeHttpClient.calls[1][2]["data"]["creation_id"] == "container-2"
-
-
-def test_batch_requests_chunk_at_meta_limit_in_sequence(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [
-        response([{"code": 200, "body": json.dumps({"index": index})} for index in range(50)]),
-        response([{"code": 200, "body": json.dumps({"index": 50})}]),
-    ]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
-        lambda *args, **kwargs: None,
-    )
-
-    client = InstagramClient("user-1", "token-1")
-    result = client.batch_request([{"method": "GET", "path": f"media-{index}"} for index in range(51)])
-
-    assert len(FakeHttpClient.calls) == 2
-    assert len(json.loads(FakeHttpClient.calls[0][2]["data"]["batch"])) == 50
-    assert len(json.loads(FakeHttpClient.calls[1][2]["data"]["batch"])) == 1
-    assert [item["data"]["index"] for item in result] == list(range(51))
-
-
-def test_high_level_batch_preserves_partial_success_for_retry(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [
-        response(
-            [
-                {"code": 200, "body": json.dumps({"id": "container-1"})},
-                {"code": 400, "body": json.dumps({"error": {"message": "bad video"}})},
-            ]
-        )
-    ]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-    monkeypatch.setattr(
-        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
-        lambda *args, **kwargs: None,
-    )
-
-    client = InstagramClient("user-1", "token-1")
-    with pytest.raises(InstagramBatchError) as raised:
-        client.create_reel_containers(
-            [
-                {"video_url": "https://cdn.example/one.mp4", "caption": "one"},
-                {"video_url": "https://cdn.example/two.mp4", "caption": "two"},
-            ]
-        )
-
-    assert raised.value.index == 1
-    assert raised.value.results[0]["ok"] is True
-    assert raised.value.results[0]["data"]["id"] == "container-1"
-    assert raised.value.results[1]["ok"] is False
-
-
-def test_batch_missing_child_response_is_an_explicit_failure(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [response([{"code": 200, "body": json.dumps({"id": "container-1"})}])]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-
-    client = InstagramClient("user-1", "token-1")
-    with pytest.raises(InstagramBatchError) as raised:
-        client.create_reel_containers(
-            [
-                {"video_url": "https://cdn.example/one.mp4"},
-                {"video_url": "https://cdn.example/two.mp4"},
-            ]
-        )
-
-    assert raised.value.index == 1
-    assert raised.value.results[0]["data"]["id"] == "container-1"
-    assert raised.value.results[1]["ok"] is False
-    assert len(FakeHttpClient.calls) == 1
-
-
-def test_later_chunk_transport_failure_keeps_earlier_results(monkeypatch):
-    FakeHttpClient.calls = []
-    FakeHttpClient.responses = [
-        response([{"code": 200, "body": json.dumps({"id": f"container-{index}"})} for index in range(50)]),
-        response({"error": {"message": "batch unavailable"}}, status=503),
-    ]
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
-
-    client = InstagramClient("user-1", "token-1")
-    with pytest.raises(InstagramBatchError) as raised:
-        client.create_reel_containers([{"video_url": f"https://cdn.example/{index}.mp4"} for index in range(51)])
-
-    assert raised.value.index == 50
-    assert len(raised.value.results) == 50
-    assert all(result["ok"] for result in raised.value.results)
-
-
-def test_container_error_reports_original_batch_index(monkeypatch):
-    client = InstagramClient("user-1", "token-1")
-    monkeypatch.setattr(
-        client,
-        "get_container_statuses",
-        lambda ids: [
-            {"status_code": "FINISHED", "status": "Finished"},
-            {"status_code": "ERROR", "status": "Video processing failed"},
-        ],
-    )
-
-    with pytest.raises(InstagramBatchError) as raised:
-        client.wait_for_containers(["container-1", "container-2"], poll_interval=0, max_polls=1)
-
-    assert raised.value.index == 1
-    assert raised.value.results[0]["ok"] is True
-    assert raised.value.results[1]["error"] == "Video processing failed"
+    assert url.endswith("/user-1/media")
+    assert kwargs["data"] == {
+        "media_type": "REELS",
+        "video_url": "https://cdn.example/one.mp4",
+        "caption": "one",
+        "share_to_feed": "false",
+    }
 
 
 def test_content_publishing_limit_uses_live_account_capacity(monkeypatch):
