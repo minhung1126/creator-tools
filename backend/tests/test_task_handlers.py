@@ -15,15 +15,17 @@ def make_repo(tmp_path):
 def create_task(repo, *, platform, operation, payload=None, checkpoint=None):
     created = repo.create_batch_and_tasks(
         {"platform": platform, "operation": operation, "failure_policy": "continue"},
-        [{
-            "platform": platform,
-            "operation": operation,
-            "queue_lane": platform,
-            "video_id": "video-1",
-            "video_title": "測試影片",
-            "payload": payload or {},
-            "checkpoint": checkpoint or {},
-        }],
+        [
+            {
+                "platform": platform,
+                "operation": operation,
+                "queue_lane": platform,
+                "video_id": "video-1",
+                "video_title": "測試影片",
+                "payload": payload or {},
+                "checkpoint": checkpoint or {},
+            }
+        ],
     )
     task = repo.claim_next(platform)
     assert task["id"] == created["tasks"][0]["id"]
@@ -48,7 +50,9 @@ def test_instagram_media_checkpoint_never_calls_publish_again(monkeypatch, tmp_p
         def publish_container(self, *_args):
             raise AssertionError("published media must not be published again")
 
-    result = process_instagram_reel_task(task_id, credentials=object(), client=NoPublishClient(), r2=object(), repository=repo)
+    result = process_instagram_reel_task(
+        task_id, credentials=object(), client=NoPublishClient(), r2=object(), repository=repo
+    )
 
     assert result["status"] == "succeeded"
     assert repo.get_task_internal(task_id)["checkpoint"]["media_id"] == "media-1"
@@ -136,7 +140,9 @@ def test_youtube_metadata_cancel_before_update_stops_before_external_work(monkey
     fetch_calls = []
     update_calls = []
     monkeypatch.setattr(task_handlers, "fetch_video_details", lambda *args: fetch_calls.append(args) or [])
-    monkeypatch.setattr(task_handlers, "update_single_video_metadata", lambda *args, **kwargs: update_calls.append(args))
+    monkeypatch.setattr(
+        task_handlers, "update_single_video_metadata", lambda *args, **kwargs: update_calls.append(args)
+    )
 
     result = process_youtube_metadata_task(task_id, credentials=object(), repository=repo)
 
@@ -160,7 +166,9 @@ def test_youtube_public_checkpoint_retries_cleanup_without_republishing(monkeypa
         "fetch_video_details",
         lambda *_args: [{"id": "video-1", "snippet": {}, "status": {"privacyStatus": "private"}}],
     )
-    monkeypatch.setattr(task_handlers, "set_video_public", lambda *args, **kwargs: set_calls.append(args) or {"id": "video-1"})
+    monkeypatch.setattr(
+        task_handlers, "set_video_public", lambda *args, **kwargs: set_calls.append(args) or {"id": "video-1"}
+    )
 
     def fail_cleanup(*args, **kwargs):
         remove_calls.append(args)

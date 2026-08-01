@@ -177,4 +177,3 @@ class Database:
 
 database = Database()
 database.initialize()
-

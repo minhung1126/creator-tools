@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Recover durable tasks before starting the two worker lanes."""

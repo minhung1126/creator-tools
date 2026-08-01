@@ -48,7 +48,9 @@ def _instagram_dependencies(credentials: Optional[Credentials], client: Any, r2:
 
 def _error_text(exc: Exception) -> str:
     text = str(exc).strip() or type(exc).__name__
-    if len(text) > 240 or any(marker in text.casefold() for marker in ("token", "secret", "authorization", "response body")):
+    if len(text) > 240 or any(
+        marker in text.casefold() for marker in ("token", "secret", "authorization", "response body")
+    ):
         return "外部服務處理失敗，請檢查設定後重試。"
     return text
 
@@ -75,7 +77,9 @@ def _instagram_cleanup(
     if not item.get("drive_moved"):
         context.update(stage="moving_drive", progress_percent=96)
         try:
-            source_folder_id = extract_drive_folder_id(item.get("source_folder_id") or job.get("source_folder_id") or job.get("folder"))
+            source_folder_id = extract_drive_folder_id(
+                item.get("source_folder_id") or job.get("source_folder_id") or job.get("folder")
+            )
             if not source_folder_id:
                 raise RuntimeError("找不到 Google Drive 來源資料夾 ID，無法移入 Published")
             published_folder_id = item.get("published_folder_id") or job.get("published_folder_id")
@@ -151,11 +155,28 @@ def process_instagram_reel_task(
             # A media id is the durable proof of publication.  Retries only
             # execute Drive/R2 cleanup from this point onward.
             warnings = _instagram_cleanup(context, item=item, job=job, credentials=credentials, r2=r2)
-            checkpoint = {key: item.get(key) for key in (
-                "media_id", "drive_moved", "drive_moved_at", "published_folder_id", "drive_move_error",
-                "r2_deleted", "r2_delete_error", "object_key", "public_url", "creation_id", "preflight",
-            ) if key in item}
-            context.checkpoint(checkpoint, stage="completed" if not warnings else "cleaning_r2", progress_percent=100 if not warnings else 98)
+            checkpoint = {
+                key: item.get(key)
+                for key in (
+                    "media_id",
+                    "drive_moved",
+                    "drive_moved_at",
+                    "published_folder_id",
+                    "drive_move_error",
+                    "r2_deleted",
+                    "r2_delete_error",
+                    "object_key",
+                    "public_url",
+                    "creation_id",
+                    "preflight",
+                )
+                if key in item
+            }
+            context.checkpoint(
+                checkpoint,
+                stage="completed" if not warnings else "cleaning_r2",
+                progress_percent=100 if not warnings else 98,
+            )
             return context.finish(
                 "succeeded_with_warnings" if warnings else "succeeded",
                 stage="completed" if not warnings else "cleaning_r2",
@@ -164,8 +185,13 @@ def process_instagram_reel_task(
                 cancel_too_late=bool(task.get("cancel_requested_at")),
             )
 
-        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", str(item.get("file_name") or "reel.mp4")).strip("-._") or "reel.mp4"
-        object_key = item.get("object_key") or f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/{task['sequence_in_batch']:03d}-{item.get('file_id')}-{safe_name}"
+        safe_name = (
+            re.sub(r"[^A-Za-z0-9._-]+", "-", str(item.get("file_name") or "reel.mp4")).strip("-._") or "reel.mp4"
+        )
+        object_key = (
+            item.get("object_key")
+            or f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/{task['sequence_in_batch']:03d}-{item.get('file_id')}-{safe_name}"
+        )
         item["object_key"] = object_key
         if not item.get("public_url"):
             context.raise_if_cancel_requested()
@@ -207,18 +233,24 @@ def process_instagram_reel_task(
         context.raise_if_cancel_requested()
         item["media_id"] = client.publish_container(item["creation_id"])
         item["published_at"] = _now()
-        context.checkpoint({"media_id": item["media_id"], "published_at": item["published_at"]}, stage="published", progress_percent=94)
+        context.checkpoint(
+            {"media_id": item["media_id"], "published_at": item["published_at"]}, stage="published", progress_percent=94
+        )
         cancel_too_late = context.is_cancel_requested()
         warnings = _instagram_cleanup(context, item=item, job=job, credentials=credentials, r2=r2)
-        context.checkpoint({
-            "media_id": item["media_id"],
-            "drive_moved": item.get("drive_moved", False),
-            "drive_moved_at": item.get("drive_moved_at"),
-            "published_folder_id": item.get("published_folder_id"),
-            "drive_move_error": item.get("drive_move_error"),
-            "r2_deleted": item.get("r2_deleted", False),
-            "r2_delete_error": item.get("r2_delete_error"),
-        }, stage="completed" if not warnings else "cleaning_r2", progress_percent=100 if not warnings else 98)
+        context.checkpoint(
+            {
+                "media_id": item["media_id"],
+                "drive_moved": item.get("drive_moved", False),
+                "drive_moved_at": item.get("drive_moved_at"),
+                "published_folder_id": item.get("published_folder_id"),
+                "drive_move_error": item.get("drive_move_error"),
+                "r2_deleted": item.get("r2_deleted", False),
+                "r2_delete_error": item.get("r2_delete_error"),
+            },
+            stage="completed" if not warnings else "cleaning_r2",
+            progress_percent=100 if not warnings else 98,
+        )
         return context.finish(
             "succeeded_with_warnings" if warnings else "succeeded",
             stage="completed" if not warnings else "cleaning_r2",
@@ -230,7 +262,13 @@ def process_instagram_reel_task(
         if item.get("media_id"):
             warnings = _instagram_cleanup(context, item=item, job=job, credentials=credentials, r2=r2)
             context.checkpoint(
-                {"media_id": item.get("media_id"), "drive_moved": item.get("drive_moved", False), "r2_deleted": item.get("r2_deleted", False), "drive_move_error": item.get("drive_move_error"), "r2_delete_error": item.get("r2_delete_error")},
+                {
+                    "media_id": item.get("media_id"),
+                    "drive_moved": item.get("drive_moved", False),
+                    "r2_deleted": item.get("r2_deleted", False),
+                    "drive_move_error": item.get("drive_move_error"),
+                    "r2_delete_error": item.get("r2_delete_error"),
+                },
                 stage="completed" if not warnings else "cleaning_r2",
                 progress_percent=100 if not warnings else 98,
             )
@@ -252,7 +290,11 @@ def process_instagram_reel_task(
             except Exception as exc:
                 warning = _error_text(exc)
                 warnings.append(warning)
-                context.checkpoint({"r2_deleted": False, "r2_delete_error": warning}, stage="canceled_with_warnings", progress_percent=0)
+                context.checkpoint(
+                    {"r2_deleted": False, "r2_delete_error": warning},
+                    stage="canceled_with_warnings",
+                    progress_percent=0,
+                )
         return context.finish(
             "canceled_with_warnings" if warnings else "canceled",
             error="；".join(warnings) if warnings else None,
@@ -261,7 +303,13 @@ def process_instagram_reel_task(
     except ReelValidationError as exc:
         return context.finish("skipped", stage="skipped", progress_percent=100, error=str(exc), retryable=False)
     except Exception as exc:
-        return context.finish("failed", stage="failed", progress_percent=task.get("progress_percent", 0), error=_error_text(exc), retryable=True)
+        return context.finish(
+            "failed",
+            stage="failed",
+            progress_percent=task.get("progress_percent", 0),
+            error=_error_text(exc),
+            retryable=True,
+        )
 
 
 def process_instagram_reel_tasks(
@@ -655,7 +703,9 @@ def process_youtube_metadata_task(
     payload = task.get("payload") or {}
     credentials = credentials or get_persistent_google_credentials()
     if credentials is None:
-        return context.finish("paused", stage="paused", error="找不到持久化 Google credential，請重新登入後重試。", retryable=True)
+        return context.finish(
+            "paused", stage="paused", error="找不到持久化 Google credential，請重新登入後重試。", retryable=True
+        )
     try:
         context.raise_if_cancel_requested()
         context.update(stage="validating_video", progress_percent=20)
@@ -663,7 +713,13 @@ def process_youtube_metadata_task(
         context.raise_if_cancel_requested()
         current = next((item for item in details if item.get("id") == task.get("video_id")), None)
         if not current:
-            return context.finish("skipped", stage="skipped", progress_percent=100, error="YouTube 找不到此影片或目前帳號無權存取。", retryable=False)
+            return context.finish(
+                "skipped",
+                stage="skipped",
+                progress_percent=100,
+                error="YouTube 找不到此影片或目前帳號無權存取。",
+                retryable=False,
+            )
         context.update(stage="updating_metadata", progress_percent=70)
         update_single_video_metadata(
             credentials,
@@ -672,7 +728,9 @@ def process_youtube_metadata_task(
             str(payload.get("new_description") or ""),
             current_snippet=current.get("snippet") or {},
         )
-        context.checkpoint({"metadata_updated_at": _now(), "title_applied": True}, stage="completed", progress_percent=100)
+        context.checkpoint(
+            {"metadata_updated_at": _now(), "title_applied": True}, stage="completed", progress_percent=100
+        )
         cancel_too_late = context.is_cancel_requested()
         return context.finish("succeeded", stage="completed", progress_percent=100, cancel_too_late=cancel_too_late)
     except TaskCancellationRequested:
@@ -693,7 +751,9 @@ def process_youtube_publish_cleanup_task(
     checkpoint = dict(task.get("checkpoint") or {})
     credentials = credentials or get_persistent_google_credentials()
     if credentials is None:
-        return context.finish("paused", stage="paused", error="找不到持久化 Google credential，請重新登入後重試。", retryable=True)
+        return context.finish(
+            "paused", stage="paused", error="找不到持久化 Google credential，請重新登入後重試。", retryable=True
+        )
     try:
         context.raise_if_cancel_requested()
         current_details = fetch_video_details(credentials, [task.get("video_id")])
@@ -701,7 +761,13 @@ def process_youtube_publish_cleanup_task(
             context.raise_if_cancel_requested()
         current_video = next((item for item in current_details if item.get("id") == task.get("video_id")), None)
         if not current_video:
-            return context.finish("skipped", stage="skipped", progress_percent=100, error="YouTube 找不到此影片或目前帳號無權存取。", retryable=False)
+            return context.finish(
+                "skipped",
+                stage="skipped",
+                progress_percent=100,
+                error="YouTube 找不到此影片或目前帳號無權存取。",
+                retryable=False,
+            )
         if not checkpoint.get("privacy_updated_at"):
             context.raise_if_cancel_requested()
             context.update(stage="setting_public", progress_percent=35)
@@ -724,7 +790,18 @@ def process_youtube_publish_cleanup_task(
         return context.finish("canceled", message="取消要求在 YouTube 設為 public 前送達，未進行公開。")
     except Exception as exc:
         checkpoint["playlist_cleanup_error"] = _error_text(exc)
-        context.checkpoint(checkpoint, stage="removing_playlist_item" if checkpoint.get("privacy_updated_at") else "setting_public", progress_percent=80 if checkpoint.get("privacy_updated_at") else 35)
+        context.checkpoint(
+            checkpoint,
+            stage="removing_playlist_item" if checkpoint.get("privacy_updated_at") else "setting_public",
+            progress_percent=80 if checkpoint.get("privacy_updated_at") else 35,
+        )
         if checkpoint.get("privacy_updated_at"):
-            return context.finish("succeeded_with_warnings", stage="removing_playlist_item", progress_percent=80, error=_error_text(exc), retryable=True, cancel_too_late=context.is_cancel_requested())
+            return context.finish(
+                "succeeded_with_warnings",
+                stage="removing_playlist_item",
+                progress_percent=80,
+                error=_error_text(exc),
+                retryable=True,
+                cancel_too_late=context.is_cancel_requested(),
+            )
         return context.finish("failed", stage="failed", error=_error_text(exc), retryable=True)

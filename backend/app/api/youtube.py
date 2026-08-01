@@ -277,7 +277,9 @@ def run_batch_metadata_update_sync_legacy(payload: BatchUpdateInput, creds: Cred
 
 
 @router.post("/publish-and-cleanup-legacy")
-def run_publish_and_cleanup_sync_legacy(payload: PublishCleanupInput, creds: Credentials = Depends(require_credentials)):
+def run_publish_and_cleanup_sync_legacy(
+    payload: PublishCleanupInput, creds: Credentials = Depends(require_credentials)
+):
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
@@ -416,18 +418,51 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             matches = [row for row in sheet_rows if matches_team_person(row, normalized_team, person)]
             row, match_error = resolve_assignment_row(matches, title_column, description_column)
             if match_error == "not_found":
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料"})
+                prepared.append(
+                    {
+                        "video_id": video_id,
+                        "person": person,
+                        "status": "skipped",
+                        "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料",
+                    }
+                )
             elif match_error == "conflict":
-                prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同"})
+                prepared.append(
+                    {
+                        "video_id": video_id,
+                        "person": person,
+                        "status": "skipped",
+                        "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同",
+                    }
+                )
             else:
                 new_title = normalize_text(row.get(title_column) or "")
                 new_description = str(row.get(description_column) or "")
                 if not new_title:
-                    prepared.append({"video_id": video_id, "person": person, "status": "skipped", "reason": f"工作表的 {title_column} 為空白"})
+                    prepared.append(
+                        {
+                            "video_id": video_id,
+                            "person": person,
+                            "status": "skipped",
+                            "reason": f"工作表的 {title_column} 為空白",
+                        }
+                    )
                 else:
-                    prepared.append({"video_id": video_id, "person": person, "status": "pending", "new_title": new_title, "new_description": new_description})
+                    prepared.append(
+                        {
+                            "video_id": video_id,
+                            "person": person,
+                            "status": "pending",
+                            "new_title": new_title,
+                            "new_description": new_description,
+                        }
+                    )
 
-        details_map = {item["id"]: item for item in fetch_video_details(creds, [item["video_id"] for item in prepared]) if item.get("id")}
+        details_map = {
+            item["id"]: item
+            for item in fetch_video_details(creds, [item["video_id"] for item in prepared])
+            if item.get("id")
+        }
         specs = []
         for index, item in enumerate(prepared, start=1):
             detail = details_map.get(item["video_id"])
@@ -491,7 +526,15 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
     try:
         raw_items = fetch_playlist_items(creds, playlist_id)
         if not raw_items:
-            return {"accepted": True, "batch_id": None, "task_ids": [], "total_count": 0, "queued_count": 0, "skipped_count": 0, "message": "To-Post 播放清單目前沒有影片。"}
+            return {
+                "accepted": True,
+                "batch_id": None,
+                "task_ids": [],
+                "total_count": 0,
+                "queued_count": 0,
+                "skipped_count": 0,
+                "message": "To-Post 播放清單目前沒有影片。",
+            }
         playlist_item_map: dict[str, str] = {}
         api_order: list[str] = []
         title_map: dict[str, str] = {}
@@ -504,7 +547,9 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
             title_map[video_id] = item.get("snippet", {}).get("title", "")
         details_map = {item["id"]: item for item in fetch_video_details(creds, api_order) if item.get("id")}
         original_positions = {video_id: index for index, video_id in enumerate(api_order)}
-        ordered_ids = sorted(api_order, key=lambda video_id: upload_time_sort_key(video_id, details_map, original_positions))
+        ordered_ids = sorted(
+            api_order, key=lambda video_id: upload_time_sort_key(video_id, details_map, original_positions)
+        )
         specs = []
         for index, video_id in enumerate(ordered_ids, start=1):
             detail = details_map.get(video_id)
@@ -516,7 +561,9 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
                     "queue_lane": "youtube",
                     "sequence_in_batch": index,
                     "video_id": video_id,
-                    "video_title": title_map.get(video_id) or ((detail or {}).get("snippet") or {}).get("title") or video_id,
+                    "video_title": title_map.get(video_id)
+                    or ((detail or {}).get("snippet") or {}).get("title")
+                    or video_id,
                     "thumbnail_url": _youtube_thumbnail(detail or {}, video_id),
                     "status": "skipped" if missing else "queued",
                     "stage": "skipped" if missing else "queued",

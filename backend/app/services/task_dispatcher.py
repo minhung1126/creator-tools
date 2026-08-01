@@ -45,7 +45,9 @@ class TaskDispatcher:
             elif operation == "youtube.metadata_update":
                 result = process_youtube_metadata_task(task_id, credentials=credentials, repository=self.repository)
             elif operation == "youtube.publish_cleanup":
-                result = process_youtube_publish_cleanup_task(task_id, credentials=credentials, repository=self.repository)
+                result = process_youtube_publish_cleanup_task(
+                    task_id, credentials=credentials, repository=self.repository
+                )
             else:
                 result = self.repository.update_task(
                     task_id,
