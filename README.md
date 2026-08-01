@@ -29,7 +29,8 @@
    - 使用與 YouTube 相同的 Sheet 團體／人物選擇邏輯，套用指定欄位的 Instagram 內文。
    - 下載 Drive 影片後上傳至 Cloudflare R2，驗證公開 HTTPS URL，再建立並發布 Reels。
    - 使用 **Instagram API with Instagram Login** 與 `graph.instagram.com`，不需連結 Facebook 粉絲專頁。
-   - 支援逐片選人、批量套用、分享到動態消息、持久化工作結果與 retry。
+   - Instagram 發布成功後，會在來源 Drive 資料夾下建立／使用 `Published` 子資料夾並移入原始影片；同時以 Drive `file_id` 與持久化工作結果防止重複發布。
+   - 支援逐片選人、批量套用、分享到動態消息、持久化工作結果與 retry；搬移 Drive 或清理 R2 失敗時只重試後續清理，不重複發布 Instagram。
 
 5. **♻️ OAuth Token 自動管理**
    - Google Access Token 到期前 5 分鐘自動刷新，最新 token 與 refresh token 加密保存於 `data/credential_store.json`。

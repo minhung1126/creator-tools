@@ -14,6 +14,8 @@ DRIVE_THUMBNAIL_SIZE = 1600
 DRIVE_SOURCE_THUMBNAIL_MAX_BYTES = 512 * 1024 * 1024
 DRIVE_SOURCE_THUMBNAIL_TIMEOUT_SECONDS = 90
 DRIVE_THUMBNAIL_CACHE_DIR = Path("data") / "drive-thumbnails"
+DRIVE_FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+PUBLISHED_FOLDER_NAME = "Published"
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ def list_drive_videos(credentials, folder_url_or_id: str):
             .list(
                 q=f"'{folder_id}' in parents and trashed = false and mimeType contains 'video/'",
                 fields="nextPageToken,files(id,name,mimeType,size,createdTime,videoMediaMetadata,webViewLink,thumbnailLink)",
-                orderBy="createdTime asc",
+                orderBy="name asc",
                 pageSize=100,
                 pageToken=page_token,
             )
@@ -66,6 +68,94 @@ def list_drive_videos(credentials, folder_url_or_id: str):
         if not page_token:
             break
     return items
+
+
+def ensure_published_folder(
+    credentials,
+    source_folder_url_or_id: str,
+    folder_name: str = PUBLISHED_FOLDER_NAME,
+) -> str:
+    """Return the Published child folder, creating it once when necessary."""
+    source_folder_id = extract_drive_folder_id(source_folder_url_or_id)
+    if not source_folder_id:
+        raise ValueError("Google Drive 來源資料夾 ID 不得為空白")
+
+    service = build("drive", "v3", credentials=credentials)
+    escaped_name = folder_name.replace("\\", "\\\\").replace("'", "\\'")
+    response = (
+        service.files()
+        .list(
+            q=(
+                f"'{source_folder_id}' in parents and trashed = false and "
+                f"mimeType = '{DRIVE_FOLDER_MIME_TYPE}' and name = '{escaped_name}'"
+            ),
+            fields="files(id,name,parents)",
+            orderBy="createdTime asc",
+            pageSize=100,
+        )
+        .execute()
+    )
+    existing = next((item.get("id") for item in response.get("files", []) if item.get("id")), None)
+    if existing:
+        return existing
+
+    created = (
+        service.files()
+        .create(
+            body={
+                "name": folder_name,
+                "mimeType": DRIVE_FOLDER_MIME_TYPE,
+                "parents": [source_folder_id],
+            },
+            fields="id,parents",
+            supportsAllDrives=True,
+        )
+        .execute()
+    )
+    folder_id = created.get("id")
+    if not folder_id:
+        raise RuntimeError("Google Drive Published 資料夾建立後沒有回傳 ID")
+    return folder_id
+
+
+def move_drive_file_to_folder(
+    credentials,
+    file_id: str,
+    source_folder_id: str,
+    destination_folder_id: str,
+) -> dict:
+    """Move a Drive file into a destination folder idempotently."""
+    if not file_id or not source_folder_id or not destination_folder_id:
+        raise ValueError("Google Drive 檔案與來源／目的資料夾 ID 皆不可為空白")
+    if source_folder_id == destination_folder_id:
+        raise ValueError("Google Drive 來源與目的資料夾不可相同")
+
+    service = build("drive", "v3", credentials=credentials)
+    metadata = service.files().get(fileId=file_id, fields="id,parents", supportsAllDrives=True).execute()
+    parents = set(metadata.get("parents") or [])
+    if destination_folder_id in parents:
+        if source_folder_id in parents:
+            return (
+                service.files()
+                .update(
+                    fileId=file_id,
+                    removeParents=source_folder_id,
+                    fields="id,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+        return metadata
+
+    update_kwargs = {
+        "fileId": file_id,
+        "addParents": destination_folder_id,
+        "fields": "id,parents",
+        "supportsAllDrives": True,
+    }
+    if source_folder_id in parents:
+        update_kwargs["removeParents"] = source_folder_id
+    return service.files().update(**update_kwargs).execute()
 
 
 def _large_drive_thumbnail_link(thumbnail_link: str) -> str:
@@ -193,10 +283,14 @@ def _render_drive_source_thumbnail(credentials, file_id: str, metadata: dict):
 def get_drive_video_thumbnail(credentials, file_id: str, *, prefer_source: bool = False):
     """Fetch a Drive thumbnail, optionally preferring a frame from the original video."""
     service = build("drive", "v3", credentials=credentials)
-    metadata = service.files().get(
-        fileId=file_id,
-        fields="thumbnailLink,size,headRevisionId,modifiedTime",
-    ).execute()
+    metadata = (
+        service.files()
+        .get(
+            fileId=file_id,
+            fields="thumbnailLink,size,headRevisionId,modifiedTime",
+        )
+        .execute()
+    )
     if prefer_source:
         source_thumbnail = _render_drive_source_thumbnail(credentials, file_id, metadata)
         if source_thumbnail:
