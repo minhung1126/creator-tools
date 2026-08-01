@@ -42,6 +42,79 @@ def test_atomic_batch_enqueue_assigns_contiguous_lane_sequences(tmp_path):
     assert len({task["id"] for task in created["tasks"]}) == 5
 
 
+def test_list_tasks_shows_oldest_submitted_task_first(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        [
+            {
+                **make_specs(1)[0],
+                "id": "latest-task",
+                "created_at": "2026-01-01T00:00:03+00:00",
+                "sequence_in_batch": 2,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "oldest-task",
+                "created_at": "2026-01-01T00:00:01+00:00",
+                "sequence_in_batch": 1,
+            },
+        ],
+    )
+
+    items, total = repo.list_tasks(limit=100)
+
+    assert total == 2
+    assert [task["id"] for task in items] == ["oldest-task", "latest-task"]
+    assert [task["id"] for task in repo.get_batch_internal(created["batch"]["id"])["tasks"]] == [
+        "oldest-task",
+        "latest-task",
+    ]
+
+
+def test_retry_batch_requeues_and_claims_tasks_in_batch_order(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        [
+            {
+                **make_specs(1)[0],
+                "id": "retry-third",
+                "sequence_in_batch": 3,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "retry-first",
+                "sequence_in_batch": 1,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "retry-second",
+                "sequence_in_batch": 2,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+        ],
+    )
+
+    retried = repo.retry_batch(created["batch"]["id"])
+
+    assert [task["id"] for task in retried] == ["retry-first", "retry-second", "retry-third"]
+    assert [task["queue_sequence"] for task in retried] == [4, 5, 6]
+    assert [repo.claim_next("youtube")["id"] for _ in range(3)] == [
+        "retry-first",
+        "retry-second",
+        "retry-third",
+    ]
+
+
 def test_lanes_are_independent_and_claim_keeps_order(tmp_path):
     repo = make_repo(tmp_path)
     instagram = repo.create_batch_and_tasks(

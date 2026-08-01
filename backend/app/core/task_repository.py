@@ -597,7 +597,7 @@ class TaskRepository:
         with self.db.connection() as connection:
             total = int(connection.execute(f"SELECT COUNT(*) AS count FROM tasks {where}", values).fetchone()["count"])
             rows = connection.execute(
-                f"SELECT * FROM tasks {where} ORDER BY created_at DESC, sequence_in_batch DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM tasks {where} ORDER BY created_at ASC, queue_sequence ASC, sequence_in_batch ASC, id ASC LIMIT ? OFFSET ?",
                 [*values, safe_limit, safe_offset],
             ).fetchall()
             public = []
@@ -1132,7 +1132,7 @@ class TaskRepository:
     def retry_batch(self, batch_id: str) -> list[dict[str, Any]]:
         with self.db.transaction() as connection:
             rows = connection.execute(
-                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY sequence_in_batch", (batch_id,)
+                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY sequence_in_batch ASC, id ASC", (batch_id,)
             ).fetchall()
             eligible = [task for task in (_task_dict(row) for row in rows) if self._eligible_for_retry(task)]
             if not eligible:

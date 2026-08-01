@@ -4,9 +4,16 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import BatchDetail from '../components/BatchDetail';
 import TaskDetail from '../components/TaskDetail';
 import { useActivityCenter } from '../hooks/useActivityCenter';
-import { TASK_ACTIVE_STATUSES, TASK_NEEDS_ATTENTION, taskOperationLabel, taskStatusLabel } from '../utils/taskStatus';
+import {
+  TASK_ACTIVE_STATUSES,
+  TASK_NEEDS_ATTENTION,
+  TASK_UNFINISHED_QUEUE_STATUSES,
+  taskOperationLabel,
+  taskStatusLabel,
+} from '../utils/taskStatus';
 
 const filters = [
+  ['unfinished', '未完成隊列'],
   ['all', '全部'],
   ['active', '執行中'],
   ['queued', '排隊中'],
@@ -22,6 +29,26 @@ function isCompleted(task) {
 
 function isCanceled(task) {
   return ['canceled', 'canceled_with_warnings'].includes(task.status);
+}
+
+function taskOrderValue(value) {
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function taskSequenceValue(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+}
+
+function compareTaskSubmissionOrder(left, right) {
+  const createdOrder = taskOrderValue(left.created_at) - taskOrderValue(right.created_at);
+  if (createdOrder) return createdOrder;
+  const queueOrder = taskSequenceValue(left.queue_sequence) - taskSequenceValue(right.queue_sequence);
+  if (queueOrder) return queueOrder;
+  const batchOrder = taskSequenceValue(left.sequence_in_batch) - taskSequenceValue(right.sequence_in_batch);
+  if (batchOrder) return batchOrder;
+  return String(left.id || '').localeCompare(String(right.id || ''));
 }
 
 function deriveBatchStatus(batchTasks) {
@@ -41,7 +68,7 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
   const {
     tasks, summary, loading, refreshing, error, refresh, cancelTask, retryTask, cancelAll, cancelBatch, retryBatch,
   } = useActivityCenter();
-  const [filter, setFilter] = useState('all');
+  const [filter, setFilter] = useState('unfinished');
   const [platform, setPlatform] = useState('all');
   const [operation, setOperation] = useState('all');
   const [grouped, setGrouped] = useState(false);
@@ -67,10 +94,12 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
     element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focusedBatchId]);
 
-  const operationOptions = useMemo(() => [...new Set(tasks.map((task) => task.operation).filter(Boolean))], [tasks]);
-  const filteredTasks = useMemo(() => tasks.filter((task) => {
+  const orderedTasks = useMemo(() => [...tasks].sort(compareTaskSubmissionOrder), [tasks]);
+  const operationOptions = useMemo(() => [...new Set(orderedTasks.map((task) => task.operation).filter(Boolean))], [orderedTasks]);
+  const filteredTasks = useMemo(() => orderedTasks.filter((task) => {
     if (platform !== 'all' && task.platform !== platform) return false;
     if (operation !== 'all' && task.operation !== operation) return false;
+    if (filter === 'unfinished' && !TASK_UNFINISHED_QUEUE_STATUSES.includes(task.status)) return false;
     if (filter === 'active' && !TASK_ACTIVE_STATUSES.includes(task.status)) return false;
     if (filter === 'queued' && task.status !== 'queued') return false;
     if (filter === 'cancel_requested' && task.status !== 'cancel_requested') return false;
@@ -78,7 +107,7 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
     if (filter === 'completed' && !isCompleted(task)) return false;
     if (filter === 'canceled' && !isCanceled(task)) return false;
     return true;
-  }), [filter, operation, platform, tasks]);
+  }), [filter, operation, platform, orderedTasks]);
 
   const groupedTasks = useMemo(() => filteredTasks.reduce((groups, task) => {
     const key = task.batch_id || 'no-batch';
@@ -134,7 +163,7 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
         onCancel={() => setCancelAllOpen(false)}
       />
       <div className="task-queue-header">
-        <div><div className="section-header"><ListTodo size={24} color="var(--primary)" /><h1>任務隊列</h1></div><p className="section-desc">每支影片都是獨立任務；批次只用來檢視順序與整批操作。</p></div>
+        <div><div className="section-header"><ListTodo size={24} color="var(--primary)" /><h1>任務隊列</h1></div><p className="section-desc">依送出順序由最早到最晚顯示；批次重試也會依原順序重新排入。</p></div>
         <div className="task-queue-header-actions"><button className="btn btn-secondary" type="button" onClick={() => refresh()} disabled={refreshing}><RefreshCw size={15} className={refreshing ? 'spin' : ''} />重新整理</button><button className="btn btn-danger" type="button" disabled={!unfinishedTasks.length || busyId === 'all'} onClick={() => setCancelAllOpen(true)}><XCircle size={15} />取消所有未完成任務</button></div>
       </div>
       <div className="task-summary-strip"><span>未完成 <strong>{summary?.tasks?.active ?? activeTasks.length}</strong></span><span>需要處理 <strong>{(summary?.tasks?.paused || 0) + (summary?.tasks?.failed || 0)}</strong></span><span>已完成 <strong>{summary?.tasks?.completed || 0}</strong></span><span>通知未讀 <strong>{summary?.unread_notification_count || 0}</strong></span></div>
