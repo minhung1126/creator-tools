@@ -6,11 +6,10 @@ import {
   Settings,
   CheckCircle2,
   AlertTriangle,
-  FileSpreadsheet,
-  PlaySquare,
   ArrowRight,
   Sparkles,
 } from 'lucide-react';
+import { SourceLinkButton } from '../components/SourceLinkInput';
 
 export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
   return (
@@ -27,12 +26,12 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           <h3 style={{ fontSize: '1rem', color: '#fff' }}>{authUser ? authUser.email : '尚未連線 Google 帳號'}</h3>
         </div>
         <div className="glass-panel" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>主要設定試算表</span><FileSpreadsheet size={18} color="var(--primary)" /></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>主要設定試算表</span><SourceLinkButton value={sysSettings.default_spreadsheet_id} sourceType="spreadsheet" label="開啟主要設定試算表" /></div>
           <h3 style={{ fontSize: '1rem', color: '#fff', wordBreak: 'break-all' }}>{sysSettings.default_spreadsheet_id || '未設定'}</h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>頁面內再選擇要使用的工作表與欄位</p>
         </div>
         <div className="glass-panel" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>預設 To-Post 播放清單</span><PlaySquare size={18} color="var(--secondary)" /></div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>預設 To-Post 播放清單</span><SourceLinkButton value={sysSettings.default_playlist_id} sourceType="youtube-playlist" label="開啟預設 To-Post 播放清單" /></div>
           <h3 style={{ fontSize: '1rem', color: '#fff', wordBreak: 'break-all' }}>{sysSettings.default_playlist_id || '未設定'}</h3>
         </div>
       </div>
