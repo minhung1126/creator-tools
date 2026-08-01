@@ -51,14 +51,10 @@ def team_option_label(team: str) -> str:
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
     """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:
-        result = service.spreadsheets().values().get(
-            spreadsheetId=spreadsheet_id,
-            range=range_name,
-        ).execute()
+        result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
         rows = result.get("values", [])
         if not rows or len(rows) < 2:
             return []
-
         header = [normalize_text(col) for col in rows[0]]
         parsed_rows = []
         for row in rows[1:]:
@@ -73,11 +69,7 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
         raise RuntimeError(f"無法讀取工作表範圍 {range_name}: {exc}") from exc
 
 
-def get_sheet_headers(
-    credentials: Credentials,
-    spreadsheet_id_or_url: str,
-    worksheet_name: str,
-) -> List[str]:
+def get_sheet_headers(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> List[str]:
     """Return normalized first-row headers for one worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
@@ -96,7 +88,6 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
         spreadsheetId=spreadsheet_id,
         fields="properties.title,sheets.properties.title",
     ).execute()
-
     worksheets = []
     for sheet in metadata.get("sheets", []):
         title = sheet.get("properties", {}).get("title")
@@ -108,7 +99,6 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
         ).execute().get("values", [])
         columns = [normalize_text(value) for value in (values[0] if values else []) if normalize_text(value)]
         worksheets.append({"title": title, "columns": columns})
-
     return {
         "spreadsheet_id": spreadsheet_id,
         "spreadsheet_title": metadata.get("properties", {}).get("title", ""),
@@ -116,11 +106,7 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
     }
 
 
-def parse_options_from_sheets(
-    credentials: Credentials,
-    spreadsheet_id_or_url: str,
-    worksheet_name: str,
-) -> Dict[str, Any]:
+def parse_options_from_sheets(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> Dict[str, Any]:
     """Parse team options in their first-appearance order in the selected worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
@@ -134,12 +120,7 @@ def parse_options_from_sheets(
     }
 
 
-def get_people_for_team(
-    credentials: Credentials,
-    spreadsheet_id_or_url: str,
-    worksheet_name: str,
-    team: str,
-) -> List[str]:
+def get_people_for_team(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str, team: str) -> List[str]:
     """Return person and whole-team options in the worksheet's exact row order."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
@@ -166,22 +147,16 @@ def get_random_member_preview(
     service = get_sheets_service(credentials)
     rows = read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
     normalized_team = normalize_text(team)
-    normalized_columns = list(dict.fromkeys(
-        normalize_text(column) for column in columns if normalize_text(column)
-    ))
-
+    normalized_columns = list(dict.fromkeys(normalize_text(column) for column in columns if normalize_text(column)))
     candidates = []
     for row in rows:
         if normalize_text(row.get("所屬團體") or "") != normalized_team:
             continue
         person = normalize_text(row.get("人") or "")
-        if not person:
-            continue
-        candidates.append((person, row))
-
+        if person:
+            candidates.append((person, row))
     if not candidates:
         raise ValueError(f"工作表中找不到「{normalized_team}」的成員資料")
-
     person, row = random.choice(candidates)
     return {
         "spreadsheet_id": spreadsheet_id,
@@ -192,11 +167,48 @@ def get_random_member_preview(
     }
 
 
-def get_all_rows_for_sheet(
+def get_copyable_sheet_table(
     credentials: Credentials,
     spreadsheet_id_or_url: str,
     worksheet_name: str,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
+    """Return displayed cell strings unchanged, plus normalized keys used only for filtering."""
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
+    service = get_sheets_service(credentials)
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=quote_sheet_name(worksheet_name),
+        valueRenderOption="FORMATTED_VALUE",
+        dateTimeRenderOption="FORMATTED_STRING",
+    ).execute()
+    values = result.get("values", [])
+    if not values:
+        return {"spreadsheet_id": spreadsheet_id, "worksheet_name": worksheet_name, "columns": [], "rows": []}
+
+    raw_headers = [str(value) for value in values[0]]
+    normalized_headers = [normalize_text(value) for value in raw_headers]
+    team_index = normalized_headers.index("所屬團體") if "所屬團體" in normalized_headers else -1
+    person_index = normalized_headers.index("人") if "人" in normalized_headers else -1
+    columns = [
+        {"key": f"column_{index}", "label": header or f"未命名欄位 {index + 1}", "index": index}
+        for index, header in enumerate(raw_headers)
+    ]
+    rows = []
+    for row_number, row in enumerate(values[1:], start=2):
+        cells = [str(row[index]) if index < len(row) else "" for index in range(len(columns))]
+        team = normalize_text(cells[team_index]) if team_index >= 0 else ""
+        person = normalize_text(cells[person_index]) if person_index >= 0 else ""
+        rows.append({
+            "row_number": row_number,
+            "cells": cells,
+            "team": team,
+            "person": person,
+            "person_option": person or (team_option_label(team) if team else ""),
+        })
+    return {"spreadsheet_id": spreadsheet_id, "worksheet_name": worksheet_name, "columns": columns, "rows": rows}
+
+
+def get_all_rows_for_sheet(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> List[Dict[str, Any]]:
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
     return read_sheet_data(service, spreadsheet_id, quote_sheet_name(worksheet_name))
