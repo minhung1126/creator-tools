@@ -12,11 +12,9 @@ class Settings(BaseSettings):
     PUBLIC_BASE_URL: str = ""
     FRONTEND_URL: str = ""
 
-    # Read for one migration cycle only. It never controls binding or URLs.
-    HOST: str = ""
-
     # Access is intentionally single-admin. Keep this comma-separated so the
-    # same .env works with pydantic-settings and Docker.
+    # same .env works with pydantic-settings and Docker. This must stay in the
+    # server environment because it is needed before the user can open the UI.
     ALLOWED_GOOGLE_EMAILS: str = ""
 
     GOOGLE_CLIENT_ID: str = ""
@@ -24,9 +22,6 @@ class Settings(BaseSettings):
 
     SECRET_KEY: str = "creator-tools-super-secret-key-change-in-production-2026"
     CREDENTIAL_ENCRYPTION_KEY: str = ""
-
-    DEFAULT_SPREADSHEET_ID: str = ""
-    DEFAULT_PLAYLIST_ID: str = ""
 
     INSTAGRAM_APP_ID: str = ""
     INSTAGRAM_APP_SECRET: str = ""
@@ -36,11 +31,6 @@ class Settings(BaseSettings):
     META_APP_ID: str = ""
     META_APP_SECRET: str = ""
 
-    R2_ACCOUNT_ID: str = ""
-    R2_ACCESS_KEY_ID: str = ""
-    R2_BUCKET_NAME: str = ""
-    R2_PUBLIC_BASE_URL: str = ""
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -49,13 +39,7 @@ class Settings(BaseSettings):
 
     def model_post_init(self, __context) -> None:
         if not self.PUBLIC_BASE_URL:
-            legacy_host = self.HOST.strip()
-            if legacy_host:
-                scheme = "http" if legacy_host in {"localhost", "127.0.0.1", "0.0.0.0"} else "https"
-                port = f":{self.PORT}" if scheme == "http" else ""
-                self.PUBLIC_BASE_URL = f"{scheme}://{legacy_host}{port}"
-            else:
-                self.PUBLIC_BASE_URL = f"http://localhost:{self.PORT}"
+            self.PUBLIC_BASE_URL = f"http://localhost:{self.PORT}"
         if not self.FRONTEND_URL:
             parsed = urlparse(self.PUBLIC_BASE_URL)
             if parsed.hostname in {"localhost", "127.0.0.1", "0.0.0.0"}:
@@ -122,13 +106,6 @@ settings = Settings()
 if settings.SECRET_KEY == "creator-tools-super-secret-key-change-in-production-2026":
     warnings.warn(
         "Using the default SECRET_KEY; set a unique value before production.",
-        stacklevel=2,
-    )
-
-if settings.HOST:
-    warnings.warn(
-        "HOST is deprecated; migrate to BIND_HOST and PUBLIC_BASE_URL.",
-        DeprecationWarning,
         stacklevel=2,
     )
 

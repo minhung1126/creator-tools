@@ -25,7 +25,7 @@ Instagram API version 由後端 release pin，不能由 UI 任意修改；callba
 ## 2. Cloudflare R2
 
 1. 建立 R2 bucket 與限制於該 bucket 的 Object Read & Write S3 API token。
-2. 在 Instagram / R2 設定頁輸入 Account ID、Access Key ID、Bucket Name、HTTPS public base URL 與 Secret Access Key。
+2. 在 Instagram / R2 設定頁輸入 Account ID、Access Key ID、Bucket Name、HTTPS public base URL 與 Secret Access Key。R2 設定只從登入後的網頁保存，不放在 `.env`。
 3. Secret Access Key 只能由 UI 輸入並加密存入 credential store，不支援 env/UI 雙來源。
 4. public base URL 必須 HTTPS，系統會拒絕 localhost/private IP；建議使用 Custom Domain 或 `r2.dev`。
 5. 為 `instagram-reels/` prefix 設定 1–7 天 lifecycle，預設工作流程使用 3 天，避免影片永久堆積。

@@ -287,7 +287,7 @@ def get_instagram_settings(creds: Credentials = Depends(require_credentials)):
     del creds
     return {
         "drive_folder_id": cfg("instagram_drive_folder_id"),
-        "spreadsheet_id": cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID,
+        "spreadsheet_id": cfg("instagram_spreadsheet_id"),
         "instagram_api_version": settings.instagram_api_version,
         "r2_account_id": cfg("r2_account_id"),
         "r2_access_key_id": cfg("r2_access_key_id"),
@@ -362,7 +362,7 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
 
 @router.post("/publish-jobs", status_code=201)
 def create_publish_job(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
-    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID
+    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id")
     folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
     if not spreadsheet or not folder:
         raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
@@ -425,7 +425,7 @@ def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credenti
 
 @router.post("/publish-reels")
 def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
-    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID
+    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id")
     folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
     if not spreadsheet or not folder:
         raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
