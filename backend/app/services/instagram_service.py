@@ -117,11 +117,7 @@ class InstagramClient:
         relative_url = str(path or "").lstrip("/")
         if not relative_url or "://" in relative_url:
             raise ValueError("Instagram batch relative_url must be a relative Graph API path")
-        values = {
-            str(key): _stringify_batch_value(value)
-            for key, value in (params or {}).items()
-            if value is not None
-        }
+        values = {str(key): _stringify_batch_value(value) for key, value in (params or {}).items() if value is not None}
         if values:
             separator = "&" if "?" in relative_url else "?"
             relative_url = f"{relative_url}{separator}{urlencode(values, doseq=True)}"
@@ -147,9 +143,7 @@ class InstagramClient:
             body = request.get("body", request.get("data"))
             if body:
                 body_values = {
-                    str(key): _stringify_batch_value(value)
-                    for key, value in body.items()
-                    if value is not None
+                    str(key): _stringify_batch_value(value) for key, value in body.items() if value is not None
                 }
                 entry["body"] = urlencode(body_values, doseq=True)
             if preserve_order:
@@ -186,7 +180,9 @@ class InstagramClient:
         except ValueError:
             outer_data = None
         try:
-            instagram_api_usage_tracker.record_response("POST", "batch", response, outer_data if isinstance(outer_data, dict) else {})
+            instagram_api_usage_tracker.record_response(
+                "POST", "batch", response, outer_data if isinstance(outer_data, dict) else {}
+            )
         except Exception:
             logger.warning("Failed to record Instagram batch API usage", exc_info=True)
 
@@ -299,11 +295,13 @@ class InstagramClient:
         if not reels:
             return []
         if len(reels) == 1:
-            return [self.create_reel_container(
-                str(reels[0]["video_url"]),
-                str(reels[0].get("caption") or ""),
-                bool(reels[0].get("share_to_feed", True)),
-            )]
+            return [
+                self.create_reel_container(
+                    str(reels[0]["video_url"]),
+                    str(reels[0].get("caption") or ""),
+                    bool(reels[0].get("share_to_feed", True)),
+                )
+            ]
         requests = [
             {
                 "method": "POST",

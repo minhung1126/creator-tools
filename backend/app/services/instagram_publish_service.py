@@ -598,7 +598,9 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _process_job_with_batches(*, job: dict[str, Any], credentials, client: InstagramClient, r2: R2Config) -> dict[str, Any]:
+def _process_job_with_batches(
+    *, job: dict[str, Any], credentials, client: InstagramClient, r2: R2Config
+) -> dict[str, Any]:
     """Run the legacy JSON job with the same ordered Meta batch phases."""
 
     job["status"] = "running"
@@ -712,7 +714,11 @@ def _process_job_with_batches(*, job: dict[str, Any], credentials, client: Insta
             failed_item.update(error=_error_text(exc))
             _set_item_stage(failed_item, "failed", status="failed")
             for item in job.get("items", []):
-                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {
+                    "queued",
+                    "uploaded",
+                    "container_created",
+                }:
                     item.update(error="前一支影片發布失敗，流程已暫停")
                     _set_item_stage(item, "paused", status="paused")
             pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
@@ -722,7 +728,11 @@ def _process_job_with_batches(*, job: dict[str, Any], credentials, client: Insta
             failed_item.update(error=_error_text(exc))
             _set_item_stage(failed_item, "failed", status="failed")
             for item in job.get("items", []):
-                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {
+                    "queued",
+                    "uploaded",
+                    "container_created",
+                }:
                     item.update(error="前一支影片發布失敗，流程已暫停")
                     _set_item_stage(item, "paused", status="paused")
             pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
@@ -743,7 +753,11 @@ def _process_job_with_batches(*, job: dict[str, Any], credentials, client: Insta
             failed_item.update(error=_error_text(exc))
             _set_item_stage(failed_item, "failed", status="failed")
             for item in job.get("items", []):
-                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {
+                    "queued",
+                    "uploaded",
+                    "container_created",
+                }:
                     item.update(error="前一支影片發布失敗，流程已暫停")
                     _set_item_stage(item, "paused", status="paused")
             pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
@@ -779,7 +793,11 @@ def _process_job_with_batches(*, job: dict[str, Any], credentials, client: Insta
             failed_item.update(error=_error_text(exc))
             _set_item_stage(failed_item, "failed", status="failed")
             for item in job.get("items", []):
-                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {
+                    "queued",
+                    "uploaded",
+                    "container_created",
+                }:
                     item.update(error="前一支影片發布失敗，流程已暫停")
                     _set_item_stage(item, "paused", status="paused")
             pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
@@ -789,7 +807,11 @@ def _process_job_with_batches(*, job: dict[str, Any], credentials, client: Insta
             failed_item.update(error=_error_text(exc))
             _set_item_stage(failed_item, "failed", status="failed")
             for item in job.get("items", []):
-                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {
+                    "queued",
+                    "uploaded",
+                    "container_created",
+                }:
                     item.update(error="前一支影片發布失敗，流程已暫停")
                     _set_item_stage(item, "paused", status="paused")
             pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]

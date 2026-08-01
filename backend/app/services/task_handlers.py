@@ -403,7 +403,9 @@ def process_instagram_reel_tasks(
     def mark_failed(state: dict[str, Any], error: Any) -> None:
         state["context"].finish("failed", stage="failed", error=_error_text(error), retryable=True)
 
-    def mark_canceled(state: dict[str, Any], message: str = "取消要求在 Instagram 外部操作前送達，任務已停止。") -> None:
+    def mark_canceled(
+        state: dict[str, Any], message: str = "取消要求在 Instagram 外部操作前送達，任務已停止。"
+    ) -> None:
         state["context"].finish("canceled", error=None, message=message)
 
     def apply_creation_results(create_states: list[dict[str, Any]], ids: list[str]) -> None:
@@ -485,7 +487,9 @@ def process_instagram_reel_tasks(
                 processable.append(state)
                 continue
 
-            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", str(item.get("file_name") or "reel.mp4")).strip("-._") or "reel.mp4"
+            safe_name = (
+                re.sub(r"[^A-Za-z0-9._-]+", "-", str(item.get("file_name") or "reel.mp4")).strip("-._") or "reel.mp4"
+            )
             object_key = item.get("object_key") or (
                 f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/"
                 f"{state['sequence']:03d}-{item.get('file_id')}-{safe_name}"
@@ -509,7 +513,11 @@ def process_instagram_reel_tasks(
                         mimetypes.guess_type(safe_name)[0] or "video/mp4",
                     )
                 context.checkpoint(
-                    {"public_url": item["public_url"], "object_key": object_key, "preflight": item.get("preflight") or {}},
+                    {
+                        "public_url": item["public_url"],
+                        "object_key": object_key,
+                        "preflight": item.get("preflight") or {},
+                    },
                     stage="uploaded",
                     progress_percent=45,
                 )
@@ -533,9 +541,7 @@ def process_instagram_reel_tasks(
 
     # Create every missing container in the ordered part of this batch.
     create_states = [
-        state
-        for state in processable
-        if not state["item"].get("media_id") and not state["item"].get("creation_id")
+        state for state in processable if not state["item"].get("media_id") and not state["item"].get("creation_id")
     ]
     if create_states:
         try:
@@ -571,7 +577,9 @@ def process_instagram_reel_tasks(
             pause_after(failed_state["sequence"], "前一支影片任務失敗，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
         except TaskCancellationRequested:
-            failed_state = next((state for state in create_states if state["context"].is_cancel_requested()), create_states[0])
+            failed_state = next(
+                (state for state in create_states if state["context"].is_cancel_requested()), create_states[0]
+            )
             mark_canceled(failed_state)
             pause_after(failed_state["sequence"], "前一支影片已取消，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
@@ -583,9 +591,7 @@ def process_instagram_reel_tasks(
 
     # One ordered status batch covers all containers that remain processable.
     wait_states = [
-        state
-        for state in processable
-        if state["item"].get("creation_id") and not state["item"].get("media_id")
+        state for state in processable if state["item"].get("creation_id") and not state["item"].get("media_id")
     ]
     if wait_states:
         try:
@@ -604,7 +610,9 @@ def process_instagram_reel_tasks(
             pause_after(failed_state["sequence"], "前一支影片任務失敗，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
         except TaskCancellationRequested:
-            failed_state = next((state for state in wait_states if state["context"].is_cancel_requested()), wait_states[0])
+            failed_state = next(
+                (state for state in wait_states if state["context"].is_cancel_requested()), wait_states[0]
+            )
             mark_canceled(failed_state)
             pause_after(failed_state["sequence"], "前一支影片已取消，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
@@ -615,9 +623,7 @@ def process_instagram_reel_tasks(
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
 
     publish_states = [
-        state
-        for state in processable
-        if state["item"].get("creation_id") and not state["item"].get("media_id")
+        state for state in processable if state["item"].get("creation_id") and not state["item"].get("media_id")
     ]
     if publish_states:
         try:
@@ -653,7 +659,9 @@ def process_instagram_reel_tasks(
             pause_after(failed_state["sequence"], "前一支影片任務失敗，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]
         except TaskCancellationRequested:
-            failed_state = next((state for state in publish_states if state["context"].is_cancel_requested()), publish_states[0])
+            failed_state = next(
+                (state for state in publish_states if state["context"].is_cancel_requested()), publish_states[0]
+            )
             mark_canceled(failed_state)
             pause_after(failed_state["sequence"], "前一支影片已取消，後續任務已暫停。")
             processable = [state for state in processable if state["sequence"] < failed_state["sequence"]]

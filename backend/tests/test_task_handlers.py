@@ -92,8 +92,13 @@ def test_instagram_batch_handler_batches_meta_phases_in_sequence(monkeypatch, tm
         "backend.app.services.drive_service.download_drive_file",
         lambda credentials, file_id, destination: destination.write_bytes(file_id.encode()),
     )
-    monkeypatch.setattr("backend.app.services.instagram_publish_service.validate_reel_file", lambda path: {"size_bytes": path.stat().st_size})
-    monkeypatch.setattr("backend.app.services.r2_service.upload_public_file", lambda *args, **kwargs: f"https://cdn.example/{args[2]}")
+    monkeypatch.setattr(
+        "backend.app.services.instagram_publish_service.validate_reel_file",
+        lambda path: {"size_bytes": path.stat().st_size},
+    )
+    monkeypatch.setattr(
+        "backend.app.services.r2_service.upload_public_file", lambda *args, **kwargs: f"https://cdn.example/{args[2]}"
+    )
     monkeypatch.setattr(task_handlers, "_instagram_cleanup", lambda *args, **kwargs: [])
 
     class BatchClient:

@@ -33,10 +33,14 @@ def response(payload, status=200):
 
 def test_batch_requests_chain_children_and_preserve_input_order(monkeypatch):
     FakeHttpClient.calls = []
-    FakeHttpClient.responses = [response([
-        {"code": 200, "body": json.dumps({"id": "container-1"})},
-        {"code": 200, "body": json.dumps({"id": "container-2"})},
-    ])]
+    FakeHttpClient.responses = [
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "container-1"})},
+                {"code": 200, "body": json.dumps({"id": "container-2"})},
+            ]
+        )
+    ]
     monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
     monkeypatch.setattr(
         "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
@@ -86,10 +90,14 @@ def test_batch_requests_chunk_at_meta_limit_in_sequence(monkeypatch):
 
 def test_high_level_batch_preserves_partial_success_for_retry(monkeypatch):
     FakeHttpClient.calls = []
-    FakeHttpClient.responses = [response([
-        {"code": 200, "body": json.dumps({"id": "container-1"})},
-        {"code": 400, "body": json.dumps({"error": {"message": "bad video"}})},
-    ])]
+    FakeHttpClient.responses = [
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "container-1"})},
+                {"code": 400, "body": json.dumps({"error": {"message": "bad video"}})},
+            ]
+        )
+    ]
     monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
     monkeypatch.setattr(
         "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
