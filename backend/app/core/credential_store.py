@@ -35,7 +35,7 @@ class CredentialStore:
         key_material = settings.CREDENTIAL_ENCRYPTION_KEY or settings.SECRET_KEY
         digest = hashlib.sha256(key_material.encode("utf-8")).digest()
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
-        self._data: Dict[str, Any] = {"version": 1, "instagram": None, "secrets": {}}
+        self._data: Dict[str, Any] = {"version": 2, "google": None, "instagram": None, "secrets": {}}
         self._load()
 
     def _load(self):
@@ -47,6 +47,9 @@ class CredentialStore:
                     loaded = json.load(handle)
                 if isinstance(loaded, dict):
                     self._data.update(loaded)
+                    self._data["version"] = 2
+                    self._data.setdefault("google", None)
+                    self._data.setdefault("instagram", None)
                     self._data.setdefault("secrets", {})
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", exc)
@@ -77,6 +80,119 @@ class CredentialStore:
         except (InvalidToken, ValueError) as exc:
             raise RuntimeError("無法解密已儲存的憑證。請確認 CREDENTIAL_ENCRYPTION_KEY 未變更，或重新連線。") from exc
 
+    def _decrypt_json(self, value: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not value:
+            return None
+        try:
+            payload = json.loads(self._decrypt(value))
+        except (RuntimeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise RuntimeError("無法讀取已儲存的 OAuth 憑證。請重新連線。") from exc
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _expires_at_from_value(value: Any) -> Optional[str]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return to_iso(value)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return to_iso(parsed)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _expires_at_from_seconds(expires_in: Optional[int], now: datetime) -> Optional[datetime]:
+        if expires_in is None:
+            return None
+        try:
+            return now + timedelta(seconds=int(expires_in))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def save_google_connection(self, token_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist Google OAuth credentials separately from short-lived login sessions."""
+        if not isinstance(token_dict, dict) or not token_dict.get("token"):
+            raise ValueError("Google OAuth response did not contain an access token")
+
+        now = utc_now()
+        with self._lock:
+            previous = self._data.get("google")
+            previous_credentials = (
+                self._decrypt_json(previous.get("credentials_encrypted"))
+                if isinstance(previous, dict)
+                else None
+            )
+            credentials = dict(token_dict)
+            user = credentials.get("user") if isinstance(credentials.get("user"), dict) else {}
+            previous_user = (
+                previous_credentials.get("user")
+                if isinstance(previous_credentials, dict) and isinstance(previous_credentials.get("user"), dict)
+                else {}
+            )
+            same_account = bool(
+                user.get("email")
+                and previous_user.get("email")
+                and str(user["email"]).casefold() == str(previous_user["email"]).casefold()
+            )
+            # Google may omit refresh_token when an already-authorized account is
+            # connected again. Never replace a working refresh token with None,
+            # but never copy one across different Google accounts.
+            if not credentials.get("refresh_token") and previous_credentials and same_account:
+                credentials["refresh_token"] = previous_credentials.get("refresh_token")
+
+            scopes = credentials.get("scopes") if isinstance(credentials.get("scopes"), list) else []
+            self._data["google"] = {
+                "credentials_encrypted": self._encrypt(json.dumps(credentials, ensure_ascii=False)),
+                "user": user,
+                "scopes": sorted({str(scope) for scope in scopes if str(scope).strip()}),
+                "token_expires_at": self._expires_at_from_value(credentials.get("expiry")),
+                "connected_at": (
+                    previous.get("connected_at")
+                    if isinstance(previous, dict) and previous.get("connected_at")
+                    else to_iso(now)
+                ),
+                "last_refreshed_at": to_iso(now),
+                "last_refresh_error": None,
+                "status": "active",
+            }
+            self._save()
+        return self.get_google_public() or {}
+
+    def get_google_credentials(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            record = self._data.get("google")
+            encrypted = record.get("credentials_encrypted") if isinstance(record, dict) else None
+        return self._decrypt_json(encrypted)
+
+    def get_google_public(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            record = self._data.get("google")
+            if not isinstance(record, dict):
+                return None
+            return {key: value for key, value in record.items() if key != "credentials_encrypted"}
+
+    def mark_google_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
+        with self._lock:
+            record = self._data.get("google")
+            if not isinstance(record, dict):
+                return
+            record["status"] = "reauthorization_required" if requires_reauthorization else "refresh_failed"
+            record["last_refresh_error"] = str(message)[:240]
+            record["last_refresh_failed_at"] = to_iso(utc_now())
+            self._save()
+
+    def clear_google(self) -> None:
+        with self._lock:
+            self._data["google"] = None
+            self._save()
+
     def save_instagram_connection(
         self,
         *,
@@ -89,7 +205,7 @@ class CredentialStore:
         permissions_verified: bool,
     ) -> Dict[str, Any]:
         now = utc_now()
-        expires_at = now + timedelta(seconds=int(expires_in)) if expires_in else None
+        expires_at = self._expires_at_from_seconds(expires_in, now)
         record = {
             "access_token_encrypted": self._encrypt(access_token),
             "instagram_user_id": str(user_id),
@@ -100,6 +216,9 @@ class CredentialStore:
             "token_expires_at": to_iso(expires_at) if expires_at else None,
             "connected_at": to_iso(now),
             "last_verified_at": to_iso(now),
+            "last_refreshed_at": None,
+            "last_refresh_error": None,
+            "status": "active",
         }
         with self._lock:
             self._data["instagram"] = record
@@ -121,7 +240,7 @@ class CredentialStore:
 
     def update_instagram_token(self, access_token: str, expires_in: Optional[int]) -> Dict[str, Any]:
         now = utc_now()
-        expires_at = now + timedelta(seconds=int(expires_in)) if expires_in else None
+        expires_at = self._expires_at_from_seconds(expires_in, now)
         with self._lock:
             record = self._data.get("instagram")
             if not isinstance(record, dict):
@@ -129,8 +248,21 @@ class CredentialStore:
             record["access_token_encrypted"] = self._encrypt(access_token)
             record["token_expires_at"] = to_iso(expires_at) if expires_at else record.get("token_expires_at")
             record["last_verified_at"] = to_iso(now)
+            record["last_refreshed_at"] = to_iso(now)
+            record["last_refresh_error"] = None
+            record["status"] = "active"
             self._save()
         return self.get_instagram_public() or {}
+
+    def mark_instagram_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
+        with self._lock:
+            record = self._data.get("instagram")
+            if not isinstance(record, dict):
+                return
+            record["status"] = "reauthorization_required" if requires_reauthorization else "refresh_failed"
+            record["last_refresh_error"] = str(message)[:240]
+            record["last_refresh_failed_at"] = to_iso(utc_now())
+            self._save()
 
     def update_instagram_profile(self, username: str, account_type: str):
         with self._lock:

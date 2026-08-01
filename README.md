@@ -31,6 +31,11 @@
    - 使用 **Instagram API with Instagram Login** 與 `graph.instagram.com`，不需連結 Facebook 粉絲專頁。
    - 支援逐片選人、批量套用、分享到動態消息、持久化工作結果與 retry。
 
+5. **♻️ OAuth Token 自動管理**
+   - Google Access Token 到期前 5 分鐘自動刷新，最新 token 與 refresh token 加密保存於 `data/credential_store.json`。
+   - Instagram Long-Lived Token 到期前 7 天自動刷新；若 API 回傳 token 失效，會刷新後重試一次。
+   - Refresh 失敗會記錄狀態並提示重新授權；瀏覽器 Cookie 只保存隨機 session id，不保存 OAuth token。
+
 ---
 
 ## 📁 專案架構目錄
@@ -106,3 +111,9 @@ npm run dev
 - [Google API 申請與 OAuth 2.0 設定教學](docs/GOOGLE_API_SETUP.md)
 - [Instagram Reels API 與 Cloudflare R2 設定教學](docs/INSTAGRAM_R2_SETUP.md)
 - [Docker 部署說明](docs/DEPLOYMENT.md)
+
+### OAuth Token 維運注意事項
+
+- 正式環境必須固定 `CREDENTIAL_ENCRYPTION_KEY`；金鑰變更後既有加密 token 無法解密，需要重新授權。
+- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session 與工作流程設定。
+- Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。

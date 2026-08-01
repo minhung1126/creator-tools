@@ -7,6 +7,7 @@ import tempfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import RLock
 from typing import List, Optional
 from urllib.parse import quote
 
@@ -50,6 +51,7 @@ MAX_FILE_SIZE = 1024 * 1024 * 1024
 OAUTH_FLOW_COOKIE = "creator_tools_instagram_oauth_flow"
 OAUTH_FLOW_MAX_AGE = 10 * 60
 TOKEN_REFRESH_WINDOW = timedelta(days=7)
+_instagram_refresh_lock = RLock()
 
 
 class Assignment(BaseModel):
@@ -110,21 +112,49 @@ def parse_expiration(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
-def refresh_connection() -> dict:
-    connection = credential_store.get_instagram_public()
-    token = credential_store.get_instagram_token()
-    if not connection or not token:
-        raise RuntimeError("Instagram 尚未連線")
-    refreshed = refresh_long_lived_token(token)
-    credential_store.update_instagram_token(refreshed["access_token"], refreshed.get("expires_in"))
-    client = InstagramClient(
-        connection["instagram_user_id"],
-        refreshed["access_token"],
-        settings.instagram_api_version,
-    )
-    profile = client.profile()
-    credential_store.update_instagram_profile(profile.get("username", ""), profile.get("account_type", ""))
-    return credential_store.get_instagram_public() or {}
+def refresh_connection(*, force: bool = True) -> dict:
+    """Refresh the long-lived Instagram token once per process at a time."""
+    with _instagram_refresh_lock:
+        connection = credential_store.get_instagram_public()
+        token = credential_store.get_instagram_token()
+        if not connection or not token:
+            raise RuntimeError("Instagram 尚未連線")
+
+        if not force:
+            expiration = parse_expiration(connection.get("token_expires_at"))
+            if expiration and expiration - datetime.now(timezone.utc) > TOKEN_REFRESH_WINDOW:
+                return connection
+
+        try:
+            refreshed = refresh_long_lived_token(token)
+            credential_store.update_instagram_token(refreshed["access_token"], refreshed.get("expires_in"))
+        except Exception as exc:
+            requires_reauthorization = any(
+                marker in str(exc).lower() for marker in ("expired", "invalid", "oauth")
+            )
+            credential_store.mark_instagram_refresh_failed(str(exc) or type(exc).__name__, requires_reauthorization)
+            logger.error("Instagram token refresh failed: %s", type(exc).__name__)
+            raise
+
+        # Profile refresh is useful metadata, but must not make a successfully
+        # refreshed access token look unusable when the profile endpoint has a
+        # transient failure.
+        try:
+            client = InstagramClient(
+                connection["instagram_user_id"],
+                refreshed["access_token"],
+                settings.instagram_api_version,
+            )
+            profile = client.profile()
+            credential_store.update_instagram_profile(profile.get("username", ""), profile.get("account_type", ""))
+        except Exception as exc:
+            logger.warning("Instagram profile refresh failed after token refresh: %s", type(exc).__name__)
+        return credential_store.get_instagram_public() or {}
+
+
+def refresh_token_for_api_request() -> str:
+    refresh_connection(force=True)
+    return credential_store.get_instagram_token() or ""
 
 
 def get_connected_client(refresh_if_needed: bool = True) -> InstagramClient:
@@ -136,7 +166,7 @@ def get_connected_client(refresh_if_needed: bool = True) -> InstagramClient:
     if expiration and expiration <= now:
         raise RuntimeError("Instagram Access Token 已過期，請重新連線")
     if refresh_if_needed and expiration and expiration - now <= TOKEN_REFRESH_WINDOW:
-        connection = refresh_connection()
+        connection = refresh_connection(force=False)
     token = credential_store.get_instagram_token()
     if not token:
         raise RuntimeError("找不到已儲存的 Instagram Access Token，請重新連線")
@@ -144,6 +174,7 @@ def get_connected_client(refresh_if_needed: bool = True) -> InstagramClient:
         connection["instagram_user_id"],
         token,
         settings.instagram_api_version,
+        on_token_refresh=refresh_token_for_api_request,
     )
 
 
@@ -254,6 +285,15 @@ def instagram_auth_status(creds: Credentials = Depends(require_credentials)):
     connection = credential_store.get_instagram_public()
     expiration = parse_expiration(connection.get("token_expires_at")) if connection else None
     now = datetime.now(timezone.utc)
+    if connection and not (expiration and expiration <= now):
+        try:
+            # Reading the status page also performs the normal proactive
+            # refresh, so a token does not sit in the UI as "expires soon".
+            get_connected_client(refresh_if_needed=True)
+            connection = credential_store.get_instagram_public()
+            expiration = parse_expiration(connection.get("token_expires_at")) if connection else None
+        except Exception as exc:
+            logger.warning("Instagram status refresh check failed: %s", type(exc).__name__)
     return {
         "app_configured": bool(settings.instagram_app_id and settings.instagram_app_secret),
         "redirect_uri": settings.get_instagram_redirect_uri(),

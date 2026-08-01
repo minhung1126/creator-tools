@@ -25,7 +25,16 @@ function AppContent() {
   const fetchUser = async () => {
     try {
       const res = await api.getUserStatus();
-      if (res.authenticated) { setAuthUser(res.user); return res.user; }
+      if (res.authenticated) {
+        const user = {
+          ...res.user,
+          token_expires_at: res.token_expires_at,
+          token_status: res.token_status,
+          last_refreshed_at: res.last_refreshed_at,
+          last_refresh_error: res.last_refresh_error,
+        };
+        setAuthUser(user); return user;
+      }
       setAuthUser(null); return null;
     } catch (err) { console.error('Failed to fetch user status:', err); setAuthUser(null); return null; }
   };

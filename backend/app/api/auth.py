@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
 from backend.app.core.config import settings
+from backend.app.core.credential_store import credential_store
 from backend.app.core.security import (
     GOOGLE_OAUTH_STATE_SALT,
     sign_timed_data,
@@ -123,7 +124,16 @@ def google_oauth_callback(
         email = str(user_info.get("email") or "").strip()
         if not settings.is_google_email_allowed(email):
             raise RuntimeError("此 Google 帳號不在 ALLOWED_GOOGLE_EMAILS")
-        session_id = session_store.create(token_dict, max_age=SESSION_MAX_AGE)
+        # Keep OAuth secrets in the encrypted persistent store. The browser
+        # session only carries the account identity and a random session id.
+        credential_store.save_google_connection(token_dict)
+        session_id = session_store.create(
+            {
+                "credential_provider": "google",
+                "user": user_info,
+            },
+            max_age=SESSION_MAX_AGE,
+        )
 
         response = RedirectResponse(url=f"{settings.frontend_url}/#auth_success=1")
         response.set_cookie(
@@ -145,13 +155,22 @@ def google_oauth_callback(
 def get_user_status(request: Request):
     """Check current authentication status."""
     session_id = request.cookies.get(SESSION_COOKIE)
-    stored_tokens = session_store.get(session_id) if session_id else None
     creds = get_current_credentials(session_id)
     if not creds or not creds.valid:
         return {"authenticated": False, "user": None}
 
-    user_info = stored_tokens.get("user", {}) if stored_tokens else {"email": "Authenticated User"}
-    return {"authenticated": True, "user": user_info, "token_expired": creds.expired}
+    session_data = session_store.get(session_id) or {}
+    user_info = session_data.get("user") or {"email": "Authenticated User"}
+    token_status = credential_store.get_google_public() or {}
+    return {
+        "authenticated": True,
+        "user": user_info,
+        "token_expired": creds.expired,
+        "token_expires_at": token_status.get("token_expires_at"),
+        "token_status": token_status.get("status", "active"),
+        "last_refreshed_at": token_status.get("last_refreshed_at"),
+        "last_refresh_error": token_status.get("last_refresh_error"),
+    }
 
 
 @router.post("/logout")
