@@ -234,6 +234,56 @@ def test_all_skipped_batch_gets_one_summary_notification(tmp_path):
     assert items[0]["type"] == "batch_completed"
 
 
+def test_cancel_instagram_reservations_releases_only_matching_old_tasks(tmp_path):
+    repo = make_repo(tmp_path)
+    old = repo.create_batch_and_tasks(
+        {"platform": "instagram", "operation": "instagram.reels_publish"},
+        [
+            {
+                **make_specs(1, "instagram", "instagram.reels_publish")[0],
+                "id": "old-queued",
+                "video_id": "drive-1",
+                "payload": {"source_folder_id": "source-folder"},
+            },
+            {
+                **make_specs(1, "instagram", "instagram.reels_publish")[0],
+                "id": "other-folder",
+                "sequence_in_batch": 2,
+                "video_id": "drive-1",
+                "payload": {"source_folder_id": "other-folder"},
+            },
+        ],
+    )
+    running = repo.create_batch_and_tasks(
+        {"platform": "instagram", "operation": "instagram.reels_publish"},
+        [
+            {
+                **make_specs(1, "instagram", "instagram.reels_publish")[0],
+                "id": "old-running",
+                "video_id": "drive-2",
+                "payload": {"source_folder_id": "source-folder"},
+            }
+        ],
+    )
+    repo.claim_next("instagram")
+    assert repo.get_task_internal("old-queued")["status"] == "running"
+
+    result = repo.cancel_instagram_reservations(
+        "source-folder",
+        ["drive-1", "drive-2"],
+        exclude_batch_id="current-skipped-batch",
+    )
+
+    assert result["requested_count"] == 2
+    assert result["cancel_requested_count"] == 1
+    assert result["canceled_immediately_count"] == 1
+    assert repo.get_task_internal("old-queued")["status"] == "cancel_requested"
+    assert repo.get_task_internal("old-running")["status"] == "canceled"
+    assert repo.get_task_internal("other-folder")["status"] == "queued"
+    assert old["batch"]["id"] in result["batch_ids"]
+    assert running["batch"]["id"] in result["batch_ids"]
+
+
 def test_notification_event_key_is_deduplicated(tmp_path):
     repo = make_repo(tmp_path)
     notifications = NotificationRepository(repo.db)

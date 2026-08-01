@@ -67,6 +67,7 @@ function deriveBatchStatus(batchTasks) {
 export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focusedBatchId }) {
   const {
     tasks, summary, loading, refreshing, error, refresh, cancelTask, retryTask, cancelAll, cancelBatch, retryBatch,
+    stopInstagramBlockingJobs, showToast,
   } = useActivityCenter();
   const [filter, setFilter] = useState('unfinished');
   const [platform, setPlatform] = useState('all');
@@ -133,9 +134,21 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
 
   const execute = async (action, id) => {
     setBusyId(id);
-    try { await action(); } catch (actionError) { /* context keeps the last good snapshot */ }
+    try { return await action(); } catch (actionError) { showToast?.('error', actionError.message); return null; }
     finally { setBusyId(null); }
   };
+
+  const stopBlocking = (batch) => execute(async () => {
+    const result = await stopInstagramBlockingJobs(batch.id);
+    if (result.cancel_requested_count > 0) {
+      showToast?.('warning', `已立即取消 ${result.canceled_immediately_count} 支舊任務；另有 ${result.cancel_requested_count} 支正在安全停止，請稍後再重新建立發布工作。`);
+    } else if (result.ready_to_recreate) {
+      showToast?.('success', `已解除 ${result.blocked_item_count} 支影片的舊工作占用；現在可重新建立 Instagram 發布工作。`);
+    } else {
+      showToast?.('info', '占用中的舊工作已經結束，請重新讀取影片後再建立發布工作。');
+    }
+    return result;
+  }, batch.id);
 
   const renderTask = (task) => (
     <div className="task-row" id={`task-${task.id}`} key={task.id}>
@@ -181,7 +194,7 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
           {grouped ? Object.entries(groupedTasks).map(([batchId, batchTasks]) => <section className="task-batch-group" id={`batch-${batchId}`} key={batchId}><button type="button" className="task-batch-group-heading" onClick={() => setSelectedBatchId(batchId)}>Batch {batchTasks[0]?.batch_short_code || batchId.slice(0, 8)} <span>{batchTasks.length} 支 · 查看批次操作</span></button>{batchTasks.map(renderTask)}</section>) : filteredTasks.map(renderTask)}
         </div>
       )}
-      {selectedBatch && <BatchDetail batch={selectedBatch} busy={busyId === selectedBatch.id} onCancel={() => execute(() => cancelBatch(selectedBatch.id), selectedBatch.id)} onRetry={() => execute(() => retryBatch(selectedBatch.id), selectedBatch.id)} onTaskCancel={(task) => execute(() => cancelTask(task.id), task.id)} onTaskRetry={(task) => execute(() => retryTask(task.id), task.id)} />}
+      {selectedBatch && <BatchDetail batch={selectedBatch} busy={busyId === selectedBatch.id} onCancel={() => execute(() => cancelBatch(selectedBatch.id), selectedBatch.id)} onRetry={() => execute(() => retryBatch(selectedBatch.id), selectedBatch.id)} onStopBlocking={stopBlocking} onTaskCancel={(task) => execute(() => cancelTask(task.id), task.id)} onTaskRetry={(task) => execute(() => retryTask(task.id), task.id)} />}
     </div>
   );
 }

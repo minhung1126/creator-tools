@@ -128,10 +128,12 @@ export function ActivityCenterProvider({ children }) {
     retryTask: (taskId) => runAndRefresh(() => api.retryTask(taskId)),
     cancelBatch: (batchId) => runAndRefresh(() => api.cancelTaskBatch(batchId)),
     retryBatch: (batchId) => runAndRefresh(() => api.retryTaskBatch(batchId)),
+    stopInstagramBlockingJobs: (batchId) => runAndRefresh(() => api.stopInstagramBlockingJobs(batchId)),
     cancelAll: () => runAndRefresh(() => api.cancelAllTasks()),
     markNotificationRead: (notificationId) => runAndRefresh(() => api.markNotificationRead(notificationId)),
     markAllNotificationsRead: () => runAndRefresh(() => api.markAllNotificationsRead()),
-  }), [activeCount, error, hasAttention, loading, notifications, refresh, refreshing, runAndRefresh, summary, tasks, unreadCount]);
+    showToast: (type, message) => toast[type]?.(message),
+  }), [activeCount, error, hasAttention, loading, notifications, refresh, refreshing, runAndRefresh, summary, tasks, toast, unreadCount]);
 
   return <ActivityCenterContext.Provider value={value}>{children}</ActivityCenterContext.Provider>;
 }

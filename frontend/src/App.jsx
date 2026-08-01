@@ -47,7 +47,14 @@ function AppContent() {
   };
 
   const fetchSettings = async () => {
-    try { setSysSettings((await api.getSettings()) || {}); }
+    try {
+      const [system, shared, youtube] = await Promise.all([
+        api.getSystemInfo(),
+        api.getSharedSettings(),
+        api.getYoutubeSettings(),
+      ]);
+      setSysSettings({ ...(system || {}), ...(shared || {}), ...(youtube || {}) });
+    }
     catch (err) { console.error('Failed to fetch system settings:', err); }
   };
 
