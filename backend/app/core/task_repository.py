@@ -839,6 +839,71 @@ class TaskRepository:
             self._recompute_batch(connection, task["batch_id"], notify=False)
             return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task["id"],)).fetchone())
 
+    def claim_batch(self, queue_lane: str) -> list[dict[str, Any]]:
+        """Claim the next contiguous batch in a lane as one worker unit.
+
+        Instagram's Graph API can combine child requests, but doing so safely
+        requires the worker to see the complete ordered group before it starts
+        the first external call.  This method keeps the existing
+        ``claim_next`` API for single-task consumers while allowing the
+        Instagram lane to claim one contiguous submitted batch atomically.
+        """
+
+        lane = queue_lane if queue_lane in LANES else "youtube"
+        with self.db.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM tasks
+                WHERE queue_lane = ? AND status = 'queued' AND cancel_requested_at IS NULL
+                ORDER BY queue_sequence ASC, id ASC
+                """,
+                (lane,),
+            ).fetchall()
+            if not rows:
+                return []
+            first_batch_id = str(rows[0]["batch_id"])
+            claim_rows = []
+            for row in rows:
+                if str(row["batch_id"]) != first_batch_id:
+                    break
+                claim_rows.append(row)
+            if not claim_rows:
+                return []
+
+            now = utc_now()
+            claimed_ids: list[str] = []
+            for row in claim_rows:
+                task_id = str(row["id"])
+                updated = connection.execute(
+                    """
+                    UPDATE tasks
+                    SET status='running', stage='running', stage_label=?, started_at=COALESCE(started_at,?),
+                        updated_at=?, queued_at=COALESCE(queued_at,?)
+                    WHERE id=? AND status='queued' AND cancel_requested_at IS NULL
+                    """,
+                    (STAGE_LABELS["running"], now, now, now, task_id),
+                )
+                if updated.rowcount != 1:
+                    continue
+                claimed_ids.append(task_id)
+                self._insert_event(
+                    connection,
+                    task_id=task_id,
+                    batch_id=first_batch_id,
+                    event_type="claimed",
+                    from_status="queued",
+                    to_status="running",
+                    message="Worker 已取得批次任務",
+                    event_key=f"task:{task_id}:claimed:attempt:{row['attempt']}:{now}",
+                    created_at=now,
+                )
+            if claimed_ids:
+                self._recompute_batch(connection, first_batch_id, notify=False)
+            return [
+                _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+                for task_id in claimed_ids
+            ]
+
     def request_cancel(self, task_id: str, *, scope: str = "task", reason: str = "使用者要求取消") -> Optional[dict[str, Any]]:
         with self.db.transaction() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()

@@ -28,6 +28,7 @@ from backend.app.services.drive_service import (
     list_drive_videos,
     move_drive_file_to_folder,
 )
+from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -36,7 +37,6 @@ from backend.app.services.instagram_oauth_service import (
     normalize_permissions,
     refresh_long_lived_token,
 )
-from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
 from backend.app.services.instagram_publish_queue import instagram_publish_queue
 from backend.app.services.instagram_publish_service import (
     mark_job_failed,

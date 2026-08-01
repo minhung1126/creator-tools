@@ -20,7 +20,7 @@ from backend.app.services.drive_service import (
     list_drive_videos,
     move_drive_file_to_folder,
 )
-from backend.app.services.instagram_service import InstagramClient
+from backend.app.services.instagram_service import InstagramBatchError, InstagramClient
 from backend.app.services.r2_service import R2Config, delete_public_file, ensure_lifecycle, upload_public_file
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
@@ -598,7 +598,229 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _process_job_with_batches(*, job: dict[str, Any], credentials, client: InstagramClient, r2: R2Config) -> dict[str, Any]:
+    """Run the legacy JSON job with the same ordered Meta batch phases."""
+
+    job["status"] = "running"
+    _save_job(job)
+    ensure_lifecycle(r2, days=3)
+
+    pending: list[dict[str, Any]] = []
+    preparation_failure: dict[str, Any] | None = None
+    for item in job.get("items", []):
+        if item.get("status") == "skipped":
+            continue
+        if item.get("status") == "published":
+            _set_item_stage(item, "moving_drive")
+            _save_job(job)
+            _finish_published_item(job, item, credentials, r2)
+            _save_job(job)
+            continue
+        if preparation_failure is not None:
+            item.update(error="前一支影片發布失敗，流程已暫停")
+            _set_item_stage(item, "paused", status="paused")
+            _save_job(job)
+            continue
+        try:
+            safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", item["file_name"]).strip("-._") or "reel.mp4"
+            object_key = (
+                item.get("object_key")
+                or f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/{item['sequence']:03d}-{item['file_id']}-{safe_name}"
+            )
+            item["object_key"] = object_key
+            if not item.get("public_url"):
+                with tempfile.TemporaryDirectory(prefix="creator-tools-instagram-") as directory:
+                    local = Path(directory) / item["file_name"]
+                    _set_item_stage(item, "downloading")
+                    _save_job(job)
+                    download_drive_file(credentials, item["file_id"], local)
+                    _set_item_stage(item, "validating")
+                    _save_job(job)
+                    item["preflight"] = {**item.get("preflight", {}), **validate_reel_file(local)}
+                    _set_item_stage(item, "uploading_r2")
+                    _save_job(job)
+                    item["public_url"] = upload_public_file(
+                        r2,
+                        local,
+                        object_key,
+                        mimetypes.guess_type(item["file_name"])[0] or "video/mp4",
+                    )
+                _set_item_stage(item, "uploaded", status="uploaded")
+                _save_job(job)
+            if not item.get("creation_id"):
+                _set_item_stage(item, "creating_container")
+                _save_job(job)
+            pending.append(item)
+        except ReelValidationError as exc:
+            item.update(error=str(exc), object_key=None)
+            _set_item_stage(item, "skipped", status="skipped")
+            _save_job(job)
+        except Exception as exc:
+            item.update(error=_error_text(exc))
+            _set_item_stage(item, "failed", status="failed")
+            preparation_failure = item
+            _save_job(job)
+
+    if preparation_failure is not None:
+        for item in job.get("items", []):
+            if item.get("sequence", 0) > preparation_failure.get("sequence", 0) and item.get("status") == "queued":
+                item.update(error="前一支影片發布失敗，流程已暫停")
+                _set_item_stage(item, "paused", status="paused")
+        pending = [item for item in pending if item.get("sequence", 0) < preparation_failure.get("sequence", 0)]
+        _save_job(job)
+
+    create_items = [item for item in pending if not item.get("media_id") and not item.get("creation_id")]
+    if create_items:
+        try:
+            if len(create_items) > 1:
+                creation_ids = client.create_reel_containers(
+                    [
+                        {
+                            "video_url": item["public_url"],
+                            "caption": item.get("caption", ""),
+                            "share_to_feed": job.get("share_to_feed", True),
+                        }
+                        for item in create_items
+                    ]
+                )
+            else:
+                creation_ids = [
+                    client.create_reel_container(
+                        create_items[0]["public_url"],
+                        create_items[0].get("caption", ""),
+                        job.get("share_to_feed", True),
+                    )
+                ]
+            for item, creation_id in zip(create_items, creation_ids):
+                item["creation_id"] = creation_id
+                _set_item_stage(item, "container_created", status="container_created")
+                _save_job(job)
+        except InstagramBatchError as exc:
+            for index, result in enumerate(exc.results):
+                if index >= len(create_items):
+                    break
+                if not result.get("ok"):
+                    break
+                creation_id = str((result.get("data") or {}).get("id") or "")
+                if not creation_id:
+                    break
+                create_items[index]["creation_id"] = creation_id
+                _set_item_stage(create_items[index], "container_created", status="container_created")
+                _save_job(job)
+            failed_index = min(max(exc.index, 0), len(create_items) - 1)
+            failed_item = create_items[failed_index]
+            failed_item.update(error=_error_text(exc))
+            _set_item_stage(failed_item, "failed", status="failed")
+            for item in job.get("items", []):
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                    item.update(error="前一支影片發布失敗，流程已暫停")
+                    _set_item_stage(item, "paused", status="paused")
+            pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
+            _save_job(job)
+        except Exception as exc:
+            failed_item = create_items[0]
+            failed_item.update(error=_error_text(exc))
+            _set_item_stage(failed_item, "failed", status="failed")
+            for item in job.get("items", []):
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                    item.update(error="前一支影片發布失敗，流程已暫停")
+                    _set_item_stage(item, "paused", status="paused")
+            pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
+            _save_job(job)
+
+    wait_items = [item for item in pending if item.get("creation_id") and not item.get("media_id")]
+    if wait_items:
+        try:
+            for item in wait_items:
+                _set_item_stage(item, "waiting_container")
+            _save_job(job)
+            if len(wait_items) > 1:
+                client.wait_for_containers([item["creation_id"] for item in wait_items])
+            else:
+                client.wait_for_container(wait_items[0]["creation_id"])
+        except Exception as exc:
+            failed_item = wait_items[0]
+            failed_item.update(error=_error_text(exc))
+            _set_item_stage(failed_item, "failed", status="failed")
+            for item in job.get("items", []):
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                    item.update(error="前一支影片發布失敗，流程已暫停")
+                    _set_item_stage(item, "paused", status="paused")
+            pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
+            _save_job(job)
+
+    publish_items = [item for item in pending if item.get("creation_id") and not item.get("media_id")]
+    if publish_items:
+        try:
+            if len(publish_items) > 1:
+                media_ids = client.publish_containers([item["creation_id"] for item in publish_items])
+            else:
+                media_ids = [client.publish_container(publish_items[0]["creation_id"])]
+            for item, media_id in zip(publish_items, media_ids):
+                item["media_id"] = media_id
+                item["published_at"] = _now()
+                _set_item_stage(item, "publishing")
+                _save_job(job)
+        except InstagramBatchError as exc:
+            for index, result in enumerate(exc.results):
+                if index >= len(publish_items):
+                    break
+                if not result.get("ok"):
+                    break
+                media_id = str((result.get("data") or {}).get("id") or "")
+                if not media_id:
+                    break
+                publish_items[index]["media_id"] = media_id
+                publish_items[index]["published_at"] = _now()
+                _set_item_stage(publish_items[index], "publishing")
+                _save_job(job)
+            failed_index = min(max(exc.index, 0), len(publish_items) - 1)
+            failed_item = publish_items[failed_index]
+            failed_item.update(error=_error_text(exc))
+            _set_item_stage(failed_item, "failed", status="failed")
+            for item in job.get("items", []):
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                    item.update(error="前一支影片發布失敗，流程已暫停")
+                    _set_item_stage(item, "paused", status="paused")
+            pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
+            _save_job(job)
+        except Exception as exc:
+            failed_item = publish_items[0]
+            failed_item.update(error=_error_text(exc))
+            _set_item_stage(failed_item, "failed", status="failed")
+            for item in job.get("items", []):
+                if item.get("sequence", 0) > failed_item.get("sequence", 0) and item.get("status") in {"queued", "uploaded", "container_created"}:
+                    item.update(error="前一支影片發布失敗，流程已暫停")
+                    _set_item_stage(item, "paused", status="paused")
+            pending = [item for item in pending if item.get("sequence", 0) < failed_item.get("sequence", 0)]
+            _save_job(job)
+
+    for item in pending:
+        if not item.get("media_id"):
+            continue
+        item["error"] = None
+        _set_item_stage(item, "moving_drive", status="published")
+        _save_job(job)
+        _finish_published_item(job, item, credentials, r2)
+        _save_job(job)
+
+    if any(item.get("status") == "failed" for item in job.get("items", [])):
+        job["status"] = "paused"
+    elif any(item.get("r2_delete_error") or item.get("drive_move_error") for item in job.get("items", [])):
+        job["status"] = "completed_with_warnings"
+    else:
+        job["status"] = "completed"
+    return _save_job(job)
+
+
 def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2: R2Config) -> dict[str, Any]:
+    if (
+        callable(getattr(client, "create_reel_containers", None))
+        and callable(getattr(client, "wait_for_containers", None))
+        and callable(getattr(client, "publish_containers", None))
+        and sum(item.get("status") not in {"skipped", "published"} for item in job.get("items", [])) > 1
+    ):
+        return _process_job_with_batches(job=job, credentials=credentials, client=client, r2=r2)
     job["status"] = "running"
     _save_job(job)
     ensure_lifecycle(r2, days=3)
