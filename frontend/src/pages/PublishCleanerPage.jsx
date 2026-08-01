@@ -5,6 +5,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
+import SourceLinkInput from '../components/SourceLinkInput';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -123,7 +124,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       <div className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
         <div className="form-group" style={{ flex: 1, minWidth: '280px' }}>
           <label className="form-label"><PlaySquare size={14} /> To-Post 播放清單 ID</label>
-          <input className="form-input" type="text" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} placeholder="YouTube Playlist ID" />
+          <SourceLinkInput type="text" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID" />
         </div>
         <button className="btn btn-primary" onClick={handleLoadPlaylist} disabled={loading} style={{ marginTop: 'auto', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
           <RefreshCw size={16} className={loading ? 'spin' : ''} />

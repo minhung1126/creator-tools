@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ArrowRight, CheckCircle2, Clapperboard, PlaySquare, Save, Smartphone, XCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import SourceLinkInput from '../components/SourceLinkInput';
 
 export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setActiveTab }) {
   const toast = useToast();
@@ -46,7 +47,7 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
         </div>
         <div className="form-group">
           <label className="form-label"><PlaySquare size={14} /> 預設 To-Post 播放清單 ID</label>
-          <input className="form-input" value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} placeholder="YouTube Playlist ID" />
+          <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID" />
         </div>
         <button className="btn btn-success" type="submit" disabled={saving} style={{ width: 'fit-content' }}><Save size={18} />{saving ? '儲存中...' : '儲存 YouTube 設定'}</button>
       </form>
