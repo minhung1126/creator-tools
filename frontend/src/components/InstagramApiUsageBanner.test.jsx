@@ -16,6 +16,7 @@ describe('InstagramApiUsageBanner', () => {
     api.getInstagramApiUsage.mockResolvedValue({
       usage_percent: 18,
       requests_today: 4,
+      http_requests_today: 2,
       updated_at: '2026-08-01T10:00:00+00:00',
       meta_usage: {
         available: true,
@@ -34,7 +35,7 @@ describe('InstagramApiUsageBanner', () => {
 
     await waitFor(() => expect(screen.getByText('Instagram API 使用情況')).toBeInTheDocument());
     expect(screen.getByText('18% / 100%')).toBeInTheDocument();
-    expect(screen.getByText(/本系統今日請求 4 次/)).toBeInTheDocument();
+    expect(screen.getByText(/今日 Graph 操作 4 次（HTTP 2 次）/)).toBeInTheDocument();
     expect(screen.getByText(/呼叫量 18%/)).toBeInTheDocument();
     expect(screen.getByText(/POST create media container: 2 次/)).toBeInTheDocument();
   });

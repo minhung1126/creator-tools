@@ -133,6 +133,63 @@ def test_instagram_batch_handler_batches_meta_phases_in_sequence(monkeypatch, tm
     assert client.published == [["container-1", "container-2"]]
 
 
+def test_instagram_batch_defers_publish_work_beyond_live_quota(monkeypatch, tmp_path):
+    repo = TaskRepository(Database(tmp_path / "creator_tools.db"))
+    created = repo.create_batch_and_tasks(
+        {"platform": "instagram", "operation": "instagram.reels_publish", "failure_policy": "pause_remaining_in_batch"},
+        [
+            {
+                "platform": "instagram",
+                "operation": "instagram.reels_publish",
+                "queue_lane": "instagram",
+                "sequence_in_batch": index,
+                "video_id": f"file-{index}",
+                "video_title": f"{index}.mp4",
+                "payload": {"file_id": f"file-{index}", "source_folder_id": "source"},
+                "checkpoint": {
+                    "creation_id": f"container-{index}",
+                    "object_key": f"key-{index}",
+                    "public_url": f"https://cdn.example/{index}.mp4",
+                },
+            }
+            for index in (1, 2)
+        ],
+    )
+    claimed = repo.claim_batch("instagram")
+    monkeypatch.setattr("backend.app.services.r2_service.ensure_lifecycle", lambda *args, **kwargs: None)
+    monkeypatch.setattr(task_handlers, "_instagram_cleanup", lambda *args, **kwargs: [])
+
+    class QuotaClient:
+        def __init__(self):
+            self.published = []
+
+        def wait_for_containers(self, creation_ids):
+            return creation_ids
+
+        def wait_for_container(self, creation_id):
+            return creation_id
+
+        def get_content_publishing_limit(self):
+            return {"used": 99, "total": 100, "remaining": 1}
+
+        def publish_container(self, creation_id):
+            self.published.append(creation_id)
+            return f"media-{creation_id}"
+
+    client = QuotaClient()
+    results = task_handlers.process_instagram_reel_tasks(
+        claimed,
+        credentials=object(),
+        client=client,
+        r2=object(),
+        repository=repo,
+    )
+
+    assert [result["status"] for result in results] == ["succeeded", "paused"]
+    assert client.published == ["container-1"]
+    assert repo.get_task_internal(created["tasks"][1]["id"])["checkpoint"]["creation_id"] == "container-2"
+
+
 def test_youtube_metadata_cancel_before_update_stops_before_external_work(monkeypatch, tmp_path):
     repo = make_repo(tmp_path)
     task_id = create_task(

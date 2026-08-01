@@ -31,6 +31,18 @@ def response(payload, status=200):
     return httpx.Response(status, json=payload, request=request)
 
 
+@pytest.fixture(autouse=True)
+def disable_usage_tracking(monkeypatch):
+    monkeypatch.setattr(
+        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_batch_response",
+        lambda *args, **kwargs: None,
+    )
+
+
 def test_batch_requests_chain_children_and_preserve_input_order(monkeypatch):
     FakeHttpClient.calls = []
     FakeHttpClient.responses = [
@@ -169,3 +181,70 @@ def test_high_level_batch_preserves_partial_success_for_retry(monkeypatch):
     assert raised.value.results[0]["ok"] is True
     assert raised.value.results[0]["data"]["id"] == "container-1"
     assert raised.value.results[1]["ok"] is False
+
+
+def test_batch_missing_child_response_is_an_explicit_failure(monkeypatch):
+    FakeHttpClient.calls = []
+    FakeHttpClient.responses = [response([{"code": 200, "body": json.dumps({"id": "container-1"})}])]
+    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
+
+    client = InstagramClient("user-1", "token-1")
+    with pytest.raises(InstagramBatchError) as raised:
+        client.create_reel_containers(
+            [
+                {"video_url": "https://cdn.example/one.mp4"},
+                {"video_url": "https://cdn.example/two.mp4"},
+            ]
+        )
+
+    assert raised.value.index == 1
+    assert raised.value.results[0]["data"]["id"] == "container-1"
+    assert raised.value.results[1]["ok"] is False
+    assert len(FakeHttpClient.calls) == 1
+
+
+def test_later_chunk_transport_failure_keeps_earlier_results(monkeypatch):
+    FakeHttpClient.calls = []
+    FakeHttpClient.responses = [
+        response([{"code": 200, "body": json.dumps({"id": f"container-{index}"})} for index in range(50)]),
+        response({"error": {"message": "batch unavailable"}}, status=503),
+    ]
+    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
+
+    client = InstagramClient("user-1", "token-1")
+    with pytest.raises(InstagramBatchError) as raised:
+        client.create_reel_containers([{"video_url": f"https://cdn.example/{index}.mp4"} for index in range(51)])
+
+    assert raised.value.index == 50
+    assert len(raised.value.results) == 50
+    assert all(result["ok"] for result in raised.value.results)
+
+
+def test_container_error_reports_original_batch_index(monkeypatch):
+    client = InstagramClient("user-1", "token-1")
+    monkeypatch.setattr(
+        client,
+        "get_container_statuses",
+        lambda ids: [
+            {"status_code": "FINISHED", "status": "Finished"},
+            {"status_code": "ERROR", "status": "Video processing failed"},
+        ],
+    )
+
+    with pytest.raises(InstagramBatchError) as raised:
+        client.wait_for_containers(["container-1", "container-2"], poll_interval=0, max_polls=1)
+
+    assert raised.value.index == 1
+    assert raised.value.results[0]["ok"] is True
+    assert raised.value.results[1]["error"] == "Video processing failed"
+
+
+def test_content_publishing_limit_uses_live_account_capacity(monkeypatch):
+    client = InstagramClient("user-1", "token-1")
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: {"data": [{"quota_usage": 97, "config": {"quota_total": 100}}]},
+    )
+
+    assert client.get_content_publishing_limit() == {"used": 97, "total": 100, "remaining": 3}

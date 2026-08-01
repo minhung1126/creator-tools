@@ -42,6 +42,8 @@ class InstagramApiUsageTracker:
         normalized_path = str(path or "").split("?", 1)[0].strip("/")
         if normalized_path == "me":
             return f"{method_name} profile"
+        if normalized_path.endswith("/content_publishing_limit"):
+            return "GET content publishing limit"
         if method_name == "POST" and normalized_path.endswith("/media"):
             return "POST create media container"
         if method_name == "POST" and normalized_path.endswith("/media_publish"):
@@ -96,6 +98,9 @@ class InstagramApiUsageTracker:
             "request_date": today,
             "requests_today": 0,
             "total_requests": 0,
+            "http_requests_today": 0,
+            "total_http_requests": 0,
+            "batch_http_requests_today": 0,
             "methods": {},
             "last_meta_usage": None,
             "last_meta_usage_at": None,
@@ -120,6 +125,9 @@ class InstagramApiUsageTracker:
         data.setdefault("request_date", today)
         data.setdefault("requests_today", 0)
         data.setdefault("total_requests", 0)
+        data.setdefault("http_requests_today", data.get("requests_today", 0))
+        data.setdefault("total_http_requests", data.get("total_requests", 0))
+        data.setdefault("batch_http_requests_today", 0)
         if not isinstance(data.get("methods"), dict):
             data["methods"] = {}
         data.setdefault("last_meta_usage", None)
@@ -129,6 +137,8 @@ class InstagramApiUsageTracker:
         if data.get("request_date") != today:
             data["request_date"] = today
             data["requests_today"] = 0
+            data["http_requests_today"] = 0
+            data["batch_http_requests_today"] = 0
             data["methods"] = {}
         if not isinstance(data.get("last_meta_usage"), dict):
             data["last_meta_usage"] = None
@@ -171,6 +181,8 @@ class InstagramApiUsageTracker:
             data = self._load_unlocked()
             data["requests_today"] = int(data.get("requests_today", 0)) + 1
             data["total_requests"] = int(data.get("total_requests", 0)) + 1
+            data["http_requests_today"] = int(data.get("http_requests_today", 0)) + 1
+            data["total_http_requests"] = int(data.get("total_http_requests", 0)) + 1
             method_data = data["methods"].setdefault(endpoint, {"calls": 0})
             method_data["calls"] = int(method_data.get("calls", 0)) + 1
             if meta_usage is not None:
@@ -191,6 +203,71 @@ class InstagramApiUsageTracker:
             self._save_unlocked(data)
             return self._format_usage(data)
 
+    def record_batch_response(
+        self,
+        requests: list[dict[str, Any]],
+        response: Any,
+        response_data: Any = None,
+    ) -> dict[str, Any]:
+        """Record one HTTP batch and every Graph child operation it carries."""
+
+        request_specs = list(requests)
+        headers = getattr(response, "headers", {}) or {}
+        raw_usage = headers.get("x-app-usage") or headers.get("X-App-Usage")
+        meta_usage = self.parse_usage_header(raw_usage)
+        status_code = getattr(response, "status_code", None)
+        now = self._now()
+
+        with self._lock:
+            data = self._load_unlocked()
+            operation_count = max(len(request_specs), 1)
+            data["requests_today"] = int(data.get("requests_today", 0)) + operation_count
+            data["total_requests"] = int(data.get("total_requests", 0)) + operation_count
+            data["http_requests_today"] = int(data.get("http_requests_today", 0)) + 1
+            data["total_http_requests"] = int(data.get("total_http_requests", 0)) + 1
+            data["batch_http_requests_today"] = int(data.get("batch_http_requests_today", 0)) + 1
+            for request in request_specs:
+                endpoint = self._endpoint_label(str(request.get("method") or "GET"), str(request.get("path") or ""))
+                method_data = data["methods"].setdefault(endpoint, {"calls": 0})
+                method_data["calls"] = int(method_data.get("calls", 0)) + 1
+            if meta_usage is not None:
+                data["last_meta_usage"] = meta_usage
+                data["last_meta_usage_at"] = now
+
+            outer_error = response_data.get("error") if isinstance(response_data, Mapping) else None
+            child_error: Mapping[str, Any] | None = None
+            child_status: int | None = None
+            if isinstance(response_data, list):
+                for child in response_data:
+                    if not isinstance(child, Mapping):
+                        continue
+                    try:
+                        body = (
+                            json.loads(child.get("body", "{}"))
+                            if isinstance(child.get("body"), str)
+                            else child.get("body")
+                        )
+                    except (TypeError, json.JSONDecodeError):
+                        body = {}
+                    if isinstance(body, Mapping) and isinstance(body.get("error"), Mapping):
+                        child_error = body["error"]
+                        child_status = child.get("code")
+                        break
+            error_payload = outer_error if isinstance(outer_error, Mapping) else child_error
+            if error_payload is not None or (isinstance(status_code, int) and status_code >= 400):
+                error_payload = error_payload or {}
+                data["last_error"] = {
+                    "endpoint": "POST Graph batch",
+                    "status_code": child_status or status_code,
+                    "code": error_payload.get("code"),
+                    "error_subcode": error_payload.get("error_subcode"),
+                    "message": str(error_payload.get("message") or error_payload.get("error_user_msg") or "")[:200],
+                    "at": now,
+                }
+            data["updated_at"] = now
+            self._save_unlocked(data)
+            return self._format_usage(data)
+
     def get_usage(self) -> dict[str, Any]:
         with self._lock:
             return self._format_usage(self._load_unlocked())
@@ -204,6 +281,9 @@ class InstagramApiUsageTracker:
             "request_date": data.get("request_date", self._today()),
             "requests_today": int(data.get("requests_today", 0)),
             "total_requests": int(data.get("total_requests", 0)),
+            "http_requests_today": int(data.get("http_requests_today", 0)),
+            "total_http_requests": int(data.get("total_http_requests", 0)),
+            "batch_http_requests_today": int(data.get("batch_http_requests_today", 0)),
             "methods": [
                 {"endpoint": endpoint, **values}
                 for endpoint, values in sorted(methods.items())
@@ -228,7 +308,8 @@ class InstagramApiUsageTracker:
             "quota_source_url": _USAGE_HEADER,
             "note": (
                 "Instagram API 沒有 YouTube 那種固定 daily units 配額；這裡顯示 Meta 回應的 "
-                "x-app-usage 滾動使用率，以及本系統實際送出的請求數。剩餘百分比是目前最高欄位的估算，"
+                "x-app-usage 滾動使用率，以及本系統送出的 Graph 子操作與實際 HTTP 請求數。"
+                "批次中的每個子操作都會個別計數；剩餘百分比是目前最高欄位的估算，"
                 "不代表固定每日配額。"
             ),
         }

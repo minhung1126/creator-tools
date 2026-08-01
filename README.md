@@ -40,6 +40,18 @@
 6. **📋 統一任務隊列與通知中心**
    - Instagram Reels、YouTube metadata、YouTube 公開清理都以單支影片 task 持久化於 `data/creator_tools.db`。
    - Instagram 與 YouTube 各自有獨立的 concurrency 1 lane，支援取消、安全 checkpoint、重試、重啟恢復與持久化通知。
+   - Instagram 批次以最多 50 支影片為一個 worker claim，對齊 Meta Graph batch 上限；較大的使用者批次會保留原順序分段處理。
+   - 每個成功的 container／media ID 都會先寫入 SQLite checkpoint，再處理下一階段；部分失敗或服務重啟不會從頭重複發布。
+   - 任務中心會分頁載入完整持久化佇列；「未完成」包含排隊、執行、正在取消與暫停等待確認。
+
+### 任務佇列與 Instagram 批次語意
+
+- 一個平台 lane 同一時間只執行一個 worker unit；Instagram 與 YouTube 可彼此獨立進行。
+- Instagram 的 Drive 下載與 R2 上傳逐支執行，Meta container 建立、狀態查詢與發布則使用有界 batch。
+- 建立 container 前與發布前都會讀取帳號的 `content_publishing_limit`；若 24 小時滾動額度不足，只處理仍有額度的前段項目，其餘保留現有 checkpoint 並暫停等待重試。帳號未提供此 edge 時則由 `media_publish` 回應作最終判斷。
+- 批次中某支失敗時，後續未執行項目會暫停；已送出取消的項目會維持取消，不會被失敗處理改回可重試狀態。
+- Meta batch 缺少 child response 或後段 HTTP chunk 失敗時，已確認成功的 child response 仍會保存；未知結果不會被誤標成功。
+- API 使用量頁同時顯示 Graph 子操作數與實際 HTTP 請求數，批次不再被誤算成單一操作。
 
 ---
 
@@ -55,7 +67,6 @@ creator-tools/
 │   │   └── main.py
 │   ├── requirements.txt
 │   └── tests/              # mock-only pytest tests
-│   └── tests/              # mock-only pytest tests
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
@@ -69,7 +80,6 @@ creator-tools/
 │   ├── GOOGLE_API_SETUP.md
 │   └── INSTAGRAM_R2_SETUP.md
 ├── .env.example
-├── pyproject.toml
 ├── pyproject.toml
 ├── Dockerfile
 ├── docker-compose.yml
@@ -95,7 +105,7 @@ copy .env.example .env
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-後端 Health Check：`http://localhost:8000/api/v1/health`
+後端 Health Check：`http://localhost:8000/api/v1/health`。啟動後先確認回應中的 `ready` 是 `true`；若為 `false`，`warnings` 會直接列出尚缺的登入設定。即使程序存活，只要 OAuth 尚未備妥就不會誤報為可登入。
 
 ### 2. 前端
 

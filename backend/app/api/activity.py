@@ -33,6 +33,7 @@ def list_activity_tasks(
     operation: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     batch_id: Optional[str] = Query(None),
+    sort: str = Query("submission", pattern="^(submission|updated_desc)$"),
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     creds: Credentials = Depends(require_credentials),
@@ -43,6 +44,7 @@ def list_activity_tasks(
         operation=operation,
         status=status,
         batch_id=batch_id,
+        sort=sort,
         offset=offset,
         limit=limit,
     )

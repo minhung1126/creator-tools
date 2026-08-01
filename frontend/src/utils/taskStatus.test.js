@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isTaskRetryable, taskOperationLabel, taskStatusLabel } from './taskStatus';
+import { isTaskRetryable, TASK_UNFINISHED_QUEUE_STATUSES, taskOperationLabel, taskStatusLabel } from './taskStatus';
 
 describe('task status presentation', () => {
   it('distinguishes cancellation and warning states', () => {
@@ -7,6 +7,7 @@ describe('task status presentation', () => {
     expect(taskStatusLabel('canceled_with_warnings')).toBe('已取消但清理有警告');
     expect(isTaskRetryable({ status: 'succeeded_with_warnings', retryable: true })).toBe(true);
     expect(isTaskRetryable({ status: 'succeeded', retryable: true })).toBe(false);
+    expect(TASK_UNFINISHED_QUEUE_STATUSES).toEqual(['queued', 'running', 'cancel_requested', 'paused']);
   });
 
   it('labels the three supported operations', () => {
@@ -15,4 +16,3 @@ describe('task status presentation', () => {
     expect(taskOperationLabel('youtube.publish_cleanup')).toContain('To-Post');
   });
 });
-

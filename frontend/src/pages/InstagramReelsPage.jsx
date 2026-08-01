@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckSquare, FileSpreadsheet, Info, RefreshCw, Send, Shuffle, Users } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CheckSquare, FileSpreadsheet, Info, RefreshCw, Send, Settings, Shuffle, Users, XCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
@@ -129,6 +129,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
   const [job, setJob] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const [apiUsageRefreshKey, setApiUsageRefreshKey] = useState(0);
+  const [setupStatus, setSetupStatus] = useState({ loading: true, auth: null, settings: null, error: '' });
   const previewRequestId = useRef(0);
 
   const updateConfig = (patch) => setConfig((current) => ({ ...current, ...patch }));
@@ -217,15 +218,25 @@ export default function InstagramReelsPage({ setActiveTab }) {
     } : current);
   }, [job?.batch_id, tasks]);
 
-  useEffect(() => {
-    api.getInstagramSettings()
-      .then((data) => setConfig((current) => ({
+  const loadSetupStatus = useCallback(async () => {
+    setSetupStatus((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const [settings, auth] = await Promise.all([
+        api.getInstagramSettings(),
+        api.getInstagramAuthStatus(),
+      ]);
+      setConfig((current) => ({
         ...current,
-        drive_folder_id: data.drive_folder_id || current.drive_folder_id,
-        spreadsheet_id: data.spreadsheet_id || current.spreadsheet_id,
-      })))
-      .catch(() => {});
+        drive_folder_id: settings.drive_folder_id || current.drive_folder_id,
+        spreadsheet_id: settings.spreadsheet_id || current.spreadsheet_id,
+      }));
+      setSetupStatus({ loading: false, auth, settings, error: '' });
+    } catch (error) {
+      setSetupStatus((current) => ({ ...current, loading: false, error: error.message }));
+    }
   }, []);
+
+  useEffect(() => { loadSetupStatus(); }, [loadSetupStatus]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
@@ -479,6 +490,24 @@ export default function InstagramReelsPage({ setActiveTab }) {
   const assignedCount = selectableVideos.filter((video) => assignments[video.id]).length;
   const jobIsActive = Boolean(job?.status && ACTIVE_JOB_STATUSES.has(job.status));
   const liveProgress = job?.progress || {};
+  const setupIssues = useMemo(() => {
+    const issues = [];
+    if (setupStatus.error) return ['無法確認 Instagram 發布設定'];
+    if (setupStatus.loading) return issues;
+    const auth = setupStatus.auth || {};
+    const settings = setupStatus.settings || {};
+    if (!auth.app_configured) issues.push('Instagram App 尚未設定');
+    if (!auth.connected || auth.expired || ['reauthorization_required', 'refresh_failed'].includes(auth.account?.status)) {
+      issues.push('Instagram 帳號需要連線或重新授權');
+    }
+    const r2Ready = settings.r2_account_id
+      && settings.r2_access_key_id
+      && settings.r2_secret_access_key_configured
+      && settings.r2_bucket_name
+      && settings.r2_public_base_url;
+    if (!r2Ready) issues.push('Cloudflare R2 設定尚未完成');
+    return issues;
+  }, [setupStatus]);
   useEffect(() => {
     if (!jobIsActive) return undefined;
     const interval = setInterval(() => setApiUsageRefreshKey((key) => key + 1), 15000);
@@ -501,6 +530,25 @@ export default function InstagramReelsPage({ setActiveTab }) {
       <h1>Instagram Reels 自動發布</h1>
       <p className="section-desc">先設定 Reels 的工作表與內文欄，再在獨立區塊篩選團體和人物。Drive 影片依檔名由 A 到 Z 顯示；發布成功後會自動移入 Published 資料夾。</p>
     </div>
+
+    <section className="glass-panel card-padding" style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+            {setupStatus.loading ? <RefreshCw size={18} className="spin" /> : setupIssues.length ? <XCircle size={18} /> : <CheckCircle2 size={18} />}
+            發布前準備狀態
+          </h2>
+          <p className="section-desc">
+            {setupStatus.loading ? '正在確認 Instagram 與 R2 設定…' : setupIssues.length ? setupIssues.join('；') : 'Instagram 授權與 R2 必要設定已備妥；建立工作時會再做一次連線檢查。'}
+          </p>
+          {setupStatus.error && <p style={{ color: '#f87171', marginTop: 6 }}>{setupStatus.error}</p>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" type="button" onClick={loadSetupStatus} disabled={setupStatus.loading}><RefreshCw size={16} />重新檢查</button>
+          {setupIssues.length > 0 && <button className="btn btn-primary" type="button" onClick={() => setActiveTab('instagram_settings')}><Settings size={16} />前往修正設定</button>}
+        </div>
+      </div>
+    </section>
 
     <section className="top-filter-bar">
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: '1px solid var(--border-color)', paddingBottom: 12 }}>
@@ -580,11 +628,11 @@ export default function InstagramReelsPage({ setActiveTab }) {
         <div className="publish-progress-track"><span style={{ width: `${Math.min(Math.max(liveProgress.percent || 0, 0), 100)}%` }} /></div>
         <div className="publish-progress-meta"><span>{liveProgress.completed_count || 0} / {liveProgress.total || 0} 支完成</span><span>失敗 {liveProgress.failed_count || 0} · 暫停 {liveProgress.paused_count || 0}</span></div>
       </div>}
-      <div className="glass-panel execution-bar"><div><strong style={{ color: '#fff' }}>將處理目前清單中的 {assignedCount} 支影片</strong><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>人物為「不發布」的影片會安全略過。</p></div><button className="btn btn-success" onClick={() => setConfirmPublish(true)} disabled={publishing || jobIsActive || !assignedCount}><Send size={18} />{publishing || jobIsActive ? '處理中…' : '建立發布工作'}</button></div>
+      <div className="glass-panel execution-bar"><div><strong style={{ color: '#fff' }}>將處理目前清單中的 {assignedCount} 支影片</strong><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>{setupIssues.length ? '請先完成上方發布設定，系統不會建立注定失敗的工作。' : '人物為「不發布」的影片會安全略過；送出時會先驗證 Instagram 與 R2 連線。'}</p></div><button className="btn btn-success" onClick={() => setConfirmPublish(true)} disabled={publishing || jobIsActive || setupStatus.loading || setupIssues.length > 0 || !assignedCount}><Send size={18} />{publishing || jobIsActive ? '處理中…' : setupStatus.loading ? '檢查設定中…' : '建立發布工作'}</button></div>
     </div>}
 
     {job && <section className="glass-panel card-padding" style={{ display: 'grid', gap: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}><div><h2>發布工作 {jobIsActive ? '處理中' : job.status === 'paused' ? '已暫停' : job.status === 'failed' ? '失敗' : '結果'}</h2><p className="section-desc">Job ID：{job.id}</p>{job.r2_cleanup_failed_count > 0 && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.r2_cleanup_failed_count} 支影片尚未從 R2 清理，可重試清理。</p>}{(job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.drive_move_pending_count || job.drive_move_failed_count} 支影片尚未移入 Drive Published，可重試搬移。</p>}</div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary" onClick={reloadJob}><RefreshCw size={16} />重新讀取</button>{(job.status === 'paused' || job.r2_cleanup_failed_count > 0 || job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <button className="btn btn-primary" onClick={retryJob} disabled={publishing || jobIsActive}><Send size={16} />重試未完成項目</button>}</div></div>{job.results?.map((item) => { const taskStatus = item.task_status || (item.status === 'published' ? 'succeeded' : item.status); const task = { id: item.task_id, batch_id: job.batch_id || job.id, batch_short_code: (job.batch_id || job.id || '').slice(0, 8).toUpperCase(), platform: 'instagram', operation: 'instagram.reels_publish', video_id: item.file_id, video_title: item.file_name, status: taskStatus, stage: item.stage, stage_label: item.stage_label, progress_percent: item.progress_percent, retryable: item.retryable, error: item.error, cancel_too_late: item.cancel_too_late }; return <div key={`${item.file_id}-${item.sequence}`} className="glass-panel" style={{ padding: 12, display: 'grid', gap: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}><div><strong>{item.sequence}. {item.file_name || item.file_id}</strong><p className="section-desc">{item.person} · {STATUS_LABELS[item.status] || item.status}</p>{item.stage_label && item.stage !== 'completed' && <p className="section-desc">目前步驟：{item.stage_label}</p>}{item.error && <p style={{ color: '#f87171' }}>錯誤：{item.error}</p>}{item.drive_move_error && <p style={{ color: '#fbbf24' }}>Drive：{item.drive_move_error}</p>}{item.drive_moved && <p className="section-desc">已移入 Drive Published</p>}{item.r2_delete_error && <p style={{ color: '#fbbf24' }}>R2：{item.r2_delete_error}</p>}{item.r2_deleted && <p className="section-desc">R2 暫存影片已刪除</p>}{item.preflight && <p className="section-desc">{item.preflight.width || '?'}×{item.preflight.height || '?'} · {item.preflight.duration_seconds ? `${item.preflight.duration_seconds} 秒` : 'duration 未提供'} · {item.preflight.size_bytes || 0} bytes</p>}</div><span className={`badge ${item.stage === 'r2_cleanup_failed' || item.stage === 'drive_move_failed' || item.status === 'failed' ? 'badge-disconnected' : item.status === 'published' || item.stage === 'completed' ? 'badge-connected' : 'badge-info'}`}>{item.stage_label || STATUS_LABELS[item.status] || item.status}</span></div>{item.task_id && <TaskDetail task={task} compact onCancel={() => runTaskAction(cancelTask, item.task_id)} onRetry={() => runTaskAction(retryTask, item.task_id)} />}</div>; })}</section>}
-    <ConfirmDialog open={confirmPublish} title="建立 Instagram 發布工作" message={`將依 Drive 檔名由 A 到 Z 處理 ${assignedCount} 支 Reels，確定繼續？`} confirmText="開始處理" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
+    <ConfirmDialog open={confirmPublish} title="建立 Instagram 發布工作" message={`系統會先驗證 Instagram 與 R2 連線，再依 Drive 檔名由 A 到 Z 排入 ${assignedCount} 支 Reels；若檢查失敗不會建立任務。確定繼續？`} confirmText="檢查並開始處理" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
     <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
   </div>;
 }

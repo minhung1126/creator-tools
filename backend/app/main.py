@@ -68,11 +68,25 @@ app.include_router(api_router)
 
 @app.get("/api/v1/health")
 def health_check():
+    google_oauth_ready = bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET)
+    access_allowlist_ready = bool(settings.allowed_google_emails) or not settings.is_production
+    warnings = []
+    if not google_oauth_ready:
+        warnings.append("Google OAuth credentials are not configured")
+    if not access_allowlist_ready:
+        warnings.append("ALLOWED_GOOGLE_EMAILS is required in production")
     return {
         "status": "healthy",
+        "ready": google_oauth_ready and access_allowlist_ready,
         "service": "Creator Tools Backend",
         "host": settings.base_url,
         "redirect_uri": settings.get_redirect_uri(),
+        "configuration": {
+            "google_oauth_ready": google_oauth_ready,
+            "access_allowlist_ready": access_allowlist_ready,
+            "instagram_oauth_ready": bool(settings.instagram_app_id and settings.instagram_app_secret),
+        },
+        "warnings": warnings,
         "commit_sha": os.getenv("APP_COMMIT_SHA", "development"),
     }
 

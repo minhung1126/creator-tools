@@ -50,6 +50,8 @@ export default function SheetCopyPage({ sysSettings }) {
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   };
 
+  // Initial hydration only; later source edits are applied by the explicit refresh button.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (spreadsheetId) refresh(); }, []);
   const changeTeam = async (nextTeam) => { setTeam(nextTeam); try { await loadPeople(worksheetName, nextTeam); } catch (err) { setError(err.message); } };
   const visibleColumns = columns.filter((column) => visibleKeys.includes(column.key)); const keyword = query.trim().toLocaleLowerCase('zh-TW');

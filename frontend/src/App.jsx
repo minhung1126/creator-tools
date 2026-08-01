@@ -68,7 +68,7 @@ function AppContent() {
         clearAuthHash();
         const updatedUser = await fetchUser(); if (updatedUser) await fetchSettings();
       } else if (authResult?.type === 'google_error') {
-        const message = 'Google 帳號連線失敗，請重新嘗試。';
+        const message = authResult.value || 'Google 帳號連線失敗，請重新嘗試。';
         setAuthError(message); toast.error(message); clearAuthHash();
       } else if (authResult?.type === 'instagram_success') {
         setActiveTab('instagram_settings');
@@ -81,13 +81,24 @@ function AppContent() {
         }
       } else if (authResult?.type === 'instagram_error') {
         setActiveTab('instagram_settings');
-        toast.error('Instagram 帳號連線失敗，請重新嘗試。');
+        toast.error(authResult.value || 'Instagram 帳號連線失敗，請重新嘗試。');
         clearAuthHash();
         setInstagramStatusVersion((version) => version + 1);
       } else if (user) await fetchSettings();
       setLoading(false);
     };
     init();
+  }, [toast]);
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      const message = '登入已逾時，請重新登入；完成後可回到任務隊列繼續查看工作。';
+      setAuthUser(null);
+      setAuthError(message);
+      toast.warning(message, 8000);
+    };
+    window.addEventListener('creator-tools:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('creator-tools:session-expired', handleSessionExpired);
   }, [toast]);
 
   const handleLogout = async () => {

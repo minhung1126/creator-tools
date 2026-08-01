@@ -180,9 +180,7 @@ class InstagramClient:
         except ValueError:
             outer_data = None
         try:
-            instagram_api_usage_tracker.record_response(
-                "POST", "batch", response, outer_data if isinstance(outer_data, dict) else {}
-            )
+            instagram_api_usage_tracker.record_batch_response(requests, response, outer_data)
         except Exception:
             logger.warning("Failed to record Instagram batch API usage", exc_info=True)
 
@@ -217,8 +215,20 @@ class InstagramClient:
                     "index": index,
                 }
             )
-        if len(results) != len(requests):
-            raise RuntimeError("Instagram API batch response count did not match the request count")
+        if len(results) < len(requests):
+            for index in range(len(results), len(requests)):
+                results.append(
+                    {
+                        "ok": False,
+                        "status_code": 502,
+                        "data": {},
+                        "error": "Instagram API batch response omitted a child result",
+                        "token_error": False,
+                        "index": index,
+                    }
+                )
+        elif len(results) > len(requests):
+            raise RuntimeError("Instagram API batch response count exceeded the request count")
         return results
 
     def batch_request(
@@ -245,12 +255,33 @@ class InstagramClient:
                 chunk_results = self._batch_request_once(chunk, preserve_order=preserve_order)
             except RuntimeError as exc:
                 if not getattr(exc, "token_error", False) or not self._on_token_refresh:
+                    if results:
+                        raise InstagramBatchError(
+                            str(exc) or "Instagram API batch request failed",
+                            index=start,
+                            results=results,
+                        ) from exc
                     raise
                 refreshed_token = self._on_token_refresh()
                 if not refreshed_token:
+                    if results:
+                        raise InstagramBatchError(
+                            str(exc) or "Instagram access token refresh failed",
+                            index=start,
+                            results=results,
+                        ) from exc
                     raise
                 self.access_token = refreshed_token
-                chunk_results = self._batch_request_once(chunk, preserve_order=preserve_order)
+                try:
+                    chunk_results = self._batch_request_once(chunk, preserve_order=preserve_order)
+                except RuntimeError as retry_exc:
+                    if results:
+                        raise InstagramBatchError(
+                            str(retry_exc) or "Instagram API batch retry failed",
+                            index=start,
+                            results=results,
+                        ) from retry_exc
+                    raise
             for result in chunk_results:
                 result["index"] = start + int(result.get("index", 0))
             results.extend(chunk_results)
@@ -302,6 +333,16 @@ class InstagramClient:
         first_failure: int | None = None
         for index, (request, result) in enumerate(zip(requests, results)):
             if result.get("ok"):
+                resolved.append(result)
+                continue
+            if result.get("status_code") == 502 and result.get("error") == (
+                "Instagram API batch response omitted a child result"
+            ):
+                # The server did not acknowledge whether this side effect ran.
+                # Retrying it automatically could duplicate a container or a
+                # publish operation, so leave it for checkpoint-aware retry.
+                if first_failure is None:
+                    first_failure = index
                 resolved.append(result)
                 continue
             try:
@@ -371,6 +412,28 @@ class InstagramClient:
     def profile(self):
         # /me avoids trusting a separately supplied account ID during verification.
         return self.request("GET", "me", params={"fields": "id,username,account_type"})
+
+    def get_content_publishing_limit(self) -> dict[str, int] | None:
+        """Return the account's live rolling publishing capacity when available."""
+
+        payload = self.request(
+            "GET",
+            f"{self.user_id}/content_publishing_limit",
+            params={"fields": "quota_usage,config"},
+        )
+        records = payload.get("data") if isinstance(payload, dict) else None
+        record = records[0] if isinstance(records, list) and records and isinstance(records[0], dict) else None
+        if not record:
+            return None
+        config = record.get("config") if isinstance(record.get("config"), dict) else {}
+        try:
+            used = max(int(record.get("quota_usage") or 0), 0)
+            total = max(int(config.get("quota_total") or 0), 0)
+        except (TypeError, ValueError):
+            return None
+        if total <= 0:
+            return None
+        return {"used": used, "total": total, "remaining": max(total - used, 0)}
 
     def create_reel_containers(self, reels: list[dict[str, Any]]) -> list[str]:
         """Create multiple Reel containers in input order with one batch call."""
@@ -450,6 +513,7 @@ class InstagramClient:
             return [{"status_code": "FINISHED", "status": "Finished"}]
 
         pending = list(creation_ids)
+        original_index = {creation_id: index for index, creation_id in enumerate(creation_ids)}
         final: dict[str, dict[str, Any]] = {}
         for _ in range(max_polls):
             statuses = self.get_container_statuses(pending)
@@ -459,7 +523,29 @@ class InstagramClient:
                 if code == "FINISHED":
                     final[creation_id] = status
                 elif code in {"ERROR", "EXPIRED"}:
-                    raise RuntimeError(status.get("status") or f"Instagram container {code}")
+                    results = [
+                        {
+                            "ok": item in final,
+                            "status_code": 200 if item in final else 409,
+                            "data": final.get(item, {}),
+                            "error": None if item in final else "Instagram container status is not finished",
+                            "token_error": False,
+                            "index": index,
+                        }
+                        for index, item in enumerate(creation_ids)
+                    ]
+                    failed_index = original_index[creation_id]
+                    results[failed_index].update(
+                        {
+                            "data": status,
+                            "error": status.get("status") or f"Instagram container {code}",
+                        }
+                    )
+                    raise InstagramBatchError(
+                        results[failed_index]["error"],
+                        index=failed_index,
+                        results=results,
+                    )
                 else:
                     next_pending.append(creation_id)
             if not next_pending:

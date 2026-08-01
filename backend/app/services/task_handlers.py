@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import re
 import tempfile
@@ -22,6 +23,8 @@ from backend.app.services.youtube_service import (
     set_video_public,
     update_single_video_metadata,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -385,20 +388,9 @@ def process_instagram_reel_tasks(
         return {key: item.get(key) for key in keys if key in item}
 
     def pause_after(sequence: int, reason: str) -> None:
-        for state in states:
-            if state["sequence"] <= sequence:
-                continue
-            current = repository.get_task_internal(state["task"]["id"])
-            if current and current.get("status") in {"queued", "running", "cancel_requested"}:
-                repository.update_task(
-                    state["task"]["id"],
-                    status="paused",
-                    stage="paused",
-                    progress_percent=current.get("progress_percent", 0),
-                    error=reason,
-                    retryable=True,
-                    message=reason,
-                )
+        batch_id = str(states[0]["task"]["batch_id"])
+        repository.pause_remaining_tasks(batch_id, after_sequence=sequence, reason=reason)
+        repository.pause_or_cancel_claimed_tasks(batch_id, after_sequence=sequence, reason=reason)
 
     def mark_failed(state: dict[str, Any], error: Any) -> None:
         state["context"].finish("failed", stage="failed", error=_error_text(error), retryable=True)
@@ -461,6 +453,44 @@ def process_instagram_reel_tasks(
             elif failed_index is None:
                 failed_index = index
         return failed_index
+
+    def publishing_capacity() -> dict[str, int] | None:
+        if not callable(getattr(client, "get_content_publishing_limit", None)):
+            return None
+        try:
+            return client.get_content_publishing_limit()
+        except Exception:
+            # Some account/app combinations do not expose this edge.  The
+            # publish endpoint remains authoritative, so lack of a quota
+            # snapshot must not make an otherwise valid workflow unusable.
+            logger.warning("Unable to read Instagram content publishing limit", exc_info=True)
+            return None
+
+    def apply_publishing_capacity(
+        candidates: list[dict[str, Any]], capacity: dict[str, int] | None
+    ) -> list[dict[str, Any]]:
+        remaining = capacity.get("remaining") if capacity else None
+        if remaining is None or remaining >= len(candidates):
+            return candidates
+        allowed_states = candidates[:remaining]
+        deferred_states = candidates[remaining:]
+        reason = f"Instagram 近 24 小時發布額度不足：已使用 {capacity['used']} / {capacity['total']}，請稍後重試。"
+        for state in deferred_states:
+            current = repository.get_task_internal(state["task"]["id"])
+            if current and current.get("status") in {"running", "cancel_requested"}:
+                if current["status"] == "cancel_requested":
+                    state["context"].finish("canceled", message=current.get("cancel_reason") or "使用者要求取消")
+                else:
+                    repository.update_task(
+                        state["task"]["id"],
+                        status="paused",
+                        stage="paused",
+                        progress_percent=current.get("progress_percent", 0),
+                        error=reason,
+                        retryable=True,
+                        message=reason,
+                    )
+        return allowed_states
 
     try:
         credentials, client, r2 = _instagram_dependencies(credentials, client, r2)
@@ -534,6 +564,18 @@ def process_instagram_reel_tasks(
     if preparation_failure is not None:
         pause_after(preparation_failure["sequence"], "前一支影片任務失敗，後續任務已暫停。")
         processable = [state for state in processable if state["sequence"] < preparation_failure["sequence"]]
+
+    # Read the rolling account capacity before creating containers.  This
+    # avoids creating containers that are likely to expire while tasks wait
+    # for quota to become available.
+    unpublished_states = [state for state in processable if not state["item"].get("media_id")]
+    allowed_unpublished = apply_publishing_capacity(unpublished_states, publishing_capacity())
+    allowed_unpublished_ids = {state["task"]["id"] for state in allowed_unpublished}
+    processable = [
+        state
+        for state in processable
+        if state["item"].get("media_id") or state["task"]["id"] in allowed_unpublished_ids
+    ]
 
     # Create every missing container in the ordered part of this batch.
     create_states = [
@@ -621,6 +663,13 @@ def process_instagram_reel_tasks(
     publish_states = [
         state for state in processable if state["item"].get("creation_id") and not state["item"].get("media_id")
     ]
+    if publish_states:
+        allowed_publish_states = apply_publishing_capacity(publish_states, publishing_capacity())
+        deferred_ids = {state["task"]["id"] for state in publish_states} - {
+            state["task"]["id"] for state in allowed_publish_states
+        }
+        processable = [state for state in processable if state["task"]["id"] not in deferred_ids]
+        publish_states = allowed_publish_states
     if publish_states:
         try:
             for state in publish_states:

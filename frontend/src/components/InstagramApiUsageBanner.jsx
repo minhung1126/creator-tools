@@ -112,7 +112,8 @@ export default function InstagramApiUsageBanner({ refreshKey = 0 }) {
           <Database size={14} /> 剩餘估算 {formatPercent(usage?.remaining_percent)}
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
-          <Database size={14} /> 本系統今日請求 {Number(usage?.requests_today || 0).toLocaleString()} 次
+          <Database size={14} /> 今日 Graph 操作 {Number(usage?.requests_today || 0).toLocaleString()} 次
+          {usage?.http_requests_today !== undefined && `（HTTP ${Number(usage.http_requests_today).toLocaleString()} 次）`}
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <Clock3 size={14} /> Meta 回報更新：{formatDate(meta.observed_at)}

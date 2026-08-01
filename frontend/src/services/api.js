@@ -1,10 +1,56 @@
 const API_BASE = '/api/v1';
+const DEFAULT_TIMEOUT_MS = 45_000;
+
+export class ApiError extends Error {
+  constructor(message, { status = 0, code = 'request_failed' } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+function responseMessage(data, status) {
+  const detail = data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (typeof data?.message === 'string' && data.message.trim()) return data.message;
+  if (status === 401) return '登入已逾時，請重新登入後再試。';
+  if (status === 403) return '目前帳號沒有執行此操作的權限。';
+  if (status === 429) return '服務目前忙碌或已達 API 用量限制，請稍後再試。';
+  if (status >= 500) return '伺服器暫時無法處理，請稍後按「重試」。';
+  return `操作失敗（HTTP ${status}），請重試。`;
+}
 
 async function request(endpoint, options = {}) {
-  const config = { headers: { 'Content-Type': 'application/json', ...options.headers }, ...options };
-  const response = await fetch(`${API_BASE}${endpoint}`, config);
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const config = {
+    ...fetchOptions,
+    headers: { 'Content-Type': 'application/json', ...fetchOptions.headers },
+    signal: controller.signal,
+  };
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, config);
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new ApiError('連線逾時，請確認網路後按「重試」。', { code: 'timeout' });
+    }
+    throw new ApiError('目前無法連線到 Creator Tools，請確認服務與網路後重試。', { code: 'network_error' });
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || data.message || `Request failed with status ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 401) {
+      window.dispatchEvent(new CustomEvent('creator-tools:session-expired'));
+    }
+    throw new ApiError(responseMessage(data, response.status), {
+      status: response.status,
+      code: response.status === 401 ? 'session_expired' : 'request_failed',
+    });
+  }
   return data;
 }
 
