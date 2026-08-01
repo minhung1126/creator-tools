@@ -38,7 +38,7 @@ export default function LoginPage({ initialError }) {
           <div className="login-logo-box">
             <Video size={36} color="#ffffff" />
           </div>
-          <h1 className="login-title">YouTube Creator Tools</h1>
+          <h1 className="login-title">Creator Tools</h1>
           <p className="login-subtitle">創作者自動化控制台系統</p>
         </div>
 
@@ -49,7 +49,7 @@ export default function LoginPage({ initialError }) {
 
         {/* Description */}
         <p className="login-description">
-          歡迎使用 YouTube Creator Tools。開啟控制台與內部功能前，請先登入 Google 帳號授權存取對應之 API 資源。
+          歡迎使用 Creator Tools。開啟控制台與內部功能前，請先登入 Google 帳號授權存取對應之 API 資源。
         </p>
 
         {/* Feature List */}

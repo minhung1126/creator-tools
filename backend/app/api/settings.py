@@ -75,7 +75,11 @@ def update_system_settings(payload: ResourceSettingsModel, creds: Credentials = 
         update_data["default_playlist_id"] = payload.default_playlist_id
     runtime_config.update(update_data)
     logger.info("System settings updated: %s", list(update_data.keys()))
-    return {"status": "success", "message": "Settings updated and saved successfully", "settings": get_system_settings(creds)}
+    return {
+        "status": "success",
+        "message": "Settings updated and saved successfully",
+        "settings": get_system_settings(creds),
+    }
 
 
 @router.get("/youtube-drafts")
@@ -85,7 +89,9 @@ def get_youtube_draft_settings(creds: Credentials = Depends(require_credentials)
 
 
 @router.put("/youtube-drafts")
-def update_youtube_draft_settings(payload: YouTubeDraftConfigUpdateModel, creds: Credentials = Depends(require_credentials)):
+def update_youtube_draft_settings(
+    payload: YouTubeDraftConfigUpdateModel, creds: Credentials = Depends(require_credentials)
+):
     del creds
     key = _draft_config_key(payload.video_type)
     value = payload.config.model_dump()

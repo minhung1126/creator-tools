@@ -91,14 +91,12 @@ class Settings(BaseSettings):
 
     @property
     def allowed_google_emails(self) -> frozenset[str]:
-        return frozenset(
-            email.strip().casefold()
-            for email in self.ALLOWED_GOOGLE_EMAILS.split(",")
-            if email.strip()
-        )
+        return frozenset(email.strip().casefold() for email in self.ALLOWED_GOOGLE_EMAILS.split(",") if email.strip())
 
     def is_google_email_allowed(self, email: str) -> bool:
-        return bool(email) and email.strip().casefold() in self.allowed_google_emails
+        if self.allowed_google_emails:
+            return bool(email) and email.strip().casefold() in self.allowed_google_emails
+        return bool(email) and not self.is_production
 
     @property
     def instagram_app_id(self) -> str:

@@ -6,7 +6,7 @@ Centralizes common dependency injection functions used across API routes.
 
 import logging
 
-from fastapi import Request, HTTPException
+from fastapi import HTTPException, Request
 from google.oauth2.credentials import Credentials
 
 from backend.app.services.google_auth import get_current_credentials
@@ -27,6 +27,6 @@ def require_credentials(request: Request) -> Credentials:
         raise HTTPException(
             status_code=401,
             detail="Google account not connected or OAuth token expired. "
-                   "Please connect your Google account in Settings."
+            "Please connect your Google account in Settings.",
         )
     return creds

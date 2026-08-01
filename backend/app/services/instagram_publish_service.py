@@ -29,7 +29,12 @@ def _now() -> str:
 
 def _error_text(exc: Exception) -> str:
     message = str(exc).strip() or type(exc).__name__
-    return message[:500]
+    lowered = message.casefold()
+    if len(message) > 200 or any(
+        marker in lowered for marker in ("access_token", "client_secret", "authorization", "bearer ", "response body")
+    ):
+        return "外部服務處理失敗，請檢查設定後重試。"
+    return message
 
 
 def _preflight(file: dict[str, Any]) -> tuple[bool, str | None, dict[str, Any]]:
@@ -137,7 +142,10 @@ def prepare_job(
 
 def _counts(job: dict[str, Any]) -> dict[str, int]:
     statuses = [item.get("status") for item in job.get("items", [])]
-    return {f"{status}_count": statuses.count(status) for status in ("queued", "uploaded", "container_created", "published", "failed", "paused", "skipped")}
+    return {
+        f"{status}_count": statuses.count(status)
+        for status in ("queued", "uploaded", "container_created", "published", "failed", "paused", "skipped")
+    }
 
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
@@ -145,8 +153,7 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
     result.pop("items", None)
     result.update(_counts(job))
     result["results"] = [
-        {key: value for key, value in item.items() if key != "caption"}
-        for item in job.get("items", [])
+        {key: value for key, value in item.items() if key != "caption"} for item in job.get("items", [])
     ]
     return result
 
@@ -164,7 +171,10 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
             continue
         try:
             safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", item["file_name"]).strip("-._") or "reel.mp4"
-            object_key = item.get("object_key") or f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/{item['sequence']:03d}-{item['file_id']}-{safe_name}"
+            object_key = (
+                item.get("object_key")
+                or f"instagram-reels/{datetime.now(timezone.utc):%Y/%m/%d}/{item['sequence']:03d}-{item['file_id']}-{safe_name}"
+            )
             item["object_key"] = object_key
             if not item.get("public_url"):
                 with tempfile.TemporaryDirectory(prefix="creator-tools-instagram-") as directory:

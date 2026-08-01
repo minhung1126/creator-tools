@@ -75,9 +75,7 @@ class CredentialStore:
         try:
             return self._fernet.decrypt(value.encode("ascii")).decode("utf-8")
         except (InvalidToken, ValueError) as exc:
-            raise RuntimeError(
-                "無法解密已儲存的憑證。請確認 CREDENTIAL_ENCRYPTION_KEY 未變更，或重新連線。"
-            ) from exc
+            raise RuntimeError("無法解密已儲存的憑證。請確認 CREDENTIAL_ENCRYPTION_KEY 未變更，或重新連線。") from exc
 
     def save_instagram_connection(
         self,

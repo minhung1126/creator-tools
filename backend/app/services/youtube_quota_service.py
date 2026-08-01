@@ -132,10 +132,7 @@ class YouTubeQuotaTracker:
             "used_units": used,
             "remaining_units": max(limit - used, 0),
             "usage_percent": round((used / limit * 100), 2) if limit else 0,
-            "methods": [
-                {"method": method, **values}
-                for method, values in sorted(data.get("methods", {}).items())
-            ],
+            "methods": [{"method": method, **values} for method, values in sorted(data.get("methods", {}).items())],
             "updated_at": data.get("updated_at"),
             "reset_at": self._next_reset().isoformat(),
             "reset_timezone": "America/Los_Angeles",

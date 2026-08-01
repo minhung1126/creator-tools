@@ -73,12 +73,14 @@ def ensure_lifecycle(config: R2Config, days: int = 3):
     create_client(config).put_bucket_lifecycle_configuration(
         Bucket=config.bucket_name,
         LifecycleConfiguration={
-            "Rules": [{
-                "ID": "creator-tools-temporary-reels",
-                "Status": "Enabled",
-                "Filter": {"Prefix": "instagram-reels/"},
-                "Expiration": {"Days": days},
-            }]
+            "Rules": [
+                {
+                    "ID": "creator-tools-temporary-reels",
+                    "Status": "Enabled",
+                    "Filter": {"Prefix": "instagram-reels/"},
+                    "Expiration": {"Days": days},
+                }
+            ]
         },
     )
 

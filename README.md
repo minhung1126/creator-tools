@@ -29,7 +29,7 @@
    - 使用與 YouTube 相同的 Sheet 團體／人物選擇邏輯，套用指定欄位的 Instagram 內文。
    - 下載 Drive 影片後上傳至 Cloudflare R2，驗證公開 HTTPS URL，再建立並發布 Reels。
    - 使用 **Instagram API with Instagram Login** 與 `graph.instagram.com`，不需連結 Facebook 粉絲專頁。
-   - 支援逐片選人、批量套用、分享到動態消息與逐片發布結果。
+   - 支援逐片選人、批量套用、分享到動態消息、持久化工作結果與 retry。
 
 ---
 
@@ -43,7 +43,9 @@ creator-tools/
 │   │   ├── core/             # 環境變數、安全 Session、持久化設定
 │   │   ├── services/         # Google、YouTube、Drive、R2、Instagram
 │   │   └── main.py
-│   └── requirements.txt
+│   ├── requirements.txt
+│   └── tests/              # mock-only pytest tests
+│   └── tests/              # mock-only pytest tests
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
@@ -57,6 +59,8 @@ creator-tools/
 │   ├── GOOGLE_API_SETUP.md
 │   └── INSTAGRAM_R2_SETUP.md
 ├── .env.example
+├── pyproject.toml
+├── pyproject.toml
 ├── Dockerfile
 ├── docker-compose.yml
 └── README.md
@@ -78,7 +82,7 @@ python -m venv venv
 
 pip install -r backend/requirements.txt
 copy .env.example .env
-uvicorn backend.app.main:app --reload --port 8000
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 後端 Health Check：`http://localhost:8000/api/v1/health`

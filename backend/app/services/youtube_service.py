@@ -31,22 +31,20 @@ def _deduplicate_videos(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if not video_id or video_id in seen_video_ids:
             continue
         seen_video_ids.add(video_id)
-        unique_videos.append({
-            **video,
-            "sequence": len(unique_videos) + 1,
-            "video_id": video_id,
-        })
+        unique_videos.append(
+            {
+                **video,
+                "sequence": len(unique_videos) + 1,
+                "video_id": video_id,
+            }
+        )
 
     return unique_videos
 
 
 def _deduplicate_video_ids(video_ids: List[str]) -> List[str]:
     """Return non-empty video IDs in first-appearance order without duplicates."""
-    return list(dict.fromkeys(
-        str(video_id).strip()
-        for video_id in video_ids
-        if str(video_id or "").strip()
-    ))
+    return list(dict.fromkeys(str(video_id).strip() for video_id in video_ids if str(video_id or "").strip()))
 
 
 def _snippet_thumbnail(snippet: Dict[str, Any], video_id: str) -> str:
@@ -89,7 +87,7 @@ def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[
     service = get_youtube_service(credentials)
     detailed_videos = []
     for i in range(0, len(video_ids), 50):
-        chunk = video_ids[i:i + 50]
+        chunk = video_ids[i : i + 50]
         request = service.videos().list(
             part="snippet,contentDetails,status",
             id=",".join(chunk),
@@ -108,26 +106,24 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
         for item in raw_items
         if item.get("contentDetails", {}).get("videoId")
     ]
-    details_map = {
-        item["id"]: item
-        for item in fetch_video_details(credentials, video_ids)
-        if item.get("id")
-    }
+    details_map = {item["id"]: item for item in fetch_video_details(credentials, video_ids) if item.get("id")}
     parsed_videos = []
     for index, item in enumerate(raw_items, start=1):
         video_id = item.get("contentDetails", {}).get("videoId")
         detail = details_map.get(video_id, {})
         snippet = detail.get("snippet", item.get("snippet", {}))
-        parsed_videos.append({
-            "sequence": index,
-            "video_id": video_id,
-            "playlist_item_id": item.get("id"),
-            "title": snippet.get("title", ""),
-            "description": snippet.get("description", ""),
-            "thumbnail_url": _snippet_thumbnail(snippet, video_id),
-            "published_at": snippet.get("publishedAt", ""),
-            "category_id": snippet.get("categoryId", ""),
-        })
+        parsed_videos.append(
+            {
+                "sequence": index,
+                "video_id": video_id,
+                "playlist_item_id": item.get("id"),
+                "title": snippet.get("title", ""),
+                "description": snippet.get("description", ""),
+                "thumbnail_url": _snippet_thumbnail(snippet, video_id),
+                "published_at": snippet.get("publishedAt", ""),
+                "category_id": snippet.get("categoryId", ""),
+            }
+        )
     return _deduplicate_videos(parsed_videos)
 
 

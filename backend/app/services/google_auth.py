@@ -1,12 +1,12 @@
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
 import googleapiclient.discovery
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import Flow
 
 from backend.app.core.config import settings
 from backend.app.core.session_store import session_store
@@ -22,6 +22,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.readonly",
 ]
 
+
 def get_client_config() -> dict:
     """Build OAuth client config from .env settings."""
     return {
@@ -31,7 +32,7 @@ def get_client_config() -> dict:
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "redirect_uris": [settings.get_redirect_uri()]
+            "redirect_uris": [settings.get_redirect_uri()],
         }
     }
 
@@ -60,11 +61,7 @@ def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
 def get_auth_url() -> tuple[str, str, str]:
     """Generate the Google OAuth consent URL and return its PKCE state."""
     flow = create_oauth_flow()
-    auth_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
-    )
+    auth_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
     if not flow.code_verifier:
         raise RuntimeError("Google OAuth PKCE code verifier was not generated.")
     return auth_url, state, flow.code_verifier
@@ -101,7 +98,7 @@ def get_user_profile(credentials: Credentials) -> dict:
         return {
             "email": user_info.get("email", ""),
             "name": user_info.get("name", ""),
-            "picture": user_info.get("picture", "")
+            "picture": user_info.get("picture", ""),
         }
     except Exception as e:
         logger.error("Error fetching user profile: %s", e, exc_info=True)
@@ -115,6 +112,8 @@ def build_credentials_from_dict(token_dict: dict, session_id: Optional[str] = No
     if expiry:
         try:
             parsed_expiry = datetime.fromisoformat(expiry)
+            if parsed_expiry.tzinfo:
+                parsed_expiry = parsed_expiry.astimezone(timezone.utc).replace(tzinfo=None)
         except (TypeError, ValueError):
             parsed_expiry = None
     creds = Credentials(

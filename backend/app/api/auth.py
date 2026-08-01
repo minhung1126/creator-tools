@@ -3,9 +3,8 @@ import secrets
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request, Response, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
-from google.oauth2.credentials import Credentials
 
 from backend.app.core.config import settings
 from backend.app.core.security import (
@@ -13,11 +12,10 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.core.dependencies import require_credentials
 from backend.app.core.session_store import SESSION_MAX_AGE, session_store
 from backend.app.services.google_auth import (
-    get_auth_url,
     exchange_code_for_tokens,
+    get_auth_url,
     get_current_credentials,
 )
 
@@ -32,9 +30,7 @@ SESSION_COOKIE = "creator_tools_session"
 
 def redirect_with_auth_error(message: str) -> RedirectResponse:
     """Redirect to the frontend with a safely encoded OAuth error."""
-    response = RedirectResponse(
-        url=f"{settings.frontend_url}/#auth_error={quote(message, safe='')}"
-    )
+    response = RedirectResponse(url=f"{settings.frontend_url}/#auth_error={quote(message, safe='')}")
     response.delete_cookie(OAUTH_FLOW_COOKIE)
     return response
 
@@ -48,11 +44,7 @@ def get_auth_config():
         "redirect_uri": settings.get_redirect_uri(),
         "has_client_id": bool(settings.GOOGLE_CLIENT_ID),
         "has_client_secret": bool(settings.GOOGLE_CLIENT_SECRET),
-        "scopes": [
-            "Google Sheets API",
-            "YouTube Data API v3",
-            "Google Drive API"
-        ]
+        "scopes": ["Google Sheets API", "YouTube Data API v3", "Google Drive API"],
     }
 
 
@@ -62,17 +54,19 @@ def get_google_auth_url(response: Response):
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
         raise HTTPException(
             status_code=400,
-            detail="Google Client ID and Client Secret are not configured. "
-                   "Please set them in .env file."
+            detail="Google Client ID and Client Secret are not configured. Please set them in .env file.",
         )
     if settings.is_production and not settings.allowed_google_emails:
         raise HTTPException(status_code=503, detail="正式環境必須設定 ALLOWED_GOOGLE_EMAILS")
     try:
         url, state, code_verifier = get_auth_url()
-        flow_cookie = sign_timed_data({
-            "state": state,
-            "code_verifier": code_verifier,
-        }, salt=GOOGLE_OAUTH_STATE_SALT)
+        flow_cookie = sign_timed_data(
+            {
+                "state": state,
+                "code_verifier": code_verifier,
+            },
+            salt=GOOGLE_OAUTH_STATE_SALT,
+        )
         response.set_cookie(
             key=OAUTH_FLOW_COOKIE,
             value=flow_cookie,
@@ -82,9 +76,9 @@ def get_google_auth_url(response: Response):
             max_age=OAUTH_FLOW_MAX_AGE,
         )
         return {"auth_url": url}
-    except Exception as e:
-        logger.error("Failed to generate auth URL: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        logger.error("Failed to generate auth URL: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="無法建立 Google OAuth 授權網址，請稍後再試。") from exc
 
 
 @router.get("/callback")
@@ -104,9 +98,11 @@ def google_oauth_callback(
         return redirect_with_auth_error("Google OAuth callback is missing code or state.")
 
     flow_cookie = request.cookies.get(OAUTH_FLOW_COOKIE)
-    flow_state = verify_timed_data(
-        flow_cookie, salt=GOOGLE_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE
-    ) if flow_cookie else None
+    flow_state = (
+        verify_timed_data(flow_cookie, salt=GOOGLE_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE)
+        if flow_cookie
+        else None
+    )
     if not flow_state:
         return redirect_with_auth_error("Google OAuth session expired. Please try signing in again.")
 
@@ -136,7 +132,7 @@ def google_oauth_callback(
             httponly=True,
             secure=settings.cookie_secure,
             samesite="lax",
-            max_age=SESSION_MAX_AGE
+            max_age=SESSION_MAX_AGE,
         )
         response.delete_cookie(OAUTH_FLOW_COOKIE)
         return response
@@ -152,17 +148,10 @@ def get_user_status(request: Request):
     stored_tokens = session_store.get(session_id) if session_id else None
     creds = get_current_credentials(session_id)
     if not creds or not creds.valid:
-        return {
-            "authenticated": False,
-            "user": None
-        }
+        return {"authenticated": False, "user": None}
 
     user_info = stored_tokens.get("user", {}) if stored_tokens else {"email": "Authenticated User"}
-    return {
-        "authenticated": True,
-        "user": user_info,
-        "token_expired": creds.expired
-    }
+    return {"authenticated": True, "user": user_info, "token_expired": creds.expired}
 
 
 @router.post("/logout")

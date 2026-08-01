@@ -1,8 +1,8 @@
 import hashlib
+import logging
 import mimetypes
 import re
 import secrets
-import logging
 import tempfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -34,14 +34,14 @@ from backend.app.services.instagram_oauth_service import (
     normalize_permissions,
     refresh_long_lived_token,
 )
+from backend.app.services.instagram_publish_service import prepare_job, process_job, public_job
 from backend.app.services.instagram_service import InstagramClient
 from backend.app.services.r2_service import R2Config, test_r2_connection, upload_public_file
-from backend.app.services.instagram_publish_service import process_job, prepare_job, public_job
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
-    normalize_text,
     matches_team_person,
+    normalize_text,
 )
 
 router = APIRouter(prefix="/instagram", tags=["Instagram Reels"])
@@ -172,17 +172,22 @@ def get_instagram_auth_url(request: Request, response: Response, creds: Credenti
     state = secrets.token_urlsafe(32)
     response.set_cookie(
         key=OAUTH_FLOW_COOKIE,
-        value=sign_timed_data({
-            "state": state,
-            "session_fingerprint": fingerprint,
-            "redirect_uri": settings.get_instagram_redirect_uri(),
-        }, salt=INSTAGRAM_OAUTH_STATE_SALT),
+        value=sign_timed_data(
+            {
+                "state": state,
+                "session_fingerprint": fingerprint,
+                "redirect_uri": settings.get_instagram_redirect_uri(),
+            },
+            salt=INSTAGRAM_OAUTH_STATE_SALT,
+        ),
         httponly=True,
         secure=settings.cookie_secure,
         samesite="lax",
         max_age=OAUTH_FLOW_MAX_AGE,
     )
-    return {"auth_url": build_authorization_url(settings.instagram_app_id, settings.get_instagram_redirect_uri(), state)}
+    return {
+        "auth_url": build_authorization_url(settings.instagram_app_id, settings.get_instagram_redirect_uri(), state)
+    }
 
 
 @router.get("/auth/callback")
@@ -199,9 +204,7 @@ def instagram_oauth_callback(
     if not code or not state:
         return redirect_with_instagram_result(False, "Instagram OAuth callback 缺少 code 或 state")
     cookie = request.cookies.get(OAUTH_FLOW_COOKIE)
-    flow = verify_timed_data(
-        cookie, salt=INSTAGRAM_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE
-    ) if cookie else None
+    flow = verify_timed_data(cookie, salt=INSTAGRAM_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE) if cookie else None
     if not flow:
         return redirect_with_instagram_result(False, "Instagram 授權 Session 已逾時，請重新連線")
     if not flow.get("state") or not secrets.compare_digest(state, flow["state"]):
@@ -219,9 +222,7 @@ def instagram_oauth_callback(
         long_lived = exchange_long_lived_token(short_lived["access_token"], settings.instagram_app_secret)
         user_id = short_lived.get("user_id") or short_lived.get("id")
         token = long_lived["access_token"]
-        profile = InstagramClient(
-            str(user_id or "me"), token, settings.instagram_api_version
-        ).profile()
+        profile = InstagramClient(str(user_id or "me"), token, settings.instagram_api_version).profile()
         user_id = profile.get("id") or user_id
         if not user_id:
             raise RuntimeError("Instagram 未回傳帳號 ID")
@@ -302,14 +303,16 @@ def save_instagram_settings(payload: InstagramSettings, creds: Credentials = Dep
     values = payload.model_dump()
     if values.pop("r2_secret_access_key", "").strip():
         credential_store.set_secret("r2_secret_access_key", payload.r2_secret_access_key.strip())
-    runtime_config.update({
-        "instagram_drive_folder_id": values["drive_folder_id"].strip(),
-        "instagram_spreadsheet_id": values["spreadsheet_id"].strip(),
-        "r2_account_id": values["r2_account_id"].strip(),
-        "r2_access_key_id": values["r2_access_key_id"].strip(),
-        "r2_bucket_name": values["r2_bucket_name"].strip(),
-        "r2_public_base_url": values["r2_public_base_url"].strip().rstrip("/"),
-    })
+    runtime_config.update(
+        {
+            "instagram_drive_folder_id": values["drive_folder_id"].strip(),
+            "instagram_spreadsheet_id": values["spreadsheet_id"].strip(),
+            "r2_account_id": values["r2_account_id"].strip(),
+            "r2_access_key_id": values["r2_access_key_id"].strip(),
+            "r2_bucket_name": values["r2_bucket_name"].strip(),
+            "r2_public_base_url": values["r2_public_base_url"].strip().rstrip("/"),
+        }
+    )
     return get_instagram_settings()
 
 
@@ -323,12 +326,14 @@ def connection_status(creds: Credentials = Depends(require_credentials)):
         credential_store.update_instagram_profile(profile.get("username", ""), profile.get("account_type", ""))
         instagram_result.update({"ok": True, "profile": profile})
     except Exception as exc:
-        instagram_result["error"] = str(exc)
+        logger.error("Instagram connection check failed: %s", type(exc).__name__, exc_info=True)
+        instagram_result["error"] = "Instagram 連線驗證失敗"
     try:
         test_r2_connection(get_r2())
         r2_result["ok"] = True
     except Exception as exc:
-        r2_result["error"] = str(exc)
+        logger.error("R2 connection check failed: %s", type(exc).__name__, exc_info=True)
+        r2_result["error"] = "R2 連線驗證失敗"
     return {"ok": instagram_result["ok"] and r2_result["ok"], "instagram": instagram_result, "r2": r2_result}
 
 
@@ -338,7 +343,8 @@ def test_r2(creds: Credentials = Depends(require_credentials)):
     try:
         return test_r2_connection(get_r2())
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"R2 連線測試失敗：{exc}") from exc
+        logger.error("R2 test failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=400, detail="R2 連線測試失敗，請檢查設定。") from exc
 
 
 @router.post("/drive-videos")
@@ -350,7 +356,8 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
         videos = list_drive_videos(creds, folder)
         return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"讀取 Drive 影片失敗：{exc}") from exc
+        logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc
 
 
 @router.post("/publish-jobs", status_code=201)
@@ -374,7 +381,9 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
         )
         job = instagram_publish_store.create(job)
         if any(item.get("status") == "queued" for item in job.get("items", [])):
-            job = process_job(job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2())
+            job = process_job(
+                job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2()
+            )
         else:
             job["status"] = "completed"
             job = instagram_publish_store.save(job)
@@ -382,7 +391,8 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"建立 Instagram 發布工作失敗：{exc}") from exc
+        logger.error("Failed to create Instagram publish job: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="建立 Instagram 發布工作失敗，請稍後再試。") from exc
 
 
 @router.get("/publish-jobs/{job_id}")
@@ -407,9 +417,9 @@ def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credenti
     try:
         job = process_job(job=job, credentials=creds, client=get_connected_client(refresh_if_needed=True), r2=get_r2())
         return public_job(job)
-    except Exception as exc:
+    except Exception:
         job["status"] = "failed"
-        job["error"] = str(exc)[:500]
+        job["error"] = "Instagram 發布工作重試失敗，請檢查設定。"
         return public_job(instagram_publish_store.save(job))
 
 
@@ -419,7 +429,9 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
     folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
     if not spreadsheet or not folder:
         raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
-    active = [(item.file_id, normalize_text(item.person)) for item in payload.assignments if normalize_text(item.person)]
+    active = [
+        (item.file_id, normalize_text(item.person)) for item in payload.assignments if normalize_text(item.person)
+    ]
     if not active:
         raise HTTPException(status_code=400, detail="請至少為一支影片指定人物")
     team = normalize_text(payload.team)
@@ -438,17 +450,35 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
         for file_id, person in active:
             file = file_map.get(file_id)
             if not file:
-                results.append({"file_id": file_id, "person": person, "status": "skipped", "reason": "Drive 找不到影片"})
+                results.append(
+                    {"file_id": file_id, "person": person, "status": "skipped", "reason": "Drive 找不到影片"}
+                )
                 continue
             suffix = Path(file["name"]).suffix.lower()
             if suffix not in {".mp4", ".mov"} or file["size"] > MAX_FILE_SIZE:
-                results.append({"file_id": file_id, "file_name": file["name"], "person": person, "status": "skipped", "reason": "影片需為 MP4/MOV 且不超過 1 GB"})
+                results.append(
+                    {
+                        "file_id": file_id,
+                        "file_name": file["name"],
+                        "person": person,
+                        "status": "skipped",
+                        "reason": "影片需為 MP4/MOV 且不超過 1 GB",
+                    }
+                )
                 continue
             matching = [row for row in rows if matches_team_person(row, team, person)]
             captions = {str(row.get(caption_column) or "") for row in matching}
             caption = next(iter(captions), "")
             if len(captions) != 1 or not caption.strip():
-                results.append({"file_id": file_id, "file_name": file["name"], "person": person, "status": "skipped", "reason": "找不到唯一且非空白的內文"})
+                results.append(
+                    {
+                        "file_id": file_id,
+                        "file_name": file["name"],
+                        "person": person,
+                        "status": "skipped",
+                        "reason": "找不到唯一且非空白的內文",
+                    }
+                )
                 continue
             prepared.append((file, person, caption))
         client = get_connected_client(refresh_if_needed=True)
@@ -456,7 +486,15 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
         paused = False
         for index, (file, person, caption) in enumerate(prepared):
             if paused:
-                results.append({"file_id": file["id"], "file_name": file["name"], "person": person, "status": "paused", "reason": "前一支影片發布失敗，流程已暫停"})
+                results.append(
+                    {
+                        "file_id": file["id"],
+                        "file_name": file["name"],
+                        "person": person,
+                        "status": "paused",
+                        "reason": "前一支影片發布失敗，流程已暫停",
+                    }
+                )
                 continue
             try:
                 with tempfile.TemporaryDirectory(prefix="creator-tools-instagram-") as directory:
@@ -467,11 +505,30 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
                     safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file["name"]).strip("-._") or "reel.mp4"
                     prefix = datetime.now(timezone.utc).strftime("instagram-reels/%Y/%m/%d")
                     object_key = f"{prefix}/{index + 1:03d}-{file['id']}-{safe_name}"
-                    public_url = upload_public_file(r2, local, object_key, file["mime_type"] or mimetypes.guess_type(file["name"])[0] or "video/mp4")
+                    public_url = upload_public_file(
+                        r2, local, object_key, file["mime_type"] or mimetypes.guess_type(file["name"])[0] or "video/mp4"
+                    )
                     published = client.publish_reel(public_url, caption, payload.share_to_feed)
-                results.append({"file_id": file["id"], "file_name": file["name"], "person": person, "status": "published", "public_url": public_url, **published})
-            except Exception as exc:
-                results.append({"file_id": file["id"], "file_name": file["name"], "person": person, "status": "failed", "reason": str(exc)})
+                results.append(
+                    {
+                        "file_id": file["id"],
+                        "file_name": file["name"],
+                        "person": person,
+                        "status": "published",
+                        "public_url": public_url,
+                        **published,
+                    }
+                )
+            except Exception:
+                results.append(
+                    {
+                        "file_id": file["id"],
+                        "file_name": file["name"],
+                        "person": person,
+                        "status": "failed",
+                        "reason": "Instagram 發布步驟失敗",
+                    }
+                )
                 paused = True
         counts = Counter(item["status"] for item in results)
         return {
@@ -485,4 +542,5 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Instagram 發布流程失敗：{exc}") from exc
+        logger.error("Legacy Instagram publish flow failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="Instagram 發布流程失敗，請稍後再試。") from exc

@@ -11,8 +11,8 @@ from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
-    normalize_text,
     matches_team_person,
+    normalize_text,
 )
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
@@ -81,10 +81,7 @@ def all_skipped_message(items, attempted_count: int) -> str:
     }
     counts = skip_reason_counts(items)
     summary = "、".join(f"{labels.get(code, code)} {count} 支" for code, count in counts.items())
-    examples = "；".join(
-        f"{item.get('person') or '未指定'}：{item.get('reason')}"
-        for item in items[:3]
-    )
+    examples = "；".join(f"{item.get('person') or '未指定'}：{item.get('reason')}" for item in items[:3])
     return f"所有已指定人物的 {attempted_count} 支影片都被略過。{summary}。範例：{examples}"
 
 
@@ -160,48 +157,53 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
 
         prepared = []
         for video_id, person in active_assignments:
-            matches = [
-                row for row in sheet_rows
-                if matches_team_person(row, normalized_team, person)
-            ]
+            matches = [row for row in sheet_rows if matches_team_person(row, normalized_team, person)]
             row, match_error = resolve_assignment_row(matches, title_column, description_column)
             if match_error == "not_found":
-                prepared.append({
-                    "video_id": video_id,
-                    "person": person,
-                    "status": "skipped",
-                    "reason_code": "not_found",
-                    "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料",
-                })
+                prepared.append(
+                    {
+                        "video_id": video_id,
+                        "person": person,
+                        "status": "skipped",
+                        "reason_code": "not_found",
+                        "reason": f"找不到團體 {normalized_team} 的選項 {person} 資料",
+                    }
+                )
                 continue
             if match_error == "conflict":
-                prepared.append({
-                    "video_id": video_id,
-                    "person": person,
-                    "status": "skipped",
-                    "reason_code": "conflict",
-                    "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同",
-                })
+                prepared.append(
+                    {
+                        "video_id": video_id,
+                        "person": person,
+                        "status": "skipped",
+                        "reason_code": "conflict",
+                        "reason": f"團體 {normalized_team} 的選項 {person} 有多筆且標題或描述內容不同",
+                    }
+                )
                 continue
 
             new_title = normalize_text(row.get(title_column) or "")
             new_description = str(row.get(description_column) or "")
             if not new_title:
-                prepared.append({
+                prepared.append(
+                    {
+                        "video_id": video_id,
+                        "person": person,
+                        "status": "skipped",
+                        "reason_code": "blank_title",
+                        "reason": f"工作表的 {title_column} 為空白",
+                    }
+                )
+                continue
+            prepared.append(
+                {
                     "video_id": video_id,
                     "person": person,
-                    "status": "skipped",
-                    "reason_code": "blank_title",
-                    "reason": f"工作表的 {title_column} 為空白",
-                })
-                continue
-            prepared.append({
-                "video_id": video_id,
-                "person": person,
-                "status": "pending",
-                "new_title": new_title,
-                "new_description": new_description,
-            })
+                    "status": "pending",
+                    "new_title": new_title,
+                    "new_description": new_description,
+                }
+            )
 
         pending_ids = [item["video_id"] for item in prepared if item["status"] == "pending"]
         if not pending_ids:
@@ -219,7 +221,14 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
             video_id = item["video_id"]
             detail = details_map.get(video_id)
             if not detail:
-                results.append({"video_id": video_id, "person": item["person"], "status": "failed", "reason": "YouTube 找不到此影片或目前帳號無權存取。"})
+                results.append(
+                    {
+                        "video_id": video_id,
+                        "person": item["person"],
+                        "status": "failed",
+                        "reason": "YouTube 找不到此影片或目前帳號無權存取。",
+                    }
+                )
                 continue
             try:
                 update_single_video_metadata(
@@ -229,16 +238,22 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                     new_description=item["new_description"],
                     current_snippet=detail.get("snippet", {}),
                 )
-                results.append({
-                    "video_id": video_id,
-                    "person": item["person"],
-                    "status": "updated",
-                    "new_title": item["new_title"],
-                    "new_description_snippet": item["new_description"][:50] + "..." if len(item["new_description"]) > 50 else item["new_description"],
-                })
+                results.append(
+                    {
+                        "video_id": video_id,
+                        "person": item["person"],
+                        "status": "updated",
+                        "new_title": item["new_title"],
+                        "new_description_snippet": item["new_description"][:50] + "..."
+                        if len(item["new_description"]) > 50
+                        else item["new_description"],
+                    }
+                )
             except Exception as update_error:
                 logger.error("Failed to update video %s: %s", video_id, update_error, exc_info=True)
-                results.append({"video_id": video_id, "person": item["person"], "status": "failed", "reason": str(update_error)})
+                results.append(
+                    {"video_id": video_id, "person": item["person"], "status": "failed", "reason": str(update_error)}
+                )
 
         return {
             "total_processed": len(active_assignments),
@@ -304,11 +319,15 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
                     detail=f"發布流程已暫停：找不到影片「{display_title}」（ID: {video_id}）或目前帳號無權存取。此前已完成 {len(results)} 支影片，後續影片尚未處理。",
                 )
             try:
-                response = publish_and_remove_playlist_item(creds, video_id, playlist_item_map.get(video_id), current_video=detail)
+                response = publish_and_remove_playlist_item(
+                    creds, video_id, playlist_item_map.get(video_id), current_video=detail
+                )
                 cleanup_error = (response.get("playlist_cleanup") or {}).get("error")
                 if cleanup_error:
                     raise RuntimeError(f"影片已公開，但移出 To-Post 播放清單失敗：{cleanup_error}")
-                results.append({"video_id": video_id, "title": title, "status": "published_and_cleaned", "details": response})
+                results.append(
+                    {"video_id": video_id, "title": title, "status": "published_and_cleaned", "details": response}
+                )
             except Exception as publish_error:
                 logger.error("Failed to publish video %s: %s", video_id, publish_error, exc_info=True)
                 raise HTTPException(
