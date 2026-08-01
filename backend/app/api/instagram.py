@@ -383,11 +383,13 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
         videos = list_drive_videos(creds, folder)
         for video in videos:
             thumbnail_link = video.pop("thumbnail_link", "")
-            video["thumbnail_url"] = (
-                f"/api/v1/instagram/drive-videos/{quote(video['id'], safe='')}/thumbnail"
-                if video.get("id") and thumbnail_link
-                else ""
-            )
+            if video.get("id") and thumbnail_link:
+                thumbnail_endpoint = f"/api/v1/instagram/drive-videos/{quote(video['id'], safe='')}/thumbnail"
+                video["thumbnail_url"] = f"{thumbnail_endpoint}?quality=preview"
+                video["thumbnail_full_url"] = f"{thumbnail_endpoint}?quality=source"
+            else:
+                video["thumbnail_url"] = ""
+                video["thumbnail_full_url"] = ""
         return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
@@ -395,9 +397,15 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
 
 
 @router.get("/drive-videos/{file_id}/thumbnail")
-def drive_video_thumbnail(file_id: str, creds: Credentials = Depends(require_credentials)):
+def drive_video_thumbnail(
+    file_id: str,
+    creds: Credentials = Depends(require_credentials),
+    quality: str = "preview",
+):
+    if quality not in {"preview", "source"}:
+        raise HTTPException(status_code=400, detail="無效的縮圖品質選項")
     try:
-        thumbnail = get_drive_video_thumbnail(creds, file_id)
+        thumbnail = get_drive_video_thumbnail(creds, file_id, prefer_source=quality == "source")
     except Exception as exc:
         logger.warning("Failed to fetch Drive thumbnail for %s: %s", file_id, type(exc).__name__)
         raise HTTPException(status_code=404, detail="找不到影片縮圖") from exc
@@ -407,7 +415,7 @@ def drive_video_thumbnail(file_id: str, creds: Credentials = Depends(require_cre
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Cache-Control": "private, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=86400" if quality == "source" else "private, max-age=3600"},
     )
 
 

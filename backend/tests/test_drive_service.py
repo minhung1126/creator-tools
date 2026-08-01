@@ -75,3 +75,43 @@ def test_get_drive_video_thumbnail_uses_authorized_session(monkeypatch):
 
     assert content == b"thumbnail"
     assert media_type == "image/webp"
+
+
+def test_get_drive_video_thumbnail_prefers_source_frame_and_caches_it(
+    monkeypatch, tmp_path
+):
+    service = _FakeService({"id": "file-1"})
+    monkeypatch.setattr(drive_service, "build", lambda *args, **kwargs: service)
+    monkeypatch.setattr(drive_service, "DRIVE_THUMBNAIL_CACHE_DIR", tmp_path)
+    monkeypatch.setattr(drive_service.shutil, "which", lambda name: "ffmpeg")
+
+    downloaded = []
+
+    def fake_download(credentials, file_id, destination):
+        downloaded.append((credentials, file_id))
+        destination.write_bytes(b"video")
+
+    monkeypatch.setattr(drive_service, "download_drive_file", fake_download)
+
+    class FakeResult:
+        returncode = 0
+        stdout = b"high-resolution-frame"
+
+    def fake_run(command, **kwargs):
+        assert "-ss" in command
+        assert command[-1] == "pipe:1"
+        assert kwargs["timeout"] == drive_service.DRIVE_SOURCE_THUMBNAIL_TIMEOUT_SECONDS
+        return FakeResult()
+
+    monkeypatch.setattr(drive_service.subprocess, "run", fake_run)
+
+    first = drive_service.get_drive_video_thumbnail(
+        "credentials", "file-1", prefer_source=True
+    )
+    second = drive_service.get_drive_video_thumbnail(
+        "credentials", "file-1", prefer_source=True
+    )
+
+    assert first == (b"high-resolution-frame", "image/jpeg")
+    assert second == first
+    assert downloaded == [("credentials", "file-1")]
