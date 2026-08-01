@@ -1,7 +1,7 @@
 """Small in-process queue for ordered Instagram publish batches.
 
 The job and child-task state is persisted in the JSON store; this queue only
-controls when the worker runs. Keeping one worker preserves the existing
+controls when the worker runs.  Keeping one worker preserves the existing
 ordered-processing and pause-on-first-failure guarantees without adding Redis
 or a separate worker service to this deployment.
 """

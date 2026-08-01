@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
+import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertTriangle,
@@ -26,6 +27,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
 
   const handleLoadPlaylist = async () => {
@@ -157,7 +159,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
             {videos.map((video, index) => (
               <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px', paddingTop: '4px' }}>#{index + 1}</span>
-                {video.thumbnail_url && <img src={video.thumbnail_url} alt={video.title} style={{ width: '120px', aspectRatio: '16/9', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }} />}
+                {video.thumbnail_url && <img className="publish-cleaner-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} />}
                 <div style={{ flex: 1, minWidth: '260px' }}>
                   {metadataBlock(video.title, video.description)}
                   <div style={{ marginTop: '8px' }}>
@@ -202,6 +204,8 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           </div>
         </div>
       )}
+
+      <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );
 }

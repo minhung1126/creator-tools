@@ -21,7 +21,7 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.services.drive_service import get_drive_video_thumbnail, list_drive_videos
+from backend.app.services.drive_service import extract_drive_folder_id, get_drive_video_thumbnail, list_drive_videos
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -404,24 +404,38 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
     if not folder:
         raise HTTPException(status_code=400, detail="請輸入 Google Drive 資料夾")
     try:
+        source_folder_id = extract_drive_folder_id(folder)
         videos = list_drive_videos(creds, folder)
         for video in videos:
             thumbnail_link = video.pop("thumbnail_link", "")
-            video["thumbnail_url"] = (
-                f"/api/v1/instagram/drive-videos/{quote(video['id'], safe='')}/thumbnail"
-                if video.get("id") and thumbnail_link
-                else ""
-            )
-        return {"videos": videos, "total": len(videos), "sort_order": "created_time_ascending"}
+            if video.get("id") and thumbnail_link:
+                thumbnail_endpoint = f"/api/v1/instagram/drive-videos/{quote(video['id'], safe='')}/thumbnail"
+                video["thumbnail_url"] = f"{thumbnail_endpoint}?quality=preview"
+                video["thumbnail_full_url"] = f"{thumbnail_endpoint}?quality=source"
+            else:
+                video["thumbnail_url"] = ""
+                video["thumbnail_full_url"] = ""
+            record = instagram_publish_store.find_published_record(source_folder_id, video.get("id", ""))
+            published_item = (record or {}).get("item") or {}
+            video["already_published"] = bool(record)
+            video["published_job_id"] = (record or {}).get("job_id")
+            video["published_media_id"] = published_item.get("media_id")
+        return {"videos": videos, "total": len(videos), "sort_order": "name_ascending"}
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc
 
 
 @router.get("/drive-videos/{file_id}/thumbnail")
-def drive_video_thumbnail(file_id: str, creds: Credentials = Depends(require_credentials)):
+def drive_video_thumbnail(
+    file_id: str,
+    creds: Credentials = Depends(require_credentials),
+    quality: str = "preview",
+):
+    if quality not in {"preview", "source"}:
+        raise HTTPException(status_code=400, detail="無效的縮圖品質選項")
     try:
-        thumbnail = get_drive_video_thumbnail(creds, file_id)
+        thumbnail = get_drive_video_thumbnail(creds, file_id, prefer_source=quality == "source")
     except Exception as exc:
         logger.warning("Failed to fetch Drive thumbnail for %s: %s", file_id, type(exc).__name__)
         raise HTTPException(status_code=404, detail="找不到影片縮圖") from exc
@@ -431,7 +445,7 @@ def drive_video_thumbnail(file_id: str, creds: Credentials = Depends(require_cre
     return Response(
         content=content,
         media_type=media_type,
-        headers={"Cache-Control": "private, max-age=3600"},
+        headers={"Cache-Control": "private, max-age=86400" if quality == "source" else "private, max-age=3600"},
     )
 
 
@@ -486,7 +500,12 @@ def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credenti
         raise HTTPException(status_code=409, detail="此發布工作仍在處理中，請等待目前隊列完成。")
     retryable = False
     for item in job.get("items", []):
-        if item.get("status") in {"failed", "paused"} or item.get("r2_delete_error"):
+        if (
+            item.get("status") in {"failed", "paused"}
+            or item.get("r2_delete_error")
+            or item.get("drive_move_error")
+            or (item.get("status") == "published" and not item.get("drive_moved"))
+        ):
             reset_item_for_retry(item)
             retryable = True
     if not retryable:

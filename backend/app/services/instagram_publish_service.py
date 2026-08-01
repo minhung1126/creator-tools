@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.core.instagram_publish_store import instagram_publish_store
-from backend.app.services.drive_service import download_drive_file, list_drive_videos
+from backend.app.services.drive_service import (
+    download_drive_file,
+    ensure_published_folder,
+    extract_drive_folder_id,
+    list_drive_videos,
+    move_drive_file_to_folder,
+)
 from backend.app.services.instagram_service import InstagramClient
 from backend.app.services.r2_service import R2Config, delete_public_file, ensure_lifecycle, upload_public_file
 from backend.app.services.sheets_service import (
@@ -48,7 +54,8 @@ PIPELINE_STAGES = (
     ("container_created", "Meta container 已建立", 66),
     ("waiting_container", "等待 Meta 處理影片", 78),
     ("publishing", "透過 Meta API 發布", 92),
-    ("cleaning_r2", "清理 R2 暫存影片", 97),
+    ("moving_drive", "移入 Google Drive Published 資料夾", 96),
+    ("cleaning_r2", "清理 R2 暫存影片", 98),
     ("completed", "已完成", 100),
 )
 _STAGE_META = {
@@ -60,6 +67,7 @@ _STAGE_META.update(
         "skipped": {"label": "已略過", "progress": 100, "index": len(PIPELINE_STAGES) - 1},
         "failed": {"label": "失敗", "progress": 0, "index": 0},
         "paused": {"label": "等待重試", "progress": 0, "index": 0},
+        "drive_move_failed": {"label": "移入 Published 失敗", "progress": 96, "index": len(PIPELINE_STAGES) - 3},
         "r2_cleanup_failed": {"label": "R2 清理失敗", "progress": 97, "index": len(PIPELINE_STAGES) - 2},
     }
 )
@@ -82,7 +90,9 @@ def _set_item_stage(item: dict[str, Any], stage: str, *, status: str | None = No
     item["stage_label"] = meta["label"]
     item["stage_index"] = meta["index"]
     item["stage_count"] = _PIPELINE_STAGE_COUNT
-    if stage in {"failed", "paused"}:
+    if stage == "failed":
+        item["progress_percent"] = min(max(previous_progress, 0), 99)
+    elif stage == "paused":
         item["progress_percent"] = min(max(previous_progress, 0), 99)
     else:
         item["progress_percent"] = meta["progress"]
@@ -97,10 +107,15 @@ def _item_progress(item: dict[str, Any]) -> float:
         except (TypeError, ValueError):
             pass
     status = item.get("status") or "queued"
+    published_stage = "completed"
+    if item.get("drive_move_error"):
+        published_stage = "drive_move_failed"
+    elif item.get("r2_delete_error"):
+        published_stage = "r2_cleanup_failed"
     fallback_stage = {
         "uploaded": "uploaded",
         "container_created": "container_created",
-        "published": "completed" if not item.get("r2_delete_error") else "r2_cleanup_failed",
+        "published": published_stage,
         "skipped": "skipped",
         "failed": "failed",
         "paused": "paused",
@@ -111,13 +126,11 @@ def _item_progress(item: dict[str, Any]) -> float:
 def _progress_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     items = job.get("items", [])
     total = len(items)
-    completed_count = sum(
-        1 for item in items if item.get("status") == "skipped" or item.get("stage") == "completed"
-    )
+    completed_count = sum(1 for item in items if item.get("status") == "skipped" or item.get("stage") == "completed")
     failed_count = sum(
         1
         for item in items
-        if item.get("status") == "failed" or item.get("stage") == "r2_cleanup_failed"
+        if item.get("status") == "failed" or item.get("stage") in {"drive_move_failed", "r2_cleanup_failed"}
     )
     paused_count = sum(1 for item in items if item.get("status") == "paused")
     current_item = None
@@ -131,7 +144,7 @@ def _progress_snapshot(job: dict[str, Any]) -> dict[str, Any]:
                     item
                     for item in items
                     if item.get("status") not in {"published", "skipped", "paused"}
-                    or item.get("stage") in {"cleaning_r2", "r2_cleanup_failed"}
+                    or item.get("stage") in {"moving_drive", "drive_move_failed", "cleaning_r2", "r2_cleanup_failed"}
                 ),
                 None,
             )
@@ -143,7 +156,9 @@ def _progress_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     current_item_percent = None
     if current_item is not None:
         current_stage = current_item.get("stage") or current_stage or "queued"
-        current_stage_label = current_item.get("stage_label") or _STAGE_META.get(current_stage, {}).get("label", "處理中")
+        current_stage_label = current_item.get("stage_label") or _STAGE_META.get(current_stage, {}).get(
+            "label", "處理中"
+        )
         current_sequence = current_item.get("sequence")
         current_file_name = current_item.get("file_name")
         current_item_percent = round(_item_progress(current_item))
@@ -173,8 +188,14 @@ def _save_job(job: dict[str, Any]) -> dict[str, Any]:
 def reset_item_for_retry(item: dict[str, Any]) -> None:
     """Put one failed child task back in the queue without discarding checkpoints."""
     item["error"] = None
-    if item.get("r2_delete_error") and item.get("status") == "published":
-        _set_item_stage(item, "cleaning_r2", status="published")
+    if item.get("status") == "published" and (
+        item.get("r2_delete_error") or item.get("drive_move_error") or not item.get("drive_moved")
+    ):
+        _set_item_stage(
+            item,
+            "moving_drive" if item.get("drive_move_error") or not item.get("drive_moved") else "cleaning_r2",
+            status="published",
+        )
         return
     _set_item_stage(item, "queued", status="queued")
 
@@ -195,6 +216,28 @@ def _error_text(exc: Exception) -> str:
     ):
         return "外部服務處理失敗，請檢查設定後重試。"
     return message
+
+
+def _duplicate_item(item: dict[str, Any], record: dict[str, Any]) -> None:
+    existing_item = record.get("item") or {}
+    already_published = existing_item.get("status") == "published" or bool(existing_item.get("media_id"))
+    item.update(
+        status="skipped",
+        error=(
+            "此影片已發布過，為避免重複上傳已略過。"
+            if already_published
+            else "此影片已有未完成的發布工作，請回到原工作重試。"
+        ),
+        duplicate_of_job_id=record.get("job_id"),
+        duplicate_media_id=existing_item.get("media_id"),
+    )
+
+
+def _find_file_record(source_folder_id: str, file_id: str) -> dict[str, Any] | None:
+    finder = getattr(instagram_publish_store, "find_file_record", None)
+    if not callable(finder):
+        return None
+    return finder(source_folder_id, file_id)
 
 
 def _number(value: Any) -> float | None:
@@ -368,6 +411,7 @@ def prepare_job(
         raise ValueError(f"工作表缺少欄位：{', '.join(missing)}")
     rows = get_all_rows_for_sheet(credentials, spreadsheet, worksheet_name)
     files = list_drive_videos(credentials, folder)
+    source_folder_id = extract_drive_folder_id(folder)
     file_map = {item["id"]: item for item in files}
     positions = {item["id"]: index for index, item in enumerate(files)}
     normalized_team = normalize_text(team)
@@ -395,9 +439,22 @@ def prepare_job(
             "r2_delete_error": None,
             "creation_id": None,
             "media_id": None,
+            "drive_moved": False,
+            "drive_moved_at": None,
+            "drive_move_error": None,
+            "published_folder_id": None,
             "preflight": {},
         }
         _set_item_stage(item, "queued")
+        existing_record = _find_file_record(source_folder_id, file_id)
+        if existing_record:
+            existing_item = existing_record.get("item") or {}
+            if not item["file_name"]:
+                item["file_name"] = existing_item.get("file_name", "")
+            _duplicate_item(item, existing_record)
+            _set_item_stage(item, "skipped", status="skipped")
+            items.append(item)
+            continue
         if not file:
             item.update(error="Drive 找不到影片")
             _set_item_stage(item, "skipped", status="skipped")
@@ -428,12 +485,14 @@ def prepare_job(
         "status": "queued",
         "created_at": _now(),
         "updated_at": _now(),
-        "sort_order": "created_time_ascending",
+        "sort_order": "name_ascending",
         "worksheet_name": worksheet_name,
         "caption_column": normalized_caption_column,
         "team": normalized_team,
         "spreadsheet": spreadsheet,
         "folder": folder,
+        "source_folder_id": source_folder_id,
+        "published_folder_id": None,
         "share_to_feed": share_to_feed,
         "items": items,
     }
@@ -462,14 +521,56 @@ def _cleanup_r2_file(item: dict[str, Any], r2: R2Config) -> None:
         item["r2_delete_error"] = None
         item["public_url"] = None
         _set_item_stage(item, "completed")
+def _move_drive_item_to_published(job: dict[str, Any], item: dict[str, Any], credentials) -> None:
+    """Move a successfully published source file without ever republishing it."""
+    if item.get("drive_moved"):
+        return
+
+    source_folder_id = extract_drive_folder_id(job.get("source_folder_id") or job.get("folder", ""))
+    if not source_folder_id:
+        raise RuntimeError("找不到 Google Drive 來源資料夾 ID，無法移入 Published")
+
+    published_folder_id = item.get("published_folder_id") or job.get("published_folder_id")
+    if not published_folder_id:
+        published_folder_id = ensure_published_folder(credentials, source_folder_id)
+        job["published_folder_id"] = published_folder_id
+    item["published_folder_id"] = published_folder_id
+    move_drive_file_to_folder(credentials, item["file_id"], source_folder_id, published_folder_id)
+    item["drive_moved"] = True
+    item["drive_moved_at"] = _now()
+    item["drive_move_error"] = None
+
+
+def _finish_published_item(job: dict[str, Any], item: dict[str, Any], credentials, r2: R2Config) -> None:
+    """Complete post-publish cleanup while keeping Instagram publication idempotent."""
+    _set_item_stage(item, "moving_drive")
+    try:
+        _move_drive_item_to_published(job, item, credentials)
+    except Exception as exc:
+        item["drive_moved"] = False
+        item["drive_move_error"] = _error_text(exc)
+        _set_item_stage(item, "drive_move_failed")
+
+    _set_item_stage(item, "cleaning_r2")
+    _cleanup_r2_file(item, r2)
+    if item.get("r2_delete_error"):
+        _set_item_stage(item, "r2_cleanup_failed")
+    elif item.get("drive_move_error"):
+        _set_item_stage(item, "drive_move_failed")
+    else:
+        _set_item_stage(item, "completed")
 
 
 def public_job(job: dict[str, Any]) -> dict[str, Any]:
     result = {key: value for key, value in job.items() if key not in {"caption", "spreadsheet", "folder"}}
     result.pop("items", None)
     result.update(_counts(job))
-    result["r2_cleanup_failed_count"] = sum(bool(item.get("r2_delete_error")) for item in job.get("items", []))
     result["progress"] = _progress_snapshot(job)
+    result["r2_cleanup_failed_count"] = sum(bool(item.get("r2_delete_error")) for item in job.get("items", []))
+    result["drive_move_failed_count"] = sum(bool(item.get("drive_move_error")) for item in job.get("items", []))
+    result["drive_move_pending_count"] = sum(
+        item.get("status") == "published" and not item.get("drive_moved") for item in job.get("items", [])
+    )
     result["results"] = [
         {key: value for key, value in item.items() if key != "caption"} for item in job.get("items", [])
     ]
@@ -485,9 +586,9 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
         if item.get("status") == "skipped":
             continue
         if item.get("status") == "published":
-            _set_item_stage(item, "cleaning_r2")
+            _set_item_stage(item, "moving_drive")
             _save_job(job)
-            _cleanup_r2_file(item, r2)
+            _finish_published_item(job, item, credentials, r2)
             _save_job(job)
             continue
         if failed:
@@ -537,9 +638,9 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
                 _save_job(job)
                 item["media_id"] = client.publish_container(item["creation_id"])
             item["error"] = None
-            _set_item_stage(item, "cleaning_r2", status="published")
+            _set_item_stage(item, "moving_drive", status="published")
             _save_job(job)
-            _cleanup_r2_file(item, r2)
+            _finish_published_item(job, item, credentials, r2)
             _save_job(job)
         except ReelValidationError as exc:
             item.update(error=str(exc), object_key=None)
@@ -550,7 +651,10 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
             _set_item_stage(item, "failed", status="failed")
             failed = True
             _save_job(job)
-    job["status"] = "paused" if any(item.get("status") == "failed" for item in job.get("items", [])) else "completed"
-    if any(item.get("r2_delete_error") for item in job.get("items", [])):
+    if any(item.get("status") == "failed" for item in job.get("items", [])):
+        job["status"] = "paused"
+    elif any(item.get("r2_delete_error") or item.get("drive_move_error") for item in job.get("items", [])):
         job["status"] = "completed_with_warnings"
+    else:
+        job["status"] = "completed"
     return _save_job(job)
