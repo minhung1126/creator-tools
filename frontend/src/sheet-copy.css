@@ -1,0 +1,238 @@
+.sheet-copy-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sheet-copy-source-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.sheet-copy-source-input {
+  flex: 1;
+}
+
+.sheet-copy-column-picker {
+  padding-top: 16px;
+  border-top: 1px solid var(--border-color);
+}
+
+.sheet-copy-column-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  color: #fff;
+}
+
+.sheet-copy-column-heading div {
+  display: flex;
+  gap: 8px;
+}
+
+.sheet-copy-column-heading button {
+  border: 0;
+  background: none;
+  color: var(--primary-light, #a5b4fc);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.sheet-copy-column-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.sheet-copy-column-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sheet-copy-column-options label.is-selected {
+  border-color: rgba(99, 102, 241, 0.55);
+  background: rgba(99, 102, 241, 0.1);
+  color: #fff;
+}
+
+.sheet-copy-column-options span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sheet-copy-table-panel {
+  overflow: hidden;
+}
+
+.sheet-copy-table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.sheet-copy-table-header > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sheet-copy-table-header strong {
+  color: #fff;
+}
+
+.sheet-copy-table-header span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.sheet-copy-status {
+  min-height: 20px;
+  color: #34d399;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.sheet-copy-table-scroll {
+  width: 100%;
+  overflow: auto;
+  max-height: calc(100vh - 260px);
+}
+
+.sheet-copy-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.sheet-copy-table th,
+.sheet-copy-table td {
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: top;
+}
+
+.sheet-copy-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 12px 14px;
+  background: rgba(18, 24, 36, 0.98);
+  color: #fff;
+  text-align: left;
+  font-size: 0.82rem;
+}
+
+.sheet-copy-table .sheet-copy-row-number {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  min-width: 58px;
+  width: 58px;
+  padding: 12px 10px;
+  background: rgba(18, 24, 36, 0.98);
+  color: var(--text-dim);
+  text-align: center;
+  font-size: 0.76rem;
+}
+
+.sheet-copy-table thead .sheet-copy-row-number {
+  z-index: 4;
+}
+
+.sheet-copy-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  min-width: 220px;
+  max-width: 420px;
+  min-height: 84px;
+  padding: 13px 14px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  cursor: copy;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sheet-copy-cell:hover,
+.sheet-copy-cell:focus-visible {
+  outline: none;
+  background: rgba(99, 102, 241, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.45);
+}
+
+.sheet-copy-cell.is-copied {
+  background: rgba(16, 185, 129, 0.09);
+  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.5);
+}
+
+.sheet-copy-cell-content {
+  flex: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  font: inherit;
+  font-size: 0.86rem;
+}
+
+.sheet-copy-cell-action {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+.sheet-copy-cell.is-copied .sheet-copy-cell-action {
+  color: #34d399;
+}
+
+.sheet-copy-blank,
+.sheet-copy-empty {
+  color: var(--text-dim);
+}
+
+.sheet-copy-empty {
+  padding: 48px 20px;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .sheet-copy-source-row,
+  .sheet-copy-table-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sheet-copy-status {
+    text-align: left;
+  }
+
+  .sheet-copy-table-scroll {
+    max-height: none;
+  }
+}
