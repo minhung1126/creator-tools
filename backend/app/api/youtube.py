@@ -121,8 +121,6 @@ def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depend
         raise HTTPException(status_code=500, detail=f"Failed to fetch YouTube playlist items: {str(exc)}") from exc
 
 
-
-
 def _youtube_thumbnail(detail: dict, video_id: str) -> str:
     thumbnails = (detail.get("snippet") or {}).get("thumbnails") or {}
     return (

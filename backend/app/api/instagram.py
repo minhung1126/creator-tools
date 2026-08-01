@@ -639,8 +639,7 @@ def stop_blocking_publish_jobs(job_id: str, creds: Credentials = Depends(require
         {
             "batch_id": job_id,
             "blocked_item_count": len(blocking_items),
-            "ready_to_recreate": result["cancel_requested_count"] == 0
-            and result["canceled_immediately_count"] > 0,
+            "ready_to_recreate": result["cancel_requested_count"] == 0 and result["canceled_immediately_count"] > 0,
         }
     )
     return result

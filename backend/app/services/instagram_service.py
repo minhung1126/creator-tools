@@ -277,9 +277,7 @@ class InstagramClient:
         body = request.get("body", request.get("data"))
         if body is not None:
             kwargs["data"] = {
-                str(key): _stringify_batch_value(value)
-                for key, value in body.items()
-                if value is not None
+                str(key): _stringify_batch_value(value) for key, value in body.items() if value is not None
             }
         return self.request(
             str(request.get("method") or "GET").upper(),
