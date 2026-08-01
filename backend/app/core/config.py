@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     HOST: str = "localhost"
     PORT: int = 8000
 
+    # Access is intentionally single-admin. Keep this as a comma-separated
+    # value so the same .env works with pydantic-settings and Docker.
+    ALLOWED_GOOGLE_EMAILS: str = ""
+
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
@@ -64,6 +68,17 @@ class Settings(BaseSettings):
         if self.is_production:
             return self.base_url
         return f"http://{self.HOST}:3000"
+
+    @property
+    def allowed_google_emails(self) -> frozenset[str]:
+        return frozenset(
+            email.strip().casefold()
+            for email in self.ALLOWED_GOOGLE_EMAILS.split(",")
+            if email.strip()
+        )
+
+    def is_google_email_allowed(self, email: str) -> bool:
+        return bool(email) and email.strip().casefold() in self.allowed_google_emails
 
     @property
     def instagram_app_id(self) -> str:

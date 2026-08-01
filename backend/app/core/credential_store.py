@@ -53,14 +53,16 @@ class CredentialStore:
 
     def _save(self):
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self._path.with_suffix(".tmp")
+        # Keep the replace atomic and avoid a shared ``.tmp`` name when more
+        # than one process writes the store during a deployment.
+        tmp_path = self._path.with_name(f".{self._path.name}.{os.getpid()}.tmp")
         with tmp_path.open("w", encoding="utf-8") as handle:
             json.dump(self._data, handle, ensure_ascii=False, indent=2)
         try:
             os.chmod(tmp_path, 0o600)
         except OSError:
             pass
-        tmp_path.replace(self._path)
+        os.replace(tmp_path, self._path)
         try:
             os.chmod(self._path, 0o600)
         except OSError:

@@ -19,7 +19,11 @@ from backend.app.core.config import settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
-from backend.app.core.security import decrypt_session_data, encrypt_session_data
+from backend.app.core.security import (
+    INSTAGRAM_OAUTH_STATE_SALT,
+    sign_timed_data,
+    verify_timed_data,
+)
 from backend.app.services.drive_service import download_drive_file, list_drive_videos
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
@@ -173,11 +177,11 @@ def get_instagram_auth_url(request: Request, response: Response, creds: Credenti
     state = secrets.token_urlsafe(32)
     response.set_cookie(
         key=OAUTH_FLOW_COOKIE,
-        value=encrypt_session_data({
+        value=sign_timed_data({
             "state": state,
             "session_fingerprint": fingerprint,
             "redirect_uri": settings.get_instagram_redirect_uri(),
-        }),
+        }, salt=INSTAGRAM_OAUTH_STATE_SALT),
         httponly=True,
         secure=settings.is_production,
         samesite="lax",
@@ -199,7 +203,9 @@ def instagram_oauth_callback(
     if not code or not state:
         return redirect_with_instagram_result(False, "Instagram OAuth callback 缺少 code 或 state")
     cookie = request.cookies.get(OAUTH_FLOW_COOKIE)
-    flow = decrypt_session_data(cookie, max_age=OAUTH_FLOW_MAX_AGE) if cookie else None
+    flow = verify_timed_data(
+        cookie, salt=INSTAGRAM_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE
+    ) if cookie else None
     if not flow:
         return redirect_with_instagram_result(False, "Instagram 授權 Session 已逾時，請重新連線")
     if not flow.get("state") or not secrets.compare_digest(state, flow["state"]):

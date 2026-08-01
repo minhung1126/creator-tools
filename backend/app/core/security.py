@@ -1,19 +1,23 @@
-from itsdangerous import URLSafeTimedSerializer, BadSignature, BadData
+from typing import Any
+
+from itsdangerous import BadData, BadSignature, URLSafeTimedSerializer
+
 from backend.app.core.config import settings
 
 serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
+GOOGLE_OAUTH_STATE_SALT = "google-oauth-state"
+INSTAGRAM_OAUTH_STATE_SALT = "instagram-oauth-state"
 
 
-def encrypt_session_data(data: dict) -> str:
-    """Encrypt session token dictionary to a URL-safe signed string."""
-    return serializer.dumps(data)
+def sign_timed_data(data: dict[str, Any], salt: str) -> str:
+    """Sign short-lived, non-session state for a single OAuth flow."""
+    return serializer.dumps(data, salt=salt)
 
 
-def decrypt_session_data(token_str: str, max_age: int = 60 * 60 * 24 * 7) -> dict | None:
-    """Decrypt and verify signed session string."""
+def verify_timed_data(token_str: str, salt: str, max_age: int) -> dict | None:
+    """Verify and decode short-lived signed data."""
     try:
-        data = serializer.loads(token_str, max_age=max_age)
+        data = serializer.loads(token_str, max_age=max_age, salt=salt)
         return data
     except (BadSignature, BadData):
-        # Covers BadSignature, SignatureExpired, BadTimeSignature, etc.
         return None
