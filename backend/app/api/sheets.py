@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from backend.app.core.dependencies import require_credentials
 from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
+    get_copyable_sheet_table,
     get_people_for_team,
     get_random_member_preview,
     get_spreadsheet_metadata,
@@ -105,3 +106,16 @@ def random_member_preview(
     except Exception as exc:
         logger.error("Failed to build random member preview: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to build random member preview: {str(exc)}") from exc
+
+
+@router.post("/copy-table")
+def copyable_sheet_table(
+    payload: ParseSheetsInput,
+    creds: Credentials = Depends(require_credentials),
+):
+    target_id = resolve_spreadsheet_id(payload.spreadsheet_url_or_id)
+    try:
+        return get_copyable_sheet_table(creds, target_id, payload.worksheet_name)
+    except Exception as exc:
+        logger.error("Failed to read copyable Sheet table: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to read Google Sheet: {str(exc)}") from exc
