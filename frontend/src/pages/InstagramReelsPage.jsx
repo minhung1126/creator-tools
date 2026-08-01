@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { CheckSquare, RefreshCw, Send } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 export default function InstagramReelsPage() {
   const toast = useToast();
@@ -14,6 +15,7 @@ export default function InstagramReelsPage() {
   const [bulkPerson, setBulkPerson] = useState('');
   const [selected, setSelected] = useState([]);
   const [publishing, setPublishing] = useState(false);
+  const [confirmPublish, setConfirmPublish] = useState(false);
   const worksheet = worksheets.find((item) => item.title === config.worksheet_name);
 
   useEffect(() => { api.getInstagramSettings().then((data) => setConfig((old) => ({ ...old, drive_folder_id: data.drive_folder_id || '', spreadsheet_id: data.spreadsheet_id || '' }))).catch(() => {}); }, []);
@@ -36,7 +38,7 @@ export default function InstagramReelsPage() {
   const publish = async () => {
     const active = videos.filter((video) => assignments[video.id]).map((video) => ({ file_id: video.id, person: assignments[video.id] }));
     if (!active.length) return toast.warning('請先指定人物');
-    if (!window.confirm(`將依 Drive 建立時間由舊到新發布 ${active.length} 支 Reels，確定繼續？`)) return;
+    setConfirmPublish(false);
     setPublishing(true);
     try {
       const result = await api.publishInstagramReels({ drive_folder_url_or_id: config.drive_folder_id, spreadsheet_url_or_id: config.spreadsheet_id, worksheet_name: config.worksheet_name, caption_column: config.caption_column, team: config.team, share_to_feed: config.share_to_feed, assignments: active });
@@ -61,7 +63,8 @@ export default function InstagramReelsPage() {
     {videos.length > 0 && <div className="glass-panel card-padding">
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><select className="form-input" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">批量選人物</option>{people.map((person) => <option key={person}>{person}</option>)}</select><button className="btn btn-primary" disabled={!bulkPerson || !selected.length} onClick={applyBulk}><CheckSquare size={16} />套用至已勾選</button></div>
       <div style={{ display: 'grid', gap: 8 }}>{videos.map((video, index) => <div key={video.id} className="glass-panel" style={{ padding: 12, display: 'grid', gridTemplateColumns: '36px 1fr 260px', gap: 10, alignItems: 'center' }}><input type="checkbox" checked={selected.includes(video.id)} onChange={(e) => setSelected(e.target.checked ? [...selected, video.id] : selected.filter((id) => id !== video.id))} /><div><strong>{index + 1}. {video.name}</strong><div className="section-desc">{video.created_time}</div></div><select className="form-input" value={assignments[video.id] || ''} onChange={(e) => setAssignments({ ...assignments, [video.id]: e.target.value })}><option value="">不發布</option>{people.map((person) => <option key={person}>{person}</option>)}</select></div>)}</div>
-      <button className="btn btn-success" style={{ marginTop: 14 }} onClick={publish} disabled={publishing}><Send size={17} />{publishing ? '發布中…' : '開始發布'}</button>
+      <button className="btn btn-success" style={{ marginTop: 14 }} onClick={() => setConfirmPublish(true)} disabled={publishing}><Send size={17} />{publishing ? '發布中…' : '開始發布'}</button>
     </div>}
+    <ConfirmDialog open={confirmPublish} title="開始發布 Reels" message={`將依 Drive 建立時間由舊到新發布 ${videos.filter((video) => assignments[video.id]).length} 支 Reels，確定繼續？`} confirmText="開始發布" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
   </div>;
 }

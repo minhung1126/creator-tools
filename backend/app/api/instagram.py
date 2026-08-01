@@ -4,6 +4,7 @@ import os
 import re
 import secrets
 import tempfile
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -43,6 +44,7 @@ from backend.app.services.sheets_service import (
 )
 
 router = APIRouter(prefix="/instagram", tags=["Instagram Reels"])
+logger = logging.getLogger(__name__)
 MAX_FILE_SIZE = 1024 * 1024 * 1024
 OAUTH_FLOW_COOKIE = "creator_tools_instagram_oauth_flow"
 OAUTH_FLOW_MAX_AGE = 10 * 60
@@ -199,7 +201,8 @@ def instagram_oauth_callback(
     error_description: Optional[str] = Query(None),
 ):
     if error:
-        return redirect_with_instagram_result(False, error_description or error)
+        logger.info("Instagram OAuth provider returned an error: %s", error)
+        return redirect_with_instagram_result(False, "Instagram OAuth 授權遭拒，請重新嘗試。")
     if not code or not state:
         return redirect_with_instagram_result(False, "Instagram OAuth callback 缺少 code 或 state")
     cookie = request.cookies.get(OAUTH_FLOW_COOKIE)
@@ -232,7 +235,7 @@ def instagram_oauth_callback(
         account_type = str(profile.get("account_type") or "").upper()
         if account_type and account_type not in {"BUSINESS", "CREATOR", "MEDIA_CREATOR"}:
             raise RuntimeError("此帳號不是可發布內容的 Instagram 專業帳號")
-        permissions = normalize_permissions(short_lived.get("permissions"))
+        permissions = normalize_permissions(short_lived.get("permissions") or long_lived.get("permissions"))
         missing = [scope for scope in REQUIRED_SCOPES if permissions and scope not in permissions]
         if missing:
             raise RuntimeError(f"Instagram 未授予必要權限：{', '.join(missing)}")
@@ -241,13 +244,14 @@ def instagram_oauth_callback(
             user_id=str(user_id),
             username=profile.get("username", ""),
             account_type=account_type,
-            granted_scopes=permissions or list(REQUIRED_SCOPES),
+            granted_scopes=permissions,
             expires_in=long_lived.get("expires_in"),
             permissions_verified=bool(permissions),
         )
         return redirect_with_instagram_result(True)
     except Exception as exc:
-        return redirect_with_instagram_result(False, str(exc))
+        logger.error("Instagram OAuth callback failed: %s", type(exc).__name__, exc_info=True)
+        return redirect_with_instagram_result(False, "Instagram OAuth 登入失敗，請重新嘗試。")
 
 
 @router.get("/auth/status")
@@ -273,7 +277,8 @@ def refresh_instagram_auth(creds: Credentials = Depends(require_credentials)):
     try:
         return {"connected": True, "account": refresh_connection()}
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Instagram Token 更新失敗：{exc}") from exc
+        logger.error("Instagram token refresh failed: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=400, detail="Instagram Token 更新失敗，請重新授權。") from exc
 
 
 @router.delete("/auth/connection")
