@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
+import SourceLinkInput from '../components/SourceLinkInput';
 
 const STATUS_LABELS = {
   queued: '排隊中',
@@ -496,8 +497,8 @@ export default function InstagramReelsPage() {
         <button className="btn btn-primary" onClick={loadSheet} disabled={loadingSheet}><RefreshCw size={16} className={loadingSheet ? 'spin' : ''} />{loadingSheet ? '刷新中...' : '刷新工作表與欄位'}</button>
       </div>
       <div className="top-filter-grid">
-        <div className="form-group"><label className="form-label">Reels Drive 資料夾 ID／網址</label><input className="form-input" value={config.drive_folder_id} onChange={(event) => updateConfig({ drive_folder_id: event.target.value })} placeholder="Google Drive 資料夾 ID／網址" /></div>
-        <div className="form-group"><label className="form-label">Google Sheet ID／網址</label><input className="form-input" value={config.spreadsheet_id} onChange={(event) => updateConfig({ spreadsheet_id: event.target.value })} placeholder="Google Sheet ID／網址" /></div>
+        <div className="form-group"><label className="form-label">Reels Drive 資料夾 ID／網址</label><SourceLinkInput value={config.drive_folder_id} onChange={(event) => updateConfig({ drive_folder_id: event.target.value })} sourceType="drive-folder" placeholder="Google Drive 資料夾 ID／網址" /></div>
+        <div className="form-group"><label className="form-label">Google Sheet ID／網址</label><SourceLinkInput value={config.spreadsheet_id} onChange={(event) => updateConfig({ spreadsheet_id: event.target.value })} sourceType="spreadsheet" placeholder="Google Sheet ID／網址" /></div>
         <div className="form-group"><label className="form-label">Insta Reels 工作表</label><select className="form-select" value={config.worksheet_name} onChange={handleWorksheetChange}><option value="">請先刷新工作表</option>{worksheets.map((sheet) => <option key={sheet.title} value={sheet.title}>{sheet.title}</option>)}</select></div>
         <div className="form-group"><label className="form-label">Reels Content 內文欄</label><select className="form-select" value={config.caption_column} onChange={(event) => updateConfig({ caption_column: event.target.value })} disabled={!selectedWorksheet}><option value="">請選擇內文欄</option>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
       </div>
@@ -560,7 +561,7 @@ export default function InstagramReelsPage() {
         <div className="reels-video-thumbnail-wrapper">
           {video.thumbnail_url ? <img className="reels-video-thumbnail" src={video.thumbnail_url} alt={`${index + 1}. ${video.name}`} onClick={() => openVideoPreview(video)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openVideoPreview(video); }} role="button" tabIndex={0} /> : <div className="section-desc">Drive 沒有提供縮圖</div>}
         </div>
-        <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{index + 1}. {video.name || '未命名影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>{formatVideoMeta(video)}</p></div>
+        <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{index + 1}. {video.name || '未命名影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>{formatVideoMeta(video)}</p><p style={{ color: 'var(--text-dim)', fontSize: '0.7rem', overflowWrap: 'anywhere' }}>Drive File ID：{video.id}</p></div>
         <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={video.already_published ? '' : assignments[video.id] || ''} onChange={(event) => setAssignments((current) => ({ ...current, [video.id]: event.target.value }))} disabled={video.already_published}><option value="">{video.already_published ? '已發布，無法再次上傳' : '不發布'}</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
       </div>)}</div>
       {jobIsActive && <div className="glass-panel publish-progress-panel">

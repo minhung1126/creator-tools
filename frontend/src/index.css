@@ -126,6 +126,46 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-dim);
 }
 
+.source-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.source-input-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.source-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(6, 182, 212, 0.1);
+  color: var(--accent);
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.source-link-button:hover,
+.source-link-button:focus-visible {
+  border-color: var(--accent);
+  background: rgba(6, 182, 212, 0.2);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.14);
+  outline: none;
+}
+
+.source-link-button[aria-disabled='true'] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

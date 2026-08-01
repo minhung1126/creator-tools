@@ -4,6 +4,7 @@ import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
+import SourceLinkInput from '../components/SourceLinkInput';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertCircle,
@@ -391,11 +392,11 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
           <button className="btn btn-primary" onClick={() => loadSheetResources({ showToast: true })} disabled={loadingSheet}><RefreshCw size={16} className={loadingSheet ? 'spin' : ''} /> {loadingSheet ? '刷新中...' : '刷新工作表與欄位'}</button>
         </div>
         <div className="top-filter-grid">
-          <div className="form-group"><label className="form-label">主要試算表 ID / URL</label><input className="form-input" value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} /></div>
+          <div className="form-group"><label className="form-label">主要試算表 ID / URL</label><SourceLinkInput value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} sourceType="spreadsheet" /></div>
           <div className="form-group"><label className="form-label">使用的工作表</label><select className="form-select" value={worksheetName} onChange={(e) => handleWorksheetChange(e.target.value)}>{worksheets.length ? worksheets.map((sheet) => <option key={sheet.title} value={sheet.title}>{sheet.title}</option>) : <option value={worksheetName}>{worksheetName || '請先刷新'}</option>}</select></div>
           <div className="form-group"><label className="form-label">標題套用欄位</label><select className="form-select" value={titleColumn} onChange={(e) => setTitleColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
           <div className="form-group"><label className="form-label">描述套用欄位</label><select className="form-select" value={descriptionColumn} onChange={(e) => setDescriptionColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
-          <div className="form-group"><label className="form-label"><PlaySquare size={14} /> 目標播放清單 ID</label><input className="form-input" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} /></div>
+          <div className="form-group"><label className="form-label"><PlaySquare size={14} /> 目標播放清單 ID</label><SourceLinkInput value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" /></div>
         </div>
           <div className="info-banner"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作流設定；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取。</span></div>
       </div>
