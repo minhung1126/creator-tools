@@ -39,7 +39,7 @@ from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
     normalize_text,
-    team_option_label,
+    matches_team_person,
 )
 
 router = APIRouter(prefix="/instagram", tags=["Instagram Reels"])
@@ -157,13 +157,6 @@ def get_r2() -> R2Config:
     if not all(values.values()):
         raise RuntimeError("Cloudflare R2 設定不完整")
     return R2Config(**values)
-
-
-def matches(row, team: str, person: str) -> bool:
-    if normalize_text(row.get("所屬團體") or "") != team:
-        return False
-    row_person = normalize_text(row.get("人") or "")
-    return (not row_person) if person == team_option_label(team) else row_person == person
 
 
 @router.get("/auth/url")
@@ -389,7 +382,7 @@ def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_cr
             if suffix not in {".mp4", ".mov"} or file["size"] > MAX_FILE_SIZE:
                 results.append({"file_id": file_id, "file_name": file["name"], "person": person, "status": "skipped", "reason": "影片需為 MP4/MOV 且不超過 1 GB"})
                 continue
-            matching = [row for row in rows if matches(row, team, person)]
+            matching = [row for row in rows if matches_team_person(row, team, person)]
             captions = {str(row.get(caption_column) or "") for row in matching}
             caption = next(iter(captions), "")
             if len(captions) != 1 or not caption.strip():

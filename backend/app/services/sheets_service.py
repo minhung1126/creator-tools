@@ -48,6 +48,14 @@ def team_option_label(team: str) -> str:
     return f"{normalize_text(team)}{TEAM_OPTION_SUFFIX}"
 
 
+def matches_team_person(row: Dict[str, Any], team: str, person: str) -> bool:
+    """Match a named person or the selected team's whole-team row."""
+    if normalize_text(row.get("所屬團體") or "") != normalize_text(team):
+        return False
+    row_person = normalize_text(row.get("人") or "")
+    return (not row_person) if person == team_option_label(team) else row_person == normalize_text(person)
+
+
 def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[str, Any]]:
     """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:

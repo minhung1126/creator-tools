@@ -12,11 +12,10 @@ from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
     normalize_text,
-    team_option_label,
+    matches_team_person,
 )
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
-    fetch_playlist_entries_ytdlp,
     fetch_playlist_items,
     fetch_playlist_preview,
     fetch_video_details,
@@ -50,16 +49,6 @@ class BatchUpdateInput(BaseModel):
 
 class PublishCleanupInput(BaseModel):
     playlist_id: Optional[str] = ""
-
-
-def assignment_matches_row(row, team: str, assignment_value: str) -> bool:
-    """Match either a named person row or the selected team's blank-person whole-team row."""
-    if normalize_text(row.get("所屬團體") or "") != team:
-        return False
-    row_person = normalize_text(row.get("人") or "")
-    if assignment_value == team_option_label(team):
-        return not row_person
-    return row_person == assignment_value
 
 
 def resolve_assignment_row(matches, title_column: str, description_column: str):
@@ -173,7 +162,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
         for video_id, person in active_assignments:
             matches = [
                 row for row in sheet_rows
-                if assignment_matches_row(row, normalized_team, person)
+                if matches_team_person(row, normalized_team, person)
             ]
             row, match_error = resolve_assignment_row(matches, title_column, description_column)
             if match_error == "not_found":
@@ -299,15 +288,6 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
         title_map = dict(api_title_map)
         ordered_ids = list(api_order)
         fallback_reason = None
-        try:
-            ytdlp_entries = fetch_playlist_entries_ytdlp(playlist_id)
-            ytdlp_ids = [item["video_id"] for item in ytdlp_entries if item["video_id"] in playlist_item_map]
-            ordered_ids = ytdlp_ids + [video_id for video_id in api_order if video_id not in ytdlp_ids]
-            title_map.update({item["video_id"]: item.get("title", "") for item in ytdlp_entries})
-            source = "yt-dlp"
-        except Exception as exc:
-            fallback_reason = str(exc)
-            logger.warning("yt-dlp lookup failed during publish; using API playlist data: %s", exc)
 
         details_map = {item["id"]: item for item in fetch_video_details(creds, ordered_ids) if item.get("id")}
         original_positions = {video_id: index for index, video_id in enumerate(ordered_ids)}

@@ -1,39 +1,8 @@
-import React, { useState, useEffect, useCallback, createContext, useContext, useMemo } from 'react';
-import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Info, X, XCircle } from 'lucide-react';
 
 const ToastContext = createContext(null);
-const NOTIFICATION_STORAGE_KEY = 'creator-tools.notifications.v1';
-const MAX_NOTIFICATIONS = 100;
-
-const ICONS = {
-  success: CheckCircle2,
-  error: XCircle,
-  warning: AlertTriangle,
-  info: Info,
-};
-
-function loadStoredNotifications() {
-  if (typeof window === 'undefined') return [];
-
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(NOTIFICATION_STORAGE_KEY) || '[]');
-    if (!Array.isArray(stored)) return [];
-
-    return stored
-      .filter((item) => item && item.id && typeof item.message === 'string')
-      .slice(0, MAX_NOTIFICATIONS)
-      .map((item) => ({
-        id: item.id,
-        message: item.message,
-        type: ICONS[item.type] ? item.type : 'info',
-        createdAt: item.createdAt || new Date().toISOString(),
-        read: Boolean(item.read),
-      }));
-  } catch (error) {
-    console.warn('Failed to load notification history:', error);
-    return [];
-  }
-}
+const ICONS = { success: CheckCircle2, error: XCircle, warning: AlertTriangle, info: Info };
 
 function ToastItem({ toast, onRemove }) {
   const [exiting, setExiting] = useState(false);
@@ -47,19 +16,16 @@ function ToastItem({ toast, onRemove }) {
     return () => clearTimeout(timer);
   }, [toast, onRemove]);
 
+  const close = () => {
+    setExiting(true);
+    setTimeout(() => onRemove(toast.id), 300);
+  };
+
   return (
     <div className={`toast-item toast-${toast.type} ${exiting ? 'toast-exit' : ''}`}>
       <Icon size={18} />
       <span className="toast-message">{toast.message}</span>
-      <button
-        type="button"
-        className="toast-close"
-        aria-label="關閉通知"
-        onClick={() => {
-          setExiting(true);
-          setTimeout(() => onRemove(toast.id), 300);
-        }}
-      >
+      <button type="button" className="toast-close" aria-label="關閉通知" onClick={close}>
         <X size={14} />
       </button>
     </div>
@@ -70,80 +36,33 @@ let toastIdCounter = 0;
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
-  const [notifications, setNotifications] = useState(loadStoredNotifications);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(NOTIFICATION_STORAGE_KEY, JSON.stringify(notifications));
-    } catch (error) {
-      console.warn('Failed to save notification history:', error);
-    }
-  }, [notifications]);
 
   const addToast = useCallback((message, type = 'info', duration = 4000) => {
-    const normalizedType = ICONS[type] ? type : 'info';
     const notification = {
       id: `${Date.now()}-${++toastIdCounter}`,
       message: String(message),
-      type: normalizedType,
-      createdAt: new Date().toISOString(),
-      read: false,
+      type: ICONS[type] ? type : 'info',
+      duration,
     };
-
-    setToasts((prev) => [...prev, { ...notification, duration }]);
-    setNotifications((prev) => [notification, ...prev].slice(0, MAX_NOTIFICATIONS));
+    setToasts((prev) => [...prev, notification]);
   }, []);
 
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
 
-  const markAllRead = useCallback(() => {
-    setNotifications((prev) => prev.map((notification) => (
-      notification.read ? notification : { ...notification, read: true }
-    )));
-  }, []);
-
-  const markNotificationRead = useCallback((id) => {
-    setNotifications((prev) => prev.map((notification) => (
-      notification.id === id ? { ...notification, read: true } : notification
-    )));
-  }, []);
-
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-  }, []);
-
-  const unreadCount = notifications.reduce((count, notification) => (
-    count + (notification.read ? 0 : 1)
-  ), 0);
-
   const toast = useMemo(() => ({
-    success: (msg, dur) => addToast(msg, 'success', dur),
-    error: (msg, dur) => addToast(msg, 'error', dur || 6000),
-    warning: (msg, dur) => addToast(msg, 'warning', dur),
-    info: (msg, dur) => addToast(msg, 'info', dur),
-    notifications,
-    unreadCount,
-    markAllRead,
-    markNotificationRead,
-    clearNotifications,
-  }), [
-    addToast,
-    clearNotifications,
-    markAllRead,
-    markNotificationRead,
-    notifications,
-    unreadCount,
-  ]);
+    success: (message, duration) => addToast(message, 'success', duration),
+    error: (message, duration) => addToast(message, 'error', duration || 6000),
+    warning: (message, duration) => addToast(message, 'warning', duration),
+    info: (message, duration) => addToast(message, 'info', duration),
+  }), [addToast]);
 
   return (
     <ToastContext.Provider value={toast}>
       {children}
       <div className="toast-container">
-        {toasts.map((notification) => (
-          <ToastItem key={notification.id} toast={notification} onRemove={removeToast} />
-        ))}
+        {toasts.map((item) => <ToastItem key={item.id} toast={item} onRemove={removeToast} />)}
       </div>
     </ToastContext.Provider>
   );

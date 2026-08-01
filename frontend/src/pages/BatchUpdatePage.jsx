@@ -3,6 +3,8 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
+import ThumbnailDialog from '../components/ThumbnailDialog';
+import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertCircle,
   CheckCircle2,
@@ -42,19 +44,6 @@ function normalizeConfig(raw, defaults, sysSettings) {
     selectedTeam: raw?.selectedTeam || raw?.team || '',
     enabledPeople: Array.isArray(enabledPeople) ? enabledPeople : [],
   };
-}
-
-function sortVideosByUploadTime(videos) {
-  return [...videos].sort((a, b) => {
-    const aTime = Date.parse(a.published_at || '');
-    const bTime = Date.parse(b.published_at || '');
-    const aHasTime = Number.isFinite(aTime);
-    const bHasTime = Number.isFinite(bTime);
-    if (aHasTime && bHasTime) return aTime - bTime || (a.sequence ?? 0) - (b.sequence ?? 0);
-    if (aHasTime) return -1;
-    if (bHasTime) return 1;
-    return (a.sequence ?? 0) - (b.sequence ?? 0);
-  });
 }
 
 function PreviewField({ label, value }) {
@@ -101,6 +90,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [errorMsg, setErrorMsg] = useState(null);
   const [configSaveError, setConfigSaveError] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
@@ -383,9 +373,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setConfirmOpen(true);
   };
 
-  const sourceLabel = playlistSource === 'yt-dlp'
-    ? 'yt-dlp（不耗 API 配額）'
-    : playlistSource === 'youtube-api' ? 'YouTube API 回退模式' : '';
+  const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
 
   return (
     <div className="section-gap">
@@ -451,7 +439,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       {videos.length > 0 && (
         <div className="section-gap" style={{ gap: 18 }}>
           <div><h2 style={{ fontSize: '1.3rem' }}>為每支影片指定人物（{videos.length} 支）</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
-          <div className="glass-panel" style={{ padding: 18 }}>
+          <div className="glass-panel bulk-edit-panel" style={{ padding: 18 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
               <div><h3 style={{ color: '#fff', fontSize: '1.05rem' }}>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 4 }}>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p></div>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label>
@@ -463,9 +451,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
           </div>
 
           <div className="video-card-grid">{videos.map((video) => (
-            <div key={video.video_id} className="glass-panel video-card" style={{ borderColor: selectedVideoIds.includes(video.video_id) ? 'var(--primary)' : undefined }}>
+            <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}`} style={{ borderColor: selectedVideoIds.includes(video.video_id) ? 'var(--primary)' : undefined }}>
               <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批量編輯</label>
-              <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={video.title} /> : <div>無縮圖</div>}</div>
+              <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} /> : <div>無縮圖</div>}</div>
               <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{video.title || '無標題影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>Video ID: {video.video_id}</p></div>
               <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.video_id] || '不編輯'} onChange={(e) => setAssignments((current) => ({ ...current, [video.video_id]: e.target.value }))}><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
             </div>
@@ -475,6 +463,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       )}
 
       {result && <div className="glass-panel" style={{ padding: 24 }}><h3 style={{ color: '#34d399', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle2 size={22} /> 批次處理完成</h3><p style={{ color: 'var(--text-muted)' }}>成功 {result.updated_count}、略過 {result.skipped_count}、失敗 {result.failed_count}</p></div>}
+      <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );
 }

@@ -9,18 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-      /* YouTube 草稿卡片狀態：略過與已完成選擇使用不同底色。 */
-      .video-card:has(.form-select option[value="不編輯"]:checked) {
-        background: rgba(245, 158, 11, 0.11);
-        border-color: rgba(245, 158, 11, 0.38);
-      }
-
-      .video-card:has(.form-select option:not([value="不編輯"]):checked) {
-        background: rgba(16, 185, 129, 0.11);
-        border-color: rgba(16, 185, 129, 0.42);
-      }
-    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -82,7 +82,7 @@ function AppContent() {
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'instagram_reels' && <InstagramReelsPage />}
     {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
-    {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshUser={fetchUser} />}
+    {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main></div>;
 }
 

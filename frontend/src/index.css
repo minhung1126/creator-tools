@@ -401,6 +401,16 @@ h1, h2, h3, h4, h5, h6 {
   gap: 12px;
 }
 
+.video-card-skipped {
+  background: rgba(245, 158, 11, 0.11);
+  border-color: rgba(245, 158, 11, 0.38);
+}
+
+.video-card-assigned {
+  background: rgba(16, 185, 129, 0.11);
+  border-color: rgba(16, 185, 129, 0.42);
+}
+
 .video-thumbnail-wrapper {
   position: relative;
   width: 100%;
@@ -414,7 +424,24 @@ h1, h2, h3, h4, h5, h6 {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  cursor: zoom-in;
 }
+
+.thumbnail-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.thumbnail-dialog-content { position: relative; max-width: min(1200px, 94vw); max-height: 90vh; }
+.thumbnail-dialog-image { display: block; max-width: 100%; max-height: 90vh; object-fit: contain; border-radius: 12px; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65); }
+.thumbnail-dialog-close { position: absolute; top: -18px; right: -18px; width: 42px; height: 42px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 255, 255, 0.25); border-radius: 999px; background: rgba(15, 23, 42, 0.96); color: #fff; cursor: pointer; }
 
 .video-badge-seq {
   position: absolute;
@@ -775,4 +802,3 @@ h1, h2, h3, h4, h5, h6 {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
-

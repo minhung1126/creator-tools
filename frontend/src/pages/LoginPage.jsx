@@ -2,13 +2,9 @@ import React, { useState } from 'react';
 import { api } from '../services/api';
 import { 
   Video, 
-  Sparkles, 
   LogIn, 
   CheckCircle2, 
   AlertCircle, 
-  ShieldCheck, 
-  FileSpreadsheet, 
-  Youtube,
   Lock
 } from 'lucide-react';
 

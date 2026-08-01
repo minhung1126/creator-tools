@@ -17,7 +17,6 @@ router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
 class ResourceSettingsModel(BaseModel):
     default_spreadsheet_id: Optional[str] = ""
     default_playlist_id: Optional[str] = ""
-    default_drive_folder_id: Optional[str] = ""
 
 
 class YouTubeDraftConfigModel(BaseModel):
@@ -43,6 +42,8 @@ def _read_draft_config(video_type: str) -> Dict:
     raw = runtime_config.get(_draft_config_key(video_type), "")
     if not raw:
         return {}
+    if isinstance(raw, dict):
+        return raw
     try:
         parsed = json.loads(raw)
         return parsed if isinstance(parsed, dict) else {}
@@ -62,7 +63,6 @@ def get_system_settings(creds: Credentials = Depends(require_credentials)):
         "google_client_configured": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
         "default_spreadsheet_id": rc.get("default_spreadsheet_id", ""),
         "default_playlist_id": rc.get("default_playlist_id", ""),
-        "default_drive_folder_id": rc.get("default_drive_folder_id", ""),
     }
 
 
@@ -73,8 +73,6 @@ def update_system_settings(payload: ResourceSettingsModel, creds: Credentials = 
         update_data["default_spreadsheet_id"] = payload.default_spreadsheet_id
     if payload.default_playlist_id is not None:
         update_data["default_playlist_id"] = payload.default_playlist_id
-    if payload.default_drive_folder_id is not None:
-        update_data["default_drive_folder_id"] = payload.default_drive_folder_id
     runtime_config.update(update_data)
     logger.info("System settings updated: %s", list(update_data.keys()))
     return {"status": "success", "message": "Settings updated and saved successfully", "settings": get_system_settings(creds)}
@@ -91,6 +89,6 @@ def update_youtube_draft_settings(payload: YouTubeDraftConfigUpdateModel, creds:
     del creds
     key = _draft_config_key(payload.video_type)
     value = payload.config.model_dump()
-    runtime_config.set(key, json.dumps(value, ensure_ascii=False))
+    runtime_config.set(key, value)
     logger.info("YouTube %s draft settings updated", payload.video_type)
     return {"status": "success", "video_type": payload.video_type, "config": value}
