@@ -41,7 +41,9 @@ def test_publish_history_api_keeps_record_when_drive_restore_fails(monkeypatch, 
     store = InstagramPublishStore(tmp_path / "jobs.json")
     created = store.create(_published_job())
     monkeypatch.setattr(instagram_api, "instagram_publish_store", store)
-    monkeypatch.setattr(instagram_api, "move_drive_file_to_folder", lambda *args: (_ for _ in ()).throw(RuntimeError("denied")))
+    monkeypatch.setattr(
+        instagram_api, "move_drive_file_to_folder", lambda *args: (_ for _ in ()).throw(RuntimeError("denied"))
+    )
 
     with pytest.raises(HTTPException) as error:
         instagram_api.delete_publish_history(created["id"], "file-1", object())
