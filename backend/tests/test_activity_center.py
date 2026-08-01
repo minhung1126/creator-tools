@@ -126,11 +126,18 @@ def test_retry_preserves_checkpoint_but_get_task_is_a_safe_public_dto(tmp_path):
     repo = make_repo(tmp_path)
     created = repo.create_batch_and_tasks(
         {"platform": "instagram", "operation": "instagram.reels_publish", "failure_policy": "pause_remaining_in_batch"},
-        [{
-            **make_specs(1, "instagram", "instagram.reels_publish")[0],
-            "payload": {"caption": "private caption", "object_key": "private-key"},
-            "checkpoint": {"media_id": "media-1", "object_key": "private-key", "drive_moved": False, "r2_delete_error": "denied"},
-        }],
+        [
+            {
+                **make_specs(1, "instagram", "instagram.reels_publish")[0],
+                "payload": {"caption": "private caption", "object_key": "private-key"},
+                "checkpoint": {
+                    "media_id": "media-1",
+                    "object_key": "private-key",
+                    "drive_moved": False,
+                    "r2_delete_error": "denied",
+                },
+            }
+        ],
     )
     task_id = created["tasks"][0]["id"]
     repo.update_task(task_id, status="succeeded_with_warnings", stage="cleaning_r2", error="denied", retryable=True)
@@ -180,11 +187,13 @@ def test_restart_pauses_interrupted_task_and_keeps_checkpoint(tmp_path):
     repo = make_repo(tmp_path)
     repo.create_batch_and_tasks(
         {"platform": "youtube", "operation": "youtube.publish_cleanup", "failure_policy": "pause_remaining_in_batch"},
-        [{
-            **make_specs(1, "youtube", "youtube.publish_cleanup")[0],
-            "payload": {"playlist_item_id": "playlist-item"},
-            "checkpoint": {"privacy_updated_at": "2026-01-01T00:00:00+00:00"},
-        }],
+        [
+            {
+                **make_specs(1, "youtube", "youtube.publish_cleanup")[0],
+                "payload": {"playlist_item_id": "playlist-item"},
+                "checkpoint": {"privacy_updated_at": "2026-01-01T00:00:00+00:00"},
+            }
+        ],
     )
     claimed = repo.claim_next("youtube")
     repo.request_cancel(claimed["id"])
@@ -198,7 +207,25 @@ def test_restart_pauses_interrupted_task_and_keeps_checkpoint(tmp_path):
 def test_legacy_migration_is_idempotent_and_has_no_unread_history_notice(tmp_path):
     legacy_path = tmp_path / "instagram_publish_jobs.json"
     legacy_path.write_text(
-        json.dumps({"version": 1, "jobs": {"legacy-job": {"status": "completed", "items": [{"sequence": 1, "file_id": "drive-1", "file_name": "one.mp4", "status": "published", "media_id": "media-1"}]}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": {
+                    "legacy-job": {
+                        "status": "completed",
+                        "items": [
+                            {
+                                "sequence": 1,
+                                "file_id": "drive-1",
+                                "file_name": "one.mp4",
+                                "status": "published",
+                                "media_id": "media-1",
+                            }
+                        ],
+                    }
+                },
+            }
+        ),
         encoding="utf-8",
     )
     repo = make_repo(tmp_path)

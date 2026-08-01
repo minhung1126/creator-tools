@@ -79,4 +79,3 @@ class TaskQueue:
 
 
 task_queue = TaskQueue()
-

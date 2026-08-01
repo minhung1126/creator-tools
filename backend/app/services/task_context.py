@@ -60,12 +60,17 @@ class TaskContext:
         }
         if set_error:
             kwargs["error"] = error
-        return self.repository.update_task(
-            self.task_id,
-            **kwargs,
-        ) or task
+        return (
+            self.repository.update_task(
+                self.task_id,
+                **kwargs,
+            )
+            or task
+        )
 
-    def checkpoint(self, values: dict[str, Any], *, stage: Optional[str] = None, progress_percent: Optional[float] = None) -> dict[str, Any]:
+    def checkpoint(
+        self, values: dict[str, Any], *, stage: Optional[str] = None, progress_percent: Optional[float] = None
+    ) -> dict[str, Any]:
         return self.update(stage=stage, progress_percent=progress_percent, checkpoint=values)
 
     def finish(
@@ -80,16 +85,21 @@ class TaskContext:
         message: str = "",
     ) -> dict[str, Any]:
         if status in {"canceled", "canceled_with_warnings"}:
-            return self.repository.finalize_canceled(
-                self.task_id,
-                warning=status == "canceled_with_warnings",
-                error=error,
-                message=message,
-            ) or self.task
+            return (
+                self.repository.finalize_canceled(
+                    self.task_id,
+                    warning=status == "canceled_with_warnings",
+                    error=error,
+                    message=message,
+                )
+                or self.task
+            )
         kwargs = {
             "status": status,
             "stage": stage or status,
-            "progress_percent": 100 if progress_percent is None and status in {"succeeded", "succeeded_with_warnings", "skipped"} else progress_percent,
+            "progress_percent": 100
+            if progress_percent is None and status in {"succeeded", "succeeded_with_warnings", "skipped"}
+            else progress_percent,
             "cancel_too_late": cancel_too_late,
             "retryable": retryable,
             "message": message,
