@@ -30,3 +30,5 @@ docker compose logs -f creator-tools
 - Meta Valid OAuth Redirect URI：`PUBLIC_BASE_URL/api/v1/instagram/auth/callback`。
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時，Google login 會被拒絕；目前產品模式是單一管理者。
+
+登入後的 Google Sheet、YouTube playlist、Drive folder 與 R2 設定都由網頁設定頁保存到 `data/`，不需要放進 `.env`。修改網頁設定後不必重啟服務；修改 `.env` 則需要重新啟動。

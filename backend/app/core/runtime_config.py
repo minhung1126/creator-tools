@@ -33,6 +33,19 @@ _PERSISTABLE_FIELDS = {
     "r2_public_base_url",
 }
 
+# These values are intentionally configured only from the authenticated UI.
+# Keeping them out of Settings also prevents old environment variables from
+# silently becoming a second source of truth.
+_WEB_ONLY_FIELDS = {
+    "default_spreadsheet_id",
+    "default_playlist_id",
+    "instagram_spreadsheet_id",
+    "r2_account_id",
+    "r2_access_key_id",
+    "r2_bucket_name",
+    "r2_public_base_url",
+}
+
 # Removed legacy secrets are discarded during load instead of being copied forward.
 _LEGACY_SECRET_FIELDS = {"meta_app_secret", "meta_access_token", "instagram_access_token", "r2_secret_access_key"}
 
@@ -90,6 +103,8 @@ class RuntimeConfig:
         with self._lock:
             if key in self._data and self._data[key] not in (None, ""):
                 return self._data[key]
+        if key in _WEB_ONLY_FIELDS:
+            return default
         env_value = getattr(settings, key.upper(), "")
         return env_value if env_value not in (None, "") else default
 

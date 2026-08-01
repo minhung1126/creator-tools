@@ -58,6 +58,8 @@ def get_system_settings(creds: Credentials = Depends(require_credentials)):
     rc = runtime_config.get_all()
     return {
         "host": settings.base_url,
+        "public_base_url": settings.base_url,
+        "bind_host": settings.BIND_HOST,
         "frontend_url": settings.frontend_url,
         "redirect_uri": settings.get_redirect_uri(),
         "google_client_configured": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
