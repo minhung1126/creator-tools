@@ -69,10 +69,14 @@ def test_batch_requests_chain_children_and_preserve_input_order(monkeypatch):
 
 def test_reel_batch_operations_do_not_chain_independent_children(monkeypatch):
     FakeHttpClient.calls = []
-    FakeHttpClient.responses = [response([
-        {"code": 200, "body": json.dumps({"id": "container-1"})},
-        {"code": 200, "body": json.dumps({"id": "container-2"})},
-    ])]
+    FakeHttpClient.responses = [
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "container-1"})},
+                {"code": 200, "body": json.dumps({"id": "container-2"})},
+            ]
+        )
+    ]
     monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
     monkeypatch.setattr(
         "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
@@ -94,10 +98,12 @@ def test_reel_batch_operations_do_not_chain_independent_children(monkeypatch):
 def test_reel_batch_retries_only_rejected_publish_child(monkeypatch):
     FakeHttpClient.calls = []
     FakeHttpClient.responses = [
-        response([
-            {"code": 200, "body": json.dumps({"id": "media-1"})},
-            {"code": 400, "body": json.dumps({"error": {"message": "temporary child failure"}})},
-        ]),
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "media-1"})},
+                {"code": 400, "body": json.dumps({"error": {"message": "temporary child failure"}})},
+            ]
+        ),
         response({"id": "media-2"}),
     ]
     monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
