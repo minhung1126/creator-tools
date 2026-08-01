@@ -402,7 +402,13 @@ export default function InstagramReelsPage() {
     });
     setPublishing(true);
     try {
-      setJob(await api.retryInstagramPublishJob(job.id));
+      const result = await api.retryInstagramPublishJob(job.id);
+      setJob(result);
+      if (!ACTIVE_JOB_STATUSES.has(result.status)) {
+        const patch = operationPatchForJob(result);
+        toast.finishOperation(operationId, patch);
+        publishOperationId.current = null;
+      }
     } catch (error) {
       toast.finishOperation(operationId, { status: 'error', message: error.message });
       publishOperationId.current = null;

@@ -41,7 +41,7 @@ META_VIDEO_CODECS = {"h264", "hevc"}
 META_AUDIO_CODECS = {"aac"}
 VIDEO_SUFFIXES = {".mp4", ".mov"}
 
-# The job is intentionally more granular than the public item status.  Statuses
+# The job is intentionally more granular than the public item status. Statuses
 # are useful for retry logic, while stages describe what the user is waiting
 # for right now and give the UI a stable progress signal.
 PIPELINE_STAGES = (

@@ -304,9 +304,7 @@ def test_public_job_reports_current_child_task_stage():
             },
         ],
     }
-
     result = service.public_job(job)
-
     assert result["progress"] == {
         "total": 2,
         "completed_count": 0,
@@ -331,9 +329,7 @@ def test_retry_resets_only_the_child_task_checkpoint():
         "public_url": "https://cdn.example/reel.mp4",
         "creation_id": "creation-1",
     }
-
     service.reset_item_for_retry(item)
-
     assert item["status"] == "queued"
     assert item["stage"] == "queued"
     assert item["error"] is None
