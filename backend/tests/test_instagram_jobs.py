@@ -1,6 +1,8 @@
 from copy import deepcopy
 from pathlib import Path
 
+import pytest
+
 from backend.app.services import instagram_publish_service as service
 from backend.app.services.r2_service import validate_public_base_url
 
@@ -67,6 +69,64 @@ def test_reels_preflight_uses_meta_limits_only():
     )
     assert valid is False
     assert "1920" in reason
+
+
+def test_reels_audio_bitrate_is_non_blocking(monkeypatch, tmp_path: Path):
+    media = tmp_path / "reel.mp4"
+    media.write_bytes(b"video")
+    monkeypatch.setattr(
+        service,
+        "_probe_reel_file",
+        lambda path: {
+            "format": {"format_name": "mov,mp4", "duration": "10"},
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "codec_name": "h264",
+                    "width": 1080,
+                    "height": 1920,
+                    "avg_frame_rate": "30/1",
+                    "bit_rate": "8000000",
+                },
+                {
+                    "codec_type": "audio",
+                    "codec_name": "aac",
+                    "sample_rate": "48000",
+                    "bit_rate": "256000",
+                },
+            ],
+        },
+    )
+
+    metadata = service.validate_reel_file(media)
+
+    assert metadata["audio_bitrate"] == 256000
+
+
+def test_reels_audio_sample_rate_only_blocks_above_maximum(monkeypatch, tmp_path: Path):
+    media = tmp_path / "reel.mp4"
+    media.write_bytes(b"video")
+    probe = {
+        "format": {"format_name": "mov,mp4", "duration": "10"},
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "h264",
+                "width": 1080,
+                "height": 1920,
+                "avg_frame_rate": "30/1",
+                "bit_rate": "8000000",
+            },
+            {"codec_type": "audio", "codec_name": "aac", "sample_rate": "44100", "bit_rate": "128000"},
+        ],
+    }
+    monkeypatch.setattr(service, "_probe_reel_file", lambda path: probe)
+
+    assert service.validate_reel_file(media)["audio_sample_rate"] == 44100
+
+    probe["streams"][1]["sample_rate"] = "48001"
+    with pytest.raises(service.ReelValidationError, match="48 kHz"):
+        service.validate_reel_file(media)
 
 
 def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path: Path):
