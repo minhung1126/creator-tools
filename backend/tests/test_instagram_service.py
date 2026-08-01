@@ -67,6 +67,58 @@ def test_batch_requests_chain_children_and_preserve_input_order(monkeypatch):
     assert kwargs["data"]["access_token"] == "token-1"
 
 
+def test_reel_batch_operations_do_not_chain_independent_children(monkeypatch):
+    FakeHttpClient.calls = []
+    FakeHttpClient.responses = [
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "container-1"})},
+                {"code": 200, "body": json.dumps({"id": "container-2"})},
+            ]
+        )
+    ]
+    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
+    monkeypatch.setattr(
+        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
+        lambda *args, **kwargs: None,
+    )
+
+    client = InstagramClient("user-1", "token-1")
+    assert client.create_reel_containers(
+        [
+            {"video_url": "https://cdn.example/one.mp4", "caption": "one"},
+            {"video_url": "https://cdn.example/two.mp4", "caption": "two"},
+        ]
+    ) == ["container-1", "container-2"]
+
+    entries = json.loads(FakeHttpClient.calls[0][2]["data"]["batch"])
+    assert all("depends_on" not in entry for entry in entries)
+
+
+def test_reel_batch_retries_only_rejected_publish_child(monkeypatch):
+    FakeHttpClient.calls = []
+    FakeHttpClient.responses = [
+        response(
+            [
+                {"code": 200, "body": json.dumps({"id": "media-1"})},
+                {"code": 400, "body": json.dumps({"error": {"message": "temporary child failure"}})},
+            ]
+        ),
+        response({"id": "media-2"}),
+    ]
+    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeHttpClient)
+    monkeypatch.setattr(
+        "backend.app.services.instagram_service.instagram_api_usage_tracker.record_response",
+        lambda *args, **kwargs: None,
+    )
+
+    client = InstagramClient("user-1", "token-1")
+    assert client.publish_containers(["container-1", "container-2"]) == ["media-1", "media-2"]
+    assert len(FakeHttpClient.calls) == 2
+    assert FakeHttpClient.calls[1][1].endswith("/user-1/media_publish")
+    assert FakeHttpClient.calls[1][2]["data"]["creation_id"] == "container-2"
+
+
 def test_batch_requests_chunk_at_meta_limit_in_sequence(monkeypatch):
     FakeHttpClient.calls = []
     FakeHttpClient.responses = [

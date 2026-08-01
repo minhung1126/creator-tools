@@ -262,8 +262,91 @@ class InstagramClient:
                 break
         return results
 
-    def _strict_batch_data(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        results = self.batch_request(requests, preserve_order=True)
+    def _request_from_batch_spec(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Execute one child request using the normal client path.
+
+        High-level Instagram operations are independent child requests.  If
+        Meta rejects one child in an otherwise valid batch, retrying only that
+        child keeps the successful responses useful without repeating their
+        side effects.
+        """
+
+        kwargs: dict[str, Any] = {}
+        if request.get("params"):
+            kwargs["params"] = request["params"]
+        body = request.get("body", request.get("data"))
+        if body is not None:
+            kwargs["data"] = {
+                str(key): _stringify_batch_value(value) for key, value in body.items() if value is not None
+            }
+        return self.request(
+            str(request.get("method") or "GET").upper(),
+            str(request.get("path") or ""),
+            **kwargs,
+        )
+
+    def _independent_batch_data(self, requests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Run independent children without artificial ``depends_on`` links.
+
+        The Graph batch response keeps the input order, so the caller still
+        gets deterministic ID/status mapping.  ``depends_on`` is reserved for
+        low-level callers whose later request actually consumes an earlier
+        request's result; using it for separate Reel operations can prevent
+        later children from running when the first child has a transient
+        failure.  A failed child is retried individually once so one bad child
+        does not discard successful work from the same batch.
+        """
+
+        results = self.batch_request(requests, preserve_order=False)
+        resolved: list[dict[str, Any]] = []
+        first_failure: int | None = None
+        for index, (request, result) in enumerate(zip(requests, results)):
+            if result.get("ok"):
+                resolved.append(result)
+                continue
+            try:
+                data = self._request_from_batch_spec(request)
+            except Exception as exc:
+                if first_failure is None:
+                    first_failure = index
+                resolved.append(
+                    {
+                        "ok": False,
+                        "status_code": getattr(exc, "status_code", 500),
+                        "data": {},
+                        "error": str(exc) or result.get("error") or "Instagram API batch child request failed",
+                        "token_error": bool(getattr(exc, "token_error", False)),
+                        "index": index,
+                    }
+                )
+            else:
+                resolved.append(
+                    {
+                        "ok": True,
+                        "status_code": 200,
+                        "data": data,
+                        "error": None,
+                        "token_error": False,
+                        "index": index,
+                    }
+                )
+
+        if first_failure is not None:
+            failed = resolved[first_failure]
+            raise InstagramBatchError(
+                failed.get("error") or "Instagram API batch child request failed",
+                index=first_failure,
+                results=resolved,
+            )
+        return [result["data"] for result in resolved]
+
+    def _strict_batch_data(
+        self,
+        requests: list[dict[str, Any]],
+        *,
+        preserve_order: bool = True,
+    ) -> list[dict[str, Any]]:
+        results = self.batch_request(requests, preserve_order=preserve_order)
         for result in results:
             if not result["ok"]:
                 raise InstagramBatchError(
@@ -315,7 +398,7 @@ class InstagramClient:
             }
             for reel in reels
         ]
-        return [str(data["id"]) for data in self._strict_batch_data(requests)]
+        return [str(data["id"]) for data in self._independent_batch_data(requests)]
 
     def get_container_statuses(self, creation_ids: list[str]) -> list[dict[str, Any]]:
         """Fetch container statuses in the same order as ``creation_ids``."""
@@ -332,7 +415,7 @@ class InstagramClient:
             }
             for creation_id in creation_ids
         ]
-        return self._strict_batch_data(requests)
+        return self._independent_batch_data(requests)
 
     def publish_containers(self, creation_ids: list[str]) -> list[str]:
         """Publish multiple ready containers in input order with one batch call."""
@@ -349,7 +432,7 @@ class InstagramClient:
             }
             for creation_id in creation_ids
         ]
-        return [str(data.get("id") or "") for data in self._strict_batch_data(requests)]
+        return [str(data.get("id") or "") for data in self._independent_batch_data(requests)]
 
     def wait_for_containers(
         self,

@@ -429,12 +429,10 @@ def process_instagram_reel_tasks(
                 creation_id = str((result.get("data") or {}).get("id") or "")
                 if creation_id:
                     apply_creation_results([create_states[index]], [creation_id])
-                else:
+                elif failed_index is None:
                     failed_index = index
-                    break
-            else:
+            elif failed_index is None:
                 failed_index = index
-                break
         return failed_index
 
     def apply_partial_publish_results(
@@ -458,12 +456,10 @@ def process_instagram_reel_tasks(
                         stage="published",
                         progress_percent=94,
                     )
-                else:
+                elif failed_index is None:
                     failed_index = index
-                    break
-            else:
+            elif failed_index is None:
                 failed_index = index
-                break
         return failed_index
 
     try:
