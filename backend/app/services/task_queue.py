@@ -11,9 +11,6 @@ from backend.app.services.task_dispatcher import TaskDispatcher, task_dispatcher
 
 logger = logging.getLogger(__name__)
 
-INSTAGRAM_BATCH_SIZE = 50
-
-
 class TaskQueue:
     """Run one sequential worker per platform lane.
 
@@ -63,14 +60,6 @@ class TaskQueue:
         return True
 
     def run_once(self, lane: str) -> Optional[dict]:
-        if lane == "instagram":
-            # Meta accepts at most 50 child requests in one Graph batch.  Keep
-            # the durable claim bounded to the same unit so a later HTTP chunk
-            # can never lose checkpoints from an earlier successful chunk.
-            tasks = self.repository.claim_batch(lane, limit=INSTAGRAM_BATCH_SIZE)
-            if not tasks:
-                return None
-            return self.dispatcher.dispatch_batch(tasks)
         task = self.repository.claim_next(lane)
         if task is None:
             return None
