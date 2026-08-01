@@ -30,7 +30,7 @@ def test_reels_preflight_and_order(monkeypatch):
         service,
         "list_drive_videos",
         lambda *args: [
-            {"id": "2", "name": "two.mp4", "size": 100, "duration_seconds": 10, "width": 1080, "height": 1920},
+            {"id": "2", "name": "two.mp4", "size": 100, "duration_seconds": 120, "width": 1080, "height": 1920},
             {"id": "1", "name": "one.mp4", "size": 100, "duration_seconds": 10, "width": 1080, "height": 1920},
         ],
     )
@@ -48,6 +48,27 @@ def test_reels_preflight_and_order(monkeypatch):
     assert all(item["status"] == "queued" for item in job["items"])
 
 
+def test_reels_preflight_uses_meta_limits_only():
+    valid, reason, _ = service._preflight(
+        {"name": "wide.mp4", "size": None, "duration_seconds": 900, "width": 1920, "height": 400}
+    )
+    assert valid is True
+    assert reason is None
+
+    for duration, expected in ((2.9, "3 秒"), (900.1, "15 分鐘")):
+        valid, reason, _ = service._preflight(
+            {"name": "reel.mp4", "size": 100, "duration_seconds": duration, "width": 1080, "height": 1920}
+        )
+        assert valid is False
+        assert expected in reason
+
+    valid, reason, _ = service._preflight(
+        {"name": "reel.mp4", "size": 100, "duration_seconds": 120, "width": 1921, "height": 1080}
+    )
+    assert valid is False
+    assert "1920" in reason
+
+
 def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path: Path):
     store = MemoryStore()
     monkeypatch.setattr(service, "instagram_publish_store", store)
@@ -58,6 +79,7 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
         lambda credentials, file_id, destination: Path(destination).write_bytes(b"video"),
     )
     monkeypatch.setattr(service, "upload_public_file", lambda *args, **kwargs: "https://cdn.example/reel.mp4")
+    monkeypatch.setattr(service, "validate_reel_file", lambda path: {"size_bytes": 5})
     deleted = []
     monkeypatch.setattr(service, "delete_public_file", lambda config, object_key: deleted.append(object_key))
 

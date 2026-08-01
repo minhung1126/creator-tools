@@ -1,9 +1,13 @@
 """Preparation and durable execution of ordered Instagram publish jobs."""
 
+import json
 import mimetypes
 import re
+import shutil
+import subprocess
 import tempfile
 from datetime import datetime, timezone
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +22,22 @@ from backend.app.services.sheets_service import (
     normalize_text,
 )
 
-MAX_FILE_SIZE = 1024 * 1024 * 1024
-MAX_REEL_DURATION_SECONDS = 90
+META_MAX_FILE_SIZE_BYTES = 1024 * 1024 * 1024
+META_MIN_REEL_DURATION_SECONDS = 3
+META_MAX_REEL_DURATION_SECONDS = 15 * 60
+META_MAX_HORIZONTAL_PIXELS = 1920
+META_MIN_FRAME_RATE = 23
+META_MAX_FRAME_RATE = 60
+META_MAX_VIDEO_BITRATE = 25_000_000
+META_MAX_AUDIO_BITRATE = 128_000
+META_AUDIO_SAMPLE_RATE = 48_000
+META_VIDEO_CODECS = {"h264", "hevc"}
+META_AUDIO_CODECS = {"aac"}
 VIDEO_SUFFIXES = {".mp4", ".mov"}
+
+
+class ReelValidationError(ValueError):
+    """A downloaded video violates a documented Meta Reels requirement."""
 
 
 def _now() -> str:
@@ -37,25 +54,158 @@ def _error_text(exc: Exception) -> str:
     return message
 
 
+def _number(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _check_meta_constraints(
+    *,
+    suffix: str | None = None,
+    size_bytes: float | None = None,
+    duration_seconds: float | None = None,
+    width: float | None = None,
+) -> None:
+    if suffix is not None and suffix.lower() not in VIDEO_SUFFIXES:
+        raise ReelValidationError("影片容器必須為 Meta 支援的 MP4 或 MOV")
+    if size_bytes is not None and size_bytes > META_MAX_FILE_SIZE_BYTES:
+        raise ReelValidationError("影片超過 Meta 允許的 1 GB 檔案大小")
+    if duration_seconds is not None:
+        if duration_seconds < META_MIN_REEL_DURATION_SECONDS:
+            raise ReelValidationError("影片短於 Meta 允許的 3 秒")
+        if duration_seconds > META_MAX_REEL_DURATION_SECONDS:
+            raise ReelValidationError("影片超過 Meta 允許的 15 分鐘")
+    if width is not None and width > META_MAX_HORIZONTAL_PIXELS:
+        raise ReelValidationError("影片水平寬度超過 Meta 允許的 1920 pixels")
+
+
 def _preflight(file: dict[str, Any]) -> tuple[bool, str | None, dict[str, Any]]:
-    duration = file.get("duration_seconds")
-    width = file.get("width")
-    height = file.get("height")
+    duration = _number(file.get("duration_seconds"))
+    width = _number(file.get("width"))
+    height = _number(file.get("height"))
+    size = _number(file.get("size"))
     metadata = {
-        "size_bytes": file.get("size", 0),
+        "size_bytes": file.get("size"),
         "duration_seconds": duration,
         "width": width,
         "height": height,
     }
-    if Path(file.get("name", "")).suffix.lower() not in VIDEO_SUFFIXES:
-        return False, "影片需為 MP4 或 MOV", metadata
-    if not file.get("size") or int(file["size"]) > MAX_FILE_SIZE:
-        return False, "Drive 檔案大小缺失或超過 1 GB", metadata
-    if duration is None or duration <= 0 or duration > MAX_REEL_DURATION_SECONDS:
-        return False, "影片 duration 缺失或超過 90 秒", metadata
-    if not width or not height:
-        return False, "Drive 未提供影片 dimensions", metadata
+    try:
+        _check_meta_constraints(
+            suffix=Path(file.get("name", "")).suffix,
+            size_bytes=size,
+            duration_seconds=duration,
+            width=width,
+        )
+    except ReelValidationError as exc:
+        return False, str(exc), metadata
     return True, None, metadata
+
+
+def _frame_rate(value: Any) -> float | None:
+    if not value or value in {"0/0", "N/A"}:
+        return None
+    try:
+        return float(Fraction(str(value)))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def _probe_reel_file(path: Path) -> dict[str, Any] | None:
+    """Read media metadata when ffprobe is available in the runtime image."""
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return None
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=format_name,duration:stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,bit_rate,sample_rate,duration",
+            "-of",
+            "json",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise ReelValidationError("影片不是 Meta 支援的有效 MP4/MOV 媒體")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ReelValidationError("無法讀取影片媒體資訊") from exc
+
+
+def validate_reel_file(path: Path) -> dict[str, Any]:
+    """Validate a downloaded file against Meta's documented Reels requirements."""
+    size_bytes = path.stat().st_size
+    _check_meta_constraints(
+        suffix=path.suffix,
+        size_bytes=size_bytes,
+    )
+    metadata: dict[str, Any] = {"size_bytes": size_bytes}
+    probe = _probe_reel_file(path)
+    if not probe:
+        return metadata
+
+    format_info = probe.get("format") or {}
+    format_names = set(str(format_info.get("format_name") or "").split(","))
+    if not format_names.intersection({"mov", "mp4"}):
+        raise ReelValidationError("影片容器必須為 Meta 支援的 MP4 或 MOV")
+
+    streams = probe.get("streams") or []
+    video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+    if not video:
+        raise ReelValidationError("影片缺少 video stream")
+    video_codec = str(video.get("codec_name") or "").lower()
+    if video_codec and video_codec not in META_VIDEO_CODECS:
+        raise ReelValidationError("影片編碼必須為 Meta 支援的 H.264 或 HEVC")
+
+    duration = _number(format_info.get("duration")) or _number(video.get("duration"))
+    width = _number(video.get("width"))
+    height = _number(video.get("height"))
+    frame_rate = _frame_rate(video.get("avg_frame_rate") or video.get("r_frame_rate"))
+    video_bitrate = _number(video.get("bit_rate"))
+    metadata.update(
+        {
+            "duration_seconds": duration,
+            "width": width,
+            "height": height,
+            "video_codec": video_codec or None,
+            "frame_rate": frame_rate,
+            "video_bitrate": video_bitrate,
+        }
+    )
+    _check_meta_constraints(duration_seconds=duration, width=width)
+    if frame_rate is not None and not META_MIN_FRAME_RATE <= frame_rate <= META_MAX_FRAME_RATE:
+        raise ReelValidationError("影片 frame rate 必須介於 Meta 規格的 23–60 FPS")
+    if video_bitrate is not None and video_bitrate > META_MAX_VIDEO_BITRATE:
+        raise ReelValidationError("影片 bitrate 超過 Meta 允許的 25 Mbps")
+
+    audio = next((stream for stream in streams if stream.get("codec_type") == "audio"), None)
+    if audio:
+        audio_codec = str(audio.get("codec_name") or "").lower()
+        audio_sample_rate = _number(audio.get("sample_rate"))
+        audio_bitrate = _number(audio.get("bit_rate"))
+        metadata.update(
+            {
+                "audio_codec": audio_codec or None,
+                "audio_sample_rate": audio_sample_rate,
+                "audio_bitrate": audio_bitrate,
+            }
+        )
+        if audio_codec and audio_codec not in META_AUDIO_CODECS:
+            raise ReelValidationError("音訊編碼必須為 Meta 支援的 AAC")
+        if audio_sample_rate is not None and audio_sample_rate != META_AUDIO_SAMPLE_RATE:
+            raise ReelValidationError("音訊 sample rate 必須為 Meta 規格的 48 kHz")
+        if audio_bitrate is not None and audio_bitrate > META_MAX_AUDIO_BITRATE:
+            raise ReelValidationError("音訊 bitrate 超過 Meta 規格的 128 kbps")
+    return metadata
 
 
 def prepare_job(
@@ -202,8 +352,7 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
                 with tempfile.TemporaryDirectory(prefix="creator-tools-instagram-") as directory:
                     local = Path(directory) / item["file_name"]
                     download_drive_file(credentials, item["file_id"], local)
-                    if local.stat().st_size > MAX_FILE_SIZE:
-                        raise RuntimeError("下載後檔案超過 1 GB")
+                    item["preflight"] = {**item.get("preflight", {}), **validate_reel_file(local)}
                     item["public_url"] = upload_public_file(
                         r2,
                         local,
@@ -228,6 +377,10 @@ def process_job(*, job: dict[str, Any], credentials, client: InstagramClient, r2
             job["updated_at"] = _now()
             instagram_publish_store.save(job)
             _cleanup_r2_file(item, r2)
+            job["updated_at"] = _now()
+            instagram_publish_store.save(job)
+        except ReelValidationError as exc:
+            item.update(status="skipped", error=str(exc), object_key=None)
             job["updated_at"] = _now()
             instagram_publish_store.save(job)
         except Exception as exc:

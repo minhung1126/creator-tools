@@ -33,12 +33,13 @@ def list_drive_videos(credentials, folder_url_or_id: str):
             duration_ms = int(metadata.get("durationMillis") or 0) or None
             width = int(metadata.get("width") or 0) or None
             height = int(metadata.get("height") or 0) or None
+            size_value = item.get("size")
             items.append(
                 {
                     "id": item.get("id"),
                     "name": item.get("name", ""),
                     "mime_type": item.get("mimeType", ""),
-                    "size": int(item.get("size") or 0),
+                    "size": int(size_value) if size_value is not None else None,
                     "created_time": item.get("createdTime", ""),
                     "video_metadata": metadata,
                     "duration_ms": duration_ms,
