@@ -172,6 +172,57 @@ def update_single_video_metadata(
     return _execute_with_quota(update_request, "videos.update")
 
 
+def get_video_status(
+    credentials: Credentials,
+    video_id: str,
+    current_video: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Return the status object needed by the idempotent publish handler."""
+
+    if current_video is not None:
+        return dict(current_video.get("status", {}))
+    service = get_youtube_service(credentials)
+    request = service.videos().list(part="status", id=video_id)
+    response = _execute_with_quota(request, "videos.list")
+    items = response.get("items", [])
+    if not items:
+        raise ValueError(f"Video {video_id} not found.")
+    return dict(items[0].get("status", {}))
+
+
+def set_video_public(
+    credentials: Credentials,
+    video_id: str,
+    current_video: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Set a video public, treating an already-public video as success."""
+
+    status = get_video_status(credentials, video_id, current_video)
+    if status.get("privacyStatus") == "public":
+        return {"id": video_id, "status": status, "already_public": True}
+    service = get_youtube_service(credentials)
+    status["privacyStatus"] = "public"
+    request = service.videos().update(part="status", body={"id": video_id, "status": status})
+    return _execute_with_quota(request, "videos.update")
+
+
+def remove_playlist_item(credentials: Credentials, playlist_item_id: Optional[str]) -> Dict[str, Any]:
+    """Remove a To-Post item; a 404 is the idempotent 'already removed' case."""
+
+    if not playlist_item_id:
+        return {"already_removed": True}
+    service = get_youtube_service(credentials)
+    try:
+        request = service.playlistItems().delete(id=playlist_item_id)
+        _execute_with_quota(request, "playlistItems.delete")
+        return {"deleted_playlist_item_id": playlist_item_id}
+    except Exception as exc:
+        response = getattr(exc, "resp", None)
+        if getattr(response, "status", None) == 404:
+            return {"deleted_playlist_item_id": playlist_item_id, "already_removed": True}
+        raise
+
+
 def publish_and_remove_playlist_item(
     credentials: Credentials,
     video_id: str,
@@ -179,30 +230,20 @@ def publish_and_remove_playlist_item(
     current_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Set a video public and remove its playlist item without deleting it."""
-    service = get_youtube_service(credentials)
     if current_video is None:
+        service = get_youtube_service(credentials)
         request = service.videos().list(part="status", id=video_id)
         response = _execute_with_quota(request, "videos.list")
         items = response.get("items", [])
         if not items:
             raise ValueError(f"Video {video_id} not found.")
         current_video = items[0]
-    status = dict(current_video.get("status", {}))
-    status["privacyStatus"] = "public"
-    update_request = service.videos().update(
-        part="status",
-        body={"id": video_id, "status": status},
-    )
-    update_result = _execute_with_quota(update_request, "videos.update")
-    playlist_cleanup = None
-    if playlist_item_id:
-        try:
-            delete_request = service.playlistItems().delete(id=playlist_item_id)
-            _execute_with_quota(delete_request, "playlistItems.delete")
-            playlist_cleanup = {"deleted_playlist_item_id": playlist_item_id}
-        except Exception as exc:
-            logger.warning("Failed to delete playlist item %s: %s", playlist_item_id, exc)
-            playlist_cleanup = {"error": str(exc)}
+    update_result = set_video_public(credentials, video_id, current_video)
+    try:
+        playlist_cleanup = remove_playlist_item(credentials, playlist_item_id)
+    except Exception as exc:
+        logger.warning("Failed to delete playlist item %s: %s", playlist_item_id, exc)
+        playlist_cleanup = {"error": str(exc)}
     return {
         "video": update_result,
         "playlist_cleanup": playlist_cleanup,

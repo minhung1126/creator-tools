@@ -44,4 +44,29 @@ export const api = {
   createInstagramPublishJob: (payload) => request('/instagram/publish-jobs', { method: 'POST', body: JSON.stringify(payload) }),
   getInstagramPublishJob: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}`),
   retryInstagramPublishJob: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' }),
+  getActivitySummary: () => request('/activity-summary'),
+  getTasks: (params = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, value);
+    });
+    return request(`/tasks${query.toString() ? `?${query.toString()}` : ''}`);
+  },
+  getTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}`),
+  retryTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' }),
+  cancelTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }),
+  cancelAllTasks: () => request('/tasks/cancel-all', { method: 'POST' }),
+  getTaskBatches: (params = {}) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, value);
+    });
+    return request(`/task-batches${query.toString() ? `?${query.toString()}` : ''}`);
+  },
+  getTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}`),
+  retryTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/retry`, { method: 'POST' }),
+  cancelTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/cancel`, { method: 'POST' }),
+  getNotifications: ({ unreadOnly = false, offset = 0, limit = 50 } = {}) => request(`/notifications?unread_only=${unreadOnly ? 'true' : 'false'}&offset=${offset}&limit=${limit}`),
+  markNotificationRead: (notificationId) => request(`/notifications/${encodeURIComponent(notificationId)}`, { method: 'PATCH', body: JSON.stringify({ read: true }) }),
+  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
 };

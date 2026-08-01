@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TaskDetail from '../components/TaskDetail';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -59,8 +61,9 @@ function PreviewField({ label, value }) {
   );
 }
 
-export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
+export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video', setActiveTab }) {
   const toast = useToast();
+  const { refresh, tasks, cancelTask, retryTask } = useActivityCenter();
   const defaults = DEFAULT_COLUMNS[videoType];
   const initial = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
 
@@ -92,6 +95,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [configSaveError, setConfigSaveError] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
+  const [taskBusyId, setTaskBusyId] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
@@ -355,8 +359,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         assignments: videos.map((video) => ({ video_id: video.video_id, person: assignments[video.video_id] || '不編輯' })),
       });
       setResult(res);
+      await refresh({ background: true });
       setQuotaRefreshKey((key) => key + 1);
-      toast.success(`批次更新完成！成功 ${res.updated_count} 支、略過 ${res.skipped_count} 支`);
+      toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 筆影片任務，其中 ${res.skipped_count || 0} 筆略過。`);
     } catch (err) {
       setErrorMsg(`批次更新執行失敗：${err.message}`);
       toast.error('批次更新執行失敗');
@@ -375,6 +380,17 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
+  const resultTasks = result?.batch_id ? tasks.filter((task) => task.batch_id === result.batch_id) : [];
+  const runTaskAction = async (action, taskId) => {
+    setTaskBusyId(taskId);
+    try {
+      await action(taskId);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setTaskBusyId(null);
+    }
+  };
 
   return (
     <div className="section-gap">
@@ -468,7 +484,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         </div>
       )}
 
-      {result && <div className="glass-panel" style={{ padding: 24 }}><h3 style={{ color: '#34d399', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle2 size={22} /> 批次處理完成</h3><p style={{ color: 'var(--text-muted)' }}>成功 {result.updated_count}、略過 {result.skipped_count}、失敗 {result.failed_count}</p></div>}
+      {result && <div className="glass-panel" style={{ padding: 24, display: 'grid', gap: 12 }}><h3 style={{ color: '#34d399', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle2 size={22} /> 已建立影片任務</h3><p style={{ color: 'var(--text-muted)' }}>批次 ID：{result.batch_id} · 已建立 {result.total_count || result.task_ids?.length || 0} 筆，略過 {result.skipped_count || 0} 筆。</p><div><button className="btn btn-secondary" type="button" onClick={() => setActiveTab?.('task_queue')}>到任務隊列查看</button></div>{resultTasks.map((task) => <TaskDetail key={task.id} task={task} compact busy={taskBusyId === task.id} onCancel={() => runTaskAction(cancelTask, task.id)} onRetry={() => runTaskAction(retryTask, task.id)} />)}</div>}
       <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );

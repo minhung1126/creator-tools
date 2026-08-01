@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app.core.instagram_publish_store import instagram_publish_store
+from backend.app.core.task_repository import task_repository
 from backend.app.services.drive_service import (
     download_drive_file,
     ensure_published_folder,
@@ -243,6 +244,14 @@ def _duplicate_item(item: dict[str, Any], record: dict[str, Any]) -> None:
 
 
 def _find_file_record(source_folder_id: str, file_id: str) -> dict[str, Any] | None:
+    # SQLite is the source of truth for new jobs, while the JSON store remains
+    # part of the de-duplication check until all historical jobs are migrated.
+    try:
+        record = task_repository.find_instagram_record(source_folder_id, file_id)
+    except Exception:
+        record = None
+    if record:
+        return {"job_id": record.get("batch_id"), "item": record.get("item") or {}}
     finder = getattr(instagram_publish_store, "find_file_record", None)
     if not callable(finder):
         return None
@@ -583,7 +592,8 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
         item.get("status") == "published" and not item.get("drive_moved") for item in job.get("items", [])
     )
     result["results"] = [
-        {key: value for key, value in item.items() if key != "caption"} for item in job.get("items", [])
+        {key: value for key, value in item.items() if key not in {"caption", "public_url", "object_key"}}
+        for item in job.get("items", [])
     ]
     return result
 

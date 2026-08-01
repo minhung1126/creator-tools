@@ -11,6 +11,9 @@ import InstagramReelsPage from './pages/InstagramReelsPage';
 import InstagramHistoryPage from './pages/InstagramHistoryPage';
 import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
+import TaskQueuePage from './pages/TaskQueuePage';
+import NotificationCenter from './components/NotificationCenter';
+import { ActivityCenterProvider } from './contexts/ActivityCenterContext';
 import { api } from './services/api';
 import { clearAuthHash, parseAuthHash } from './utils/authHash';
 
@@ -21,6 +24,9 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const [instagramStatusVersion, setInstagramStatusVersion] = useState(0);
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
   const toast = useToast();
 
   const fetchUser = async () => {
@@ -75,7 +81,7 @@ function AppContent() {
       setLoading(false);
     };
     init();
-  }, []);
+  }, [toast]);
 
   const handleLogout = async () => {
     try { await api.logout(); setAuthUser(null); toast.success('已成功登出 Google 帳號！'); }
@@ -85,18 +91,27 @@ function AppContent() {
   if (loading) return <div className="loading-center">系統初始化中...</div>;
   if (!authUser) return <LoginPage initialError={authError} />;
 
-  return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} /><main className="main-content">
+  const openNotificationTarget = (taskId, batchId) => {
+    if (taskId) setSelectedTaskId(taskId);
+    if (batchId) setSelectedBatchId(batchId);
+    setActiveTab('task_queue');
+    setNotificationOpen(false);
+    if (!taskId && batchId) setSelectedTaskId(null);
+  };
+
+  return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} onOpenNotifications={() => setNotificationOpen(true)} /><main className="main-content">
     {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
-    {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
-    {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
-    {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+    {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" setActiveTab={setActiveTab} />}
+    {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" setActiveTab={setActiveTab} />}
+    {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} setActiveTab={setActiveTab} />}
     {activeTab === 'youtube_settings' && <YouTubeSettingsPage sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
-    {activeTab === 'instagram_reels' && <InstagramReelsPage />}
+    {activeTab === 'instagram_reels' && <InstagramReelsPage setActiveTab={setActiveTab} />}
     {activeTab === 'instagram_history' && <InstagramHistoryPage />}
     {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
+    {activeTab === 'task_queue' && <TaskQueuePage selectedTaskId={selectedTaskId} selectedBatchId={selectedBatchId} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
-  </main></div>;
+  </main><NotificationCenter open={notificationOpen} onClose={() => setNotificationOpen(false)} onOpenTarget={openNotificationTarget} /></div>;
 }
 
 class ErrorBoundary extends React.Component {
@@ -109,4 +124,4 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-export default function App() { return <ErrorBoundary><ToastProvider><AppContent /></ToastProvider></ErrorBoundary>; }
+export default function App() { return <ErrorBoundary><ToastProvider><ActivityCenterProvider><AppContent /></ActivityCenterProvider></ToastProvider></ErrorBoundary>; }

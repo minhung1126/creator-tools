@@ -21,7 +21,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/youtube",
-    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive",
 ]
 GOOGLE_TOKEN_REFRESH_WINDOW = timedelta(minutes=5)
 _google_refresh_lock = RLock()

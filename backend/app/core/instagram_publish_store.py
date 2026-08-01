@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _DEFAULT_PATH = _PROJECT_ROOT / "data" / "instagram_publish_jobs.json"
-_RESERVED_ITEM_STATUSES = {"queued", "uploaded", "container_created"}
+_RESERVED_ITEM_STATUSES = {"queued", "running", "cancel_requested", "paused", "uploaded", "container_created"}
 
 
 def _folder_id(value: Any) -> str:

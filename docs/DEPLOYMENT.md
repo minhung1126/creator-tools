@@ -39,8 +39,18 @@ docker compose logs -f creator-tools
 
 ## 3. 持久化與驗證
 
-- `./data:/app/data` 保存加密 credential store、server-side sessions、runtime config 與 Instagram publish jobs。
-- `data/instagram_publish_jobs.json` 是目前的 Instagram 發布紀錄與防重依據；升級 container 或搬移主機時必須保留並備份整個 `data/` volume，不要清空這個檔案。
+- `./data:/app/data` 保存加密 credential store、server-side sessions、runtime config，以及 SQLite 任務／通知中心。
+- `data/creator_tools.db` 是統一任務中心的主要資料庫，使用 SQLite WAL。升級 container 或搬移主機前，請停止服務或先確認沒有正在寫入，備份下列檔案：
+
+  ```text
+  data/creator_tools.db
+  data/creator_tools.db-wal
+  data/creator_tools.db-shm
+  data/instagram_publish_jobs.json
+  ```
+
+  實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。不要刪除或覆蓋舊的 `instagram_publish_jobs.json`；服務啟動時會以 deterministic legacy key 將歷史 job/item 匯入 SQLite，重跑 migration 不會重複建立任務或歷史通知。
+- 任務 worker 與 API 共用 SQLite；Instagram 與 YouTube 各自使用 concurrency 1 的 lane。取消是協作式 checkpoint 停止，服務重啟會把中斷中的 `running`/`cancel_requested` 任務改為 `paused`，不會自動重新發布或回滾已完成的外部操作。
 - 不要把 `.env`、`data/credential_store.json` 或 `data/sessions.json` 提交到 Git。
 - Health check：`https://creator-tools.ymin.io/api/v1/health`。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
