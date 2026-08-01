@@ -4,6 +4,7 @@ import Navbar from './components/Navbar';
 import DashboardPage from './pages/DashboardPage';
 import BatchUpdatePage from './pages/BatchUpdatePage';
 import PublishCleanerPage from './pages/PublishCleanerPage';
+import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
@@ -89,6 +90,7 @@ function AppContent() {
         {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
         {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
         {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+        {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
         {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshUser={fetchUser} />}
       </main>
     </div>
