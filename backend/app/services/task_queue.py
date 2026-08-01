@@ -11,6 +11,7 @@ from backend.app.services.task_dispatcher import TaskDispatcher, task_dispatcher
 
 logger = logging.getLogger(__name__)
 
+
 class TaskQueue:
     """Run one sequential worker per platform lane.
 
