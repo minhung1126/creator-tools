@@ -468,6 +468,8 @@ R2 lifecycle 在 3 天後清理 instagram-reels/ 暫存物件
 
 Reel 成功發布後，工作流程會先保存 Instagram `media_id`，再把 Google Drive 原始影片移入來源資料夾下的 `Published` 子資料夾，最後立即刪除 R2 object；lifecycle 仍作為清理失敗或中斷工作的後備保護。若 Drive 搬移或 R2 刪除暫時失敗，工作會保留 `published` 狀態並只重試後續清理，不會重複發布 Instagram 影片。
 
+> **Google Drive 權限要求：** Google OAuth 必須授予 Google Drive 編輯（modify）scope：`https://www.googleapis.com/auth/drive`。`drive.readonly` 只能讀取或下載影片，無法建立 `Published` 資料夾或搬移已發布影片。
+
 ## 3. Reels 工作流程
 
 Drive list 使用 pagination 與 `videoMediaMetadata` 做可取得欄位的 preflight；影片下載後再用 `ffprobe` 讀取實際媒體資訊。發布工作透過：

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, CheckSquare, FileSpreadsheet, Info, RefreshCw, Send, Shuffle, Users } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -11,6 +12,11 @@ const STATUS_LABELS = {
   uploaded: '已上傳 R2',
   container_created: '已建立 Instagram container',
   published: '已發布',
+  succeeded: '已完成',
+  succeeded_with_warnings: '已完成但有警告',
+  cancel_requested: '正在取消',
+  canceled: '已取消',
+  canceled_with_warnings: '已取消但清理有警告',
   failed: '失敗',
   paused: '已暫停',
   skipped: '已略過',
@@ -46,43 +52,11 @@ function PreviewField({ label, value }) {
   );
 }
 
-const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
+const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
 
-function operationPatchForJob(job) {
-  const progress = job.progress || {};
-  const total = progress.total || job.results?.length || 0;
-  const completed = progress.completed_count ?? 0;
-  const percent = progress.percent ?? 0;
-  const sequence = progress.current_item_sequence;
-  const currentName = progress.current_file_name ? ` · ${progress.current_file_name}` : '';
-  let message = progress.current_stage_label || '正在準備發布工作…';
-
-  if (job.status === 'completed') {
-    message = `發布完成 · ${completed} / ${total} 支完成`;
-  } else if (job.status === 'completed_with_warnings') {
-    const warningCount = Math.max(job.r2_cleanup_failed_count || 0, job.drive_move_pending_count || 0);
-    message = `發布完成，但有 ${warningCount} 支影片的後續清理需要重試`;
-  } else if (job.status === 'paused') {
-    message = `流程已暫停 · ${progress.current_stage_label || '有影片需要重試'}`;
-  } else if (job.status === 'failed') {
-    message = job.error || '發布工作失敗，請檢查設定後重試';
-  } else if (sequence && total) {
-    message = `${message} · 第 ${sequence} / ${total} 支${currentName}`;
-  }
-
-  return {
-    total,
-    completed,
-    percent,
-    message,
-    status: job.status === 'failed' || job.status === 'paused'
-      ? 'error'
-      : ACTIVE_JOB_STATUSES.has(job.status) ? 'running' : 'success',
-  };
-}
-
-export default function InstagramReelsPage() {
+export default function InstagramReelsPage({ setActiveTab }) {
   const toast = useToast();
+  const { refresh, tasks } = useActivityCenter();
   const remembered = useMemo(readRememberedConfig, []);
   const [config, setConfig] = useState({
     drive_folder_id: remembered.drive_folder_id || '',
@@ -112,7 +86,6 @@ export default function InstagramReelsPage() {
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [job, setJob] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
-  const publishOperationId = useRef(null);
   const previewRequestId = useRef(0);
 
   const updateConfig = (patch) => setConfig((current) => ({ ...current, ...patch }));
@@ -160,34 +133,44 @@ export default function InstagramReelsPage() {
   }, [loadRandomPreview]);
 
   useEffect(() => {
-    if (!job?.id || !ACTIVE_JOB_STATUSES.has(job.status)) return undefined;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const next = await api.getInstagramPublishJob(job.id);
-        if (!cancelled) setJob(next);
-      } catch (error) {
-        if (!cancelled) console.error('Failed to poll Instagram publish job:', error);
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 1500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [job?.id, job?.status]);
-
-  useEffect(() => {
-    const operationId = publishOperationId.current;
-    if (!operationId || !job) return;
-    const patch = operationPatchForJob(job);
-    if (patch.status === 'running') toast.updateOperation(operationId, patch);
-    else {
-      toast.finishOperation(operationId, patch);
-      publishOperationId.current = null;
-    }
-  }, [job, toast]);
+    if (!job?.batch_id) return;
+    const batchTasks = tasks.filter((task) => task.batch_id === job.batch_id);
+    if (!batchTasks.length) return;
+    const terminal = new Set(['failed', 'skipped', 'succeeded', 'succeeded_with_warnings', 'canceled', 'canceled_with_warnings']);
+    const status = batchTasks.some((task) => task.status === 'cancel_requested') ? 'cancel_requested'
+      : batchTasks.some((task) => task.status === 'running') ? 'running'
+        : batchTasks.some((task) => task.status === 'queued') ? 'queued'
+          : batchTasks.some((task) => task.status === 'paused') ? 'paused'
+            : batchTasks.some((task) => task.status === 'failed') ? 'failed' : 'completed';
+    const completed = batchTasks.filter((task) => terminal.has(task.status) && task.status !== 'failed' && task.status !== 'paused').length;
+    setJob((current) => current ? {
+      ...current,
+      status,
+      results: batchTasks.map((task) => ({
+        task_id: task.id,
+        sequence: task.sequence_in_batch,
+        file_id: task.video_id,
+        file_name: task.video_title,
+        status: task.status === 'succeeded' || task.status === 'succeeded_with_warnings' ? 'published' : task.status,
+        stage: task.stage,
+        stage_label: task.stage_label,
+        progress_percent: task.progress_percent,
+        error: task.error,
+        cancel_too_late: task.cancel_too_late,
+      })),
+      progress: {
+        ...(current.progress || {}),
+        total: batchTasks.length,
+        completed_count: completed,
+        failed_count: batchTasks.filter((task) => task.status === 'failed').length,
+        paused_count: batchTasks.filter((task) => task.status === 'paused').length,
+        percent: Math.round(batchTasks.reduce((sum, task) => sum + Number(task.progress_percent || 0), 0) / batchTasks.length),
+        current_item_sequence: batchTasks.find((task) => !terminal.has(task.status))?.sequence_in_batch,
+        current_file_name: batchTasks.find((task) => !terminal.has(task.status))?.video_title,
+        current_stage_label: batchTasks.find((task) => !terminal.has(task.status))?.stage_label || '發布工作完成',
+      },
+    } : current);
+  }, [job?.batch_id, tasks]);
 
   useEffect(() => {
     api.getInstagramSettings()
@@ -392,14 +375,6 @@ export default function InstagramReelsPage() {
       return;
     }
     setConfirmPublish(false);
-    const operationId = `instagram-publish-${Date.now()}`;
-    publishOperationId.current = operationId;
-    toast.startOperation({
-      id: operationId,
-      title: 'Instagram Reels 發布',
-      total: active.length,
-      message: `正在建立 ${active.length} 支影片的發布任務…`,
-    });
     setPublishing(true);
     try {
       const result = await api.createInstagramPublishJob({
@@ -412,19 +387,9 @@ export default function InstagramReelsPage() {
         assignments: active,
       });
       setJob(result);
-      if (result.id && ACTIVE_JOB_STATUSES.has(result.status)) {
-        toast.updateOperation(operationId, {
-          poll: async () => operationPatchForJob(await api.getInstagramPublishJob(result.id)),
-        });
-      }
-      if (!ACTIVE_JOB_STATUSES.has(result.status)) {
-        const patch = operationPatchForJob(result);
-        toast.finishOperation(operationId, patch);
-        publishOperationId.current = null;
-      }
+      await refresh({ background: true });
+      toast.success(`已建立 ${result.total_count || result.results?.length || active.length} 支影片任務。`);
     } catch (error) {
-      toast.finishOperation(operationId, { status: 'error', message: error.message });
-      publishOperationId.current = null;
       toast.error(error.message);
     } finally {
       setPublishing(false);
@@ -442,30 +407,13 @@ export default function InstagramReelsPage() {
 
   const retryJob = async () => {
     if (!job?.id) return;
-    const total = job.progress?.total || job.results?.length || 0;
-    const operationId = `instagram-publish-retry-${Date.now()}`;
-    publishOperationId.current = operationId;
-    toast.startOperation({
-      id: operationId,
-      title: 'Instagram Reels 重試',
-      total,
-      completed: job.progress?.completed_count || 0,
-      percent: job.progress?.percent || 0,
-      message: '正在將未完成影片重新加入隊列…',
-      poll: async () => operationPatchForJob(await api.getInstagramPublishJob(job.id)),
-    });
     setPublishing(true);
     try {
       const result = await api.retryInstagramPublishJob(job.id);
       setJob(result);
-      if (!ACTIVE_JOB_STATUSES.has(result.status)) {
-        const patch = operationPatchForJob(result);
-        toast.finishOperation(operationId, patch);
-        publishOperationId.current = null;
-      }
+      await refresh({ background: true });
+      toast.success('未完成的 Instagram 影片已重新排入隊列。');
     } catch (error) {
-      toast.finishOperation(operationId, { status: 'error', message: error.message });
-      publishOperationId.current = null;
       toast.error(error.message);
     } finally {
       setPublishing(false);
@@ -561,7 +509,7 @@ export default function InstagramReelsPage() {
         <div className="reels-video-thumbnail-wrapper">
           {video.thumbnail_url ? <img className="reels-video-thumbnail" src={video.thumbnail_url} alt={`${index + 1}. ${video.name}`} onClick={() => openVideoPreview(video)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') openVideoPreview(video); }} role="button" tabIndex={0} /> : <div className="section-desc">Drive 沒有提供縮圖</div>}
         </div>
-        <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{index + 1}. {video.name || '未命名影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>{formatVideoMeta(video)}</p><p style={{ color: 'var(--text-dim)', fontSize: '0.7rem', overflowWrap: 'anywhere' }}>Drive File ID：{video.id}</p></div>
+        <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{index + 1}. {video.name || '未命名影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>{formatVideoMeta(video)}</p></div>
         <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={video.already_published ? '' : assignments[video.id] || ''} onChange={(event) => setAssignments((current) => ({ ...current, [video.id]: event.target.value }))} disabled={video.already_published}><option value="">{video.already_published ? '已發布，無法再次上傳' : '不發布'}</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
       </div>)}</div>
       {jobIsActive && <div className="glass-panel publish-progress-panel">

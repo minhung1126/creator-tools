@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
@@ -17,8 +18,9 @@ import {
   Trash2,
 } from 'lucide-react';
 
-export default function PublishCleanerPage({ sysSettings, authUser }) {
+export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab }) {
   const toast = useToast();
+  const { refresh } = useActivityCenter();
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
@@ -60,17 +62,11 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     try {
       const metadataByVideoId = Object.fromEntries(videos.map((video) => [video.video_id, video]));
       const res = await api.publishAndCleanup(playlistId);
-      setResult({
-        ...res,
-        results: (res.results || []).map((item) => ({
-          ...item,
-          title: item.title || metadataByVideoId[item.video_id]?.title || '',
-          description: item.description ?? metadataByVideoId[item.video_id]?.description ?? '',
-        })),
-      });
+      setResult({ ...res, metadataByVideoId });
+      await refresh({ background: true });
       setVideos([]);
       setQuotaRefreshKey((key) => key + 1);
-      toast.success(`已完成 ${res.total_processed} 支影片的發布與清理！`);
+      toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 支影片的公開與清理任務。`);
     } catch (err) {
       setErrorMsg(`發布與清理執行失敗：${err.message}`);
       toast.error('發布與清理執行失敗');
@@ -189,8 +185,10 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
 
       {result && (
         <div className="glass-panel" style={{ padding: '24px', border: '1px solid rgba(236, 72, 153, 0.4)', background: 'rgba(15, 23, 42, 0.95)' }}>
-          <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> To-Post 影片已完成處理</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> 已建立公開與清理任務</h3>
+          <p style={{ color: 'var(--text-muted)' }}>批次 ID：{result.batch_id} · 已建立 {result.total_count || result.task_ids?.length || 0} 支影片任務，其中 {result.skipped_count || 0} 支略過。</p>
+          <button className="btn btn-secondary" type="button" style={{ marginTop: 12 }} onClick={() => setActiveTab?.('task_queue')}>到任務隊列查看</button>
+          {result.results && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 16 }}>
             {result.results.map((item, index) => (
               <div key={`${item.video_id}-${index}`} className="result-item" style={{ alignItems: 'flex-start', background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -202,7 +200,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
                 <span className={`badge ${item.status === 'failed' ? 'badge-disconnected' : 'badge-connected'}`}>{item.status === 'failed' ? '失敗' : '公開並移出清單完成'}</span>
               </div>
             ))}
-          </div>
+          </div>}
         </div>
       )}
 

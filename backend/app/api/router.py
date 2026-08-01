@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from backend.app.api.activity import router as activity_router
 from backend.app.api.auth import router as auth_router
 from backend.app.api.instagram import router as instagram_router
 from backend.app.api.settings import router as settings_router
@@ -12,3 +13,4 @@ api_router.include_router(settings_router)
 api_router.include_router(sheets_router)
 api_router.include_router(youtube_router)
 api_router.include_router(instagram_router)
+api_router.include_router(activity_router)

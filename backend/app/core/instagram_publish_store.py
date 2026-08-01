@@ -95,6 +95,102 @@ class InstagramPublishStore:
             return self._find_file_record_in_data(self._read(), source_folder_id, file_id, published_only=True)
 
     @staticmethod
+    def _history_entry(job_id: str, job: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+        """Return the non-sensitive fields needed by the Instagram history page."""
+        return {
+            "record_id": f"{job_id}:{item.get('file_id', '')}",
+            "job_id": job_id,
+            "job_status": job.get("status"),
+            "created_at": job.get("created_at"),
+            "updated_at": job.get("updated_at"),
+            "published_at": item.get("published_at") or job.get("updated_at"),
+            "source_folder_id": _job_folder_id(job),
+            "published_folder_id": item.get("published_folder_id") or job.get("published_folder_id"),
+            "worksheet_name": job.get("worksheet_name"),
+            "team": job.get("team"),
+            "share_to_feed": job.get("share_to_feed", True),
+            "file_id": item.get("file_id"),
+            "file_name": item.get("file_name"),
+            "person": item.get("person"),
+            "status": item.get("status"),
+            "stage": item.get("stage"),
+            "stage_label": item.get("stage_label"),
+            "media_id": item.get("media_id"),
+            "drive_move_error": item.get("drive_move_error"),
+            "drive_moved": bool(item.get("drive_moved")),
+            "drive_moved_at": item.get("drive_moved_at"),
+            "preflight": item.get("preflight") or {},
+        }
+
+    def list_history(self) -> list[dict[str, Any]]:
+        """List successfully published files, newest first."""
+        with self._lock:
+            data = self._read()
+            history = []
+            for job_id, job in data.get("jobs", {}).items():
+                if not isinstance(job, dict):
+                    continue
+                for item in job.get("items", []):
+                    if isinstance(item, dict) and _item_is_publish_record(item):
+                        history.append(self._history_entry(job_id, job, item))
+            history.sort(key=lambda entry: entry.get("published_at") or "", reverse=True)
+            return json.loads(json.dumps(history, ensure_ascii=False))
+
+    def get_history_item(self, job_id: str, file_id: str) -> Optional[dict[str, Any]]:
+        """Find one published file record by its durable job and Drive IDs."""
+        with self._lock:
+            data = self._read()
+            job = data.get("jobs", {}).get(job_id)
+            if not isinstance(job, dict):
+                return None
+            item = next(
+                (
+                    candidate
+                    for candidate in job.get("items", [])
+                    if isinstance(candidate, dict)
+                    and candidate.get("file_id") == file_id
+                    and _item_is_publish_record(candidate)
+                ),
+                None,
+            )
+            if item is None:
+                return None
+            return json.loads(json.dumps(self._history_entry(job_id, job, item), ensure_ascii=False))
+
+    def delete_history_item(self, job_id: str, file_id: str) -> Optional[dict[str, Any]]:
+        """Remove one published reservation so its Drive file can be published again."""
+        with self._lock:
+            data = self._read()
+            job = data.get("jobs", {}).get(job_id)
+            if not isinstance(job, dict):
+                return None
+            if job.get("status") in {"queued", "running"}:
+                raise RuntimeError("此發布工作仍在處理中，請等待完成後再刪除歷史紀錄。")
+
+            items = job.get("items", [])
+            item_index = next(
+                (
+                    index
+                    for index, candidate in enumerate(items)
+                    if isinstance(candidate, dict)
+                    and candidate.get("file_id") == file_id
+                    and _item_is_publish_record(candidate)
+                ),
+                None,
+            )
+            if item_index is None:
+                return None
+
+            deleted = self._history_entry(job_id, job, items[item_index])
+            items.pop(item_index)
+            if items:
+                data["jobs"][job_id] = job
+            else:
+                data["jobs"].pop(job_id, None)
+            self._write(data)
+            return json.loads(json.dumps(deleted, ensure_ascii=False))
+
+    @staticmethod
     def _mark_duplicate(item: dict[str, Any], record: dict[str, Any]) -> None:
         existing_item = record.get("item") or {}
         already_published = _item_is_publish_record(existing_item)

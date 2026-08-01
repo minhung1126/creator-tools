@@ -1,21 +1,29 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AlertTriangle } from 'lucide-react';
 
 export default function ConfirmDialog({ open, title, message, confirmText, cancelText, onConfirm, onCancel, variant }) {
+  const cancelRef = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    cancelRef.current?.focus();
+    const onKeyDown = (event) => { if (event.key === 'Escape') onCancel?.(); };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [onCancel, open]);
   if (!open) return null;
 
   const isDestructive = variant === 'destructive';
 
   return (
-    <div className="confirm-overlay" onClick={onCancel}>
-      <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
+    <div className="confirm-overlay" role="presentation" onClick={onCancel}>
+      <div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" onClick={(e) => e.stopPropagation()}>
         <div className="confirm-header">
           <AlertTriangle size={22} color={isDestructive ? '#f87171' : 'var(--primary)'} />
-          <h3 className="confirm-title">{title || '確認操作'}</h3>
+          <h3 id="confirm-dialog-title" className="confirm-title">{title || '確認操作'}</h3>
         </div>
         <p className="confirm-message">{message}</p>
         <div className="confirm-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>
+          <button ref={cancelRef} className="btn btn-secondary" onClick={onCancel}>
             {cancelText || '取消'}
           </button>
           <button

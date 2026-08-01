@@ -21,7 +21,13 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.services.drive_service import extract_drive_folder_id, get_drive_video_thumbnail, list_drive_videos
+from backend.app.core.task_repository import task_repository
+from backend.app.services.drive_service import (
+    extract_drive_folder_id,
+    get_drive_video_thumbnail,
+    list_drive_videos,
+    move_drive_file_to_folder,
+)
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -41,6 +47,7 @@ from backend.app.services.instagram_publish_service import (
 from backend.app.services.instagram_service import InstagramClient
 from backend.app.services.r2_service import R2Config, test_r2_connection
 from backend.app.services.sheets_service import normalize_text
+from backend.app.services.task_queue import task_queue
 
 router = APIRouter(prefix="/instagram", tags=["Instagram Reels"])
 logger = logging.getLogger(__name__)
@@ -201,6 +208,136 @@ def _run_publish_job(job_id: str, credentials: Credentials) -> None:
     except Exception as exc:
         logger.error("Instagram publish queue job failed: %s", type(exc).__name__, exc_info=True)
         mark_job_failed(job, exc)
+
+
+def _unified_instagram_batch_specs(job: dict) -> list[dict]:
+    """Translate the existing preparation result into one SQLite task/video."""
+
+    specs = []
+    seen_file_ids: set[str] = set()
+    for index, item in enumerate(job.get("items", []), start=1):
+        checkpoint = {
+            key: item.get(key)
+            for key in (
+                "public_url",
+                "object_key",
+                "creation_id",
+                "media_id",
+                "drive_moved",
+                "drive_moved_at",
+                "published_folder_id",
+                "drive_move_error",
+                "r2_deleted",
+                "r2_delete_error",
+                "preflight",
+            )
+            if key in item
+        }
+        status = item.get("status") or "queued"
+        duplicate_in_batch = bool(item.get("file_id") and item.get("file_id") in seen_file_ids)
+        if item.get("file_id"):
+            seen_file_ids.add(item.get("file_id"))
+        if duplicate_in_batch and status == "queued":
+            status = "skipped"
+            item["error"] = "同一支影片在本次批次中重複指定，已略過。"
+        if status not in {"queued", "skipped"}:
+            status = "queued"
+        specs.append(
+            {
+                "platform": "instagram",
+                "operation": "instagram.reels_publish",
+                "queue_lane": "instagram",
+                "sequence_in_batch": int(item.get("sequence") or index),
+                "video_id": item.get("file_id"),
+                "video_title": item.get("file_name"),
+                "status": status,
+                "stage": "skipped" if status == "skipped" else "queued",
+                "stage_label": item.get("stage_label"),
+                "progress_percent": item.get("progress_percent", 100 if status == "skipped" else 0),
+                "retryable": False if status == "skipped" else True,
+                "error": item.get("error"),
+                "payload": {
+                    "file_id": item.get("file_id"),
+                    "file_name": item.get("file_name"),
+                    "person": item.get("person"),
+                    "caption": item.get("caption"),
+                    "source_folder_id": job.get("source_folder_id"),
+                    "folder": job.get("folder"),
+                    "published_folder_id": item.get("published_folder_id") or job.get("published_folder_id"),
+                    "share_to_feed": job.get("share_to_feed", True),
+                },
+                "checkpoint": checkpoint,
+            }
+        )
+    return specs
+
+
+def _legacy_job_adapter(batch_id: str) -> dict:
+    """Compatibility shape for the old Instagram publish-jobs endpoints."""
+
+    batch = task_repository.get_batch_internal(batch_id)
+    if not batch:
+        return {}
+    tasks = batch.get("tasks", [])
+    completed = sum(task.get("status") in {"succeeded", "succeeded_with_warnings", "skipped"} for task in tasks)
+    failed = sum(task.get("status") == "failed" for task in tasks)
+    paused = sum(task.get("status") == "paused" for task in tasks)
+    warnings = sum(task.get("status") in {"succeeded_with_warnings", "canceled_with_warnings"} for task in tasks)
+    total = len(tasks)
+    result_items = []
+    for task in tasks:
+        status = task.get("status")
+        if status == "succeeded":
+            compatibility_status = "published"
+        elif status == "succeeded_with_warnings":
+            compatibility_status = "published"
+        else:
+            compatibility_status = status
+        result_items.append(
+            {
+                "task_id": task.get("id"),
+                "sequence": task.get("sequence_in_batch"),
+                "file_id": task.get("video_id"),
+                "file_name": task.get("video_title"),
+                "status": compatibility_status,
+                "stage": task.get("stage"),
+                "stage_label": task.get("stage_label"),
+                "progress_percent": task.get("progress_percent"),
+                "error": task.get("error"),
+                "cancel_too_late": task.get("cancel_too_late"),
+            }
+        )
+    return {
+        "id": batch_id,
+        "batch_id": batch_id,
+        "status": batch.get("status"),
+        "created_at": batch.get("created_at"),
+        "updated_at": batch.get("updated_at"),
+        "completed_at": batch.get("completed_at"),
+        "failure_policy": batch.get("failure_policy"),
+        "total_count": total,
+        "queued_count": sum(task.get("status") == "queued" for task in tasks),
+        "running_count": sum(task.get("status") == "running" for task in tasks),
+        "failed_count": failed,
+        "paused_count": paused,
+        "published_count": sum(task.get("status") in {"succeeded", "succeeded_with_warnings"} for task in tasks),
+        "skipped_count": sum(task.get("status") == "skipped" for task in tasks),
+        "canceled_count": sum(task.get("status") in {"canceled", "canceled_with_warnings"} for task in tasks),
+        "r2_cleanup_failed_count": warnings,
+        "drive_move_failed_count": 0,
+        "progress": {
+            "total": total,
+            "completed_count": completed,
+            "failed_count": failed,
+            "paused_count": paused,
+            "percent": round(sum(float(task.get("progress_percent") or 0) for task in tasks) / total) if total else 100,
+            "current_item_sequence": next((task.get("sequence_in_batch") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), None),
+            "current_file_name": next((task.get("video_title") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), None),
+            "current_stage": next((task.get("stage") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), "completed" if total else "queued"),
+            "current_stage_label": next((task.get("stage_label") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), "發布工作完成" if total else "準備中"),
+        },
+        "results": result_items,
+    }
 
 
 @router.get("/auth/url")
@@ -415,7 +552,11 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
             else:
                 video["thumbnail_url"] = ""
                 video["thumbnail_full_url"] = ""
-            record = instagram_publish_store.find_published_record(source_folder_id, video.get("id", ""))
+            record = task_repository.find_instagram_record(source_folder_id, video.get("id", ""), published_only=True)
+            if record:
+                record = {"job_id": record.get("batch_id"), "item": record.get("item") or {}}
+            else:
+                record = instagram_publish_store.find_published_record(source_folder_id, video.get("id", ""))
             published_item = (record or {}).get("item") or {}
             video["already_published"] = bool(record)
             video["published_job_id"] = (record or {}).get("job_id")
@@ -424,6 +565,69 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc
+
+
+@router.get("/publish-history")
+def get_publish_history(creds: Credentials = Depends(require_credentials)):
+    del creds
+    records = instagram_publish_store.list_history()
+    existing_keys = {(record.get("job_id"), record.get("file_id")) for record in records}
+    for record in task_repository.list_instagram_history():
+        if (record.get("job_id"), record.get("file_id")) not in existing_keys:
+            records.append(record)
+    records.sort(key=lambda record: record.get("published_at") or "", reverse=True)
+    return {"records": records, "total": len(records)}
+
+
+@router.delete("/publish-history/{job_id}/{file_id}")
+def delete_publish_history(job_id: str, file_id: str, creds: Credentials = Depends(require_credentials)):
+    record = instagram_publish_store.get_history_item(job_id, file_id)
+    sqlite_record = False
+    if not record:
+        record = next(
+            (
+                item
+                for item in task_repository.list_instagram_history()
+                if item.get("job_id") == job_id and item.get("file_id") == file_id
+            ),
+            None,
+        )
+        sqlite_record = record is not None
+    if not record:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 歷史紀錄")
+
+    drive_restored = False
+    if record.get("drive_moved"):
+        published_folder_id = record.get("published_folder_id")
+        source_folder_id = record.get("source_folder_id")
+        if not published_folder_id or not source_folder_id:
+            raise HTTPException(status_code=409, detail="找不到 Drive 資料夾資訊，請先手動將影片移回來源資料夾。")
+        try:
+            move_drive_file_to_folder(
+                creds,
+                file_id,
+                extract_drive_folder_id(published_folder_id),
+                extract_drive_folder_id(source_folder_id),
+            )
+            drive_restored = True
+        except Exception as exc:
+            logger.error("Failed to restore Drive file %s from Instagram history: %s", file_id, type(exc).__name__)
+            raise HTTPException(status_code=502, detail="影片無法移回 Drive 來源資料夾，歷史紀錄尚未刪除。") from exc
+
+    if sqlite_record:
+        deleted = task_repository.release_instagram_history(job_id, file_id)
+    else:
+        try:
+            deleted = instagram_publish_store.delete_history_item(job_id, file_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 歷史紀錄")
+    return {
+        "deleted": deleted,
+        "drive_restored": drive_restored,
+        "message": "歷史紀錄已刪除，可重新讀取 Drive 影片並上傳。",
+    }
 
 
 @router.get("/drive-videos/{file_id}/thumbnail")
@@ -449,7 +653,7 @@ def drive_video_thumbnail(
     )
 
 
-@router.post("/publish-jobs", status_code=201)
+@router.post("/publish-jobs", status_code=202)
 def create_publish_job(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
     spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id")
     folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
@@ -468,13 +672,25 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
             assignments=[item.model_dump() for item in payload.assignments],
             share_to_feed=payload.share_to_feed,
         )
-        job = instagram_publish_store.create(job)
-        if any(item.get("status") == "queued" for item in job.get("items", [])):
-            instagram_publish_queue.submit(job["id"], _run_publish_job, creds)
-        else:
-            job["status"] = "completed"
-            job = instagram_publish_store.save(job)
-        return public_job(job)
+        batch_result = task_repository.create_batch_and_tasks(
+            {
+                "platform": "instagram",
+                "operation": "instagram.reels_publish",
+                "failure_policy": "pause_remaining_in_batch",
+                "metadata": {
+                    "worksheet_name": job.get("worksheet_name"),
+                    "caption_column": job.get("caption_column"),
+                    "team": job.get("team"),
+                    "source_folder_id": job.get("source_folder_id"),
+                    "share_to_feed": job.get("share_to_feed", True),
+                },
+            },
+            _unified_instagram_batch_specs(job),
+        )
+        batch_id = batch_result["batch"]["id"]
+        if any(task.get("status") == "queued" for task in batch_result.get("tasks", [])):
+            task_queue.submit(batch_id)
+        return _legacy_job_adapter(batch_id)
     except HTTPException:
         raise
     except Exception as exc:
@@ -485,6 +701,8 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
 @router.get("/publish-jobs/{job_id}")
 def get_publish_job(job_id: str, creds: Credentials = Depends(require_credentials)):
     del creds
+    if task_repository.get_batch_internal(job_id):
+        return _legacy_job_adapter(job_id)
     job = instagram_publish_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="找不到 Instagram 發布工作")
@@ -493,6 +711,13 @@ def get_publish_job(job_id: str, creds: Credentials = Depends(require_credential
 
 @router.post("/publish-jobs/{job_id}/retry")
 def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credentials)):
+    if task_repository.get_batch_internal(job_id):
+        try:
+            task_repository.retry_batch(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        task_queue.submit(job_id)
+        return _legacy_job_adapter(job_id)
     job = instagram_publish_store.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="找不到 Instagram 發布工作")
