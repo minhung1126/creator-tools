@@ -131,20 +131,20 @@ def move_drive_file_to_folder(
         raise ValueError("Google Drive 來源與目的資料夾不可相同")
 
     service = build("drive", "v3", credentials=credentials)
-    metadata = (
-        service.files()
-        .get(fileId=file_id, fields="id,parents", supportsAllDrives=True)
-        .execute()
-    )
+    metadata = service.files().get(fileId=file_id, fields="id,parents", supportsAllDrives=True).execute()
     parents = set(metadata.get("parents") or [])
     if destination_folder_id in parents:
         if source_folder_id in parents:
-            return service.files().update(
-                fileId=file_id,
-                removeParents=source_folder_id,
-                fields="id,parents",
-                supportsAllDrives=True,
-            ).execute()
+            return (
+                service.files()
+                .update(
+                    fileId=file_id,
+                    removeParents=source_folder_id,
+                    fields="id,parents",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
         return metadata
 
     update_kwargs = {
@@ -177,10 +177,7 @@ def _large_drive_thumbnail_link(thumbnail_link: str) -> str:
     else:
         replacement = f"=h{DRIVE_THUMBNAIL_SIZE}"
 
-    return (
-        f"{thumbnail_link[:match.start()]}{replacement}{match.group('suffix') or ''}"
-        f"{thumbnail_link[match.end():]}"
-    )
+    return f"{thumbnail_link[: match.start()]}{replacement}{match.group('suffix') or ''}{thumbnail_link[match.end() :]}"
 
 
 def _fetch_drive_thumbnail(credentials, thumbnail_link: str):
@@ -283,10 +280,14 @@ def _render_drive_source_thumbnail(credentials, file_id: str, metadata: dict):
 def get_drive_video_thumbnail(credentials, file_id: str, *, prefer_source: bool = False):
     """Fetch a Drive thumbnail, optionally preferring a frame from the original video."""
     service = build("drive", "v3", credentials=credentials)
-    metadata = service.files().get(
-        fileId=file_id,
-        fields="thumbnailLink,size,headRevisionId,modifiedTime",
-    ).execute()
+    metadata = (
+        service.files()
+        .get(
+            fileId=file_id,
+            fields="thumbnailLink,size,headRevisionId,modifiedTime",
+        )
+        .execute()
+    )
     if prefer_source:
         source_thumbnail = _render_drive_source_thumbnail(credentials, file_id, metadata)
         if source_thumbnail:

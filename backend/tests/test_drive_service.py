@@ -150,15 +150,9 @@ def test_ensure_published_folder_creates_once_and_move_is_idempotent(monkeypatch
     service = _PublishedFolderService(files)
     monkeypatch.setattr(drive_service, "build", lambda *args, **kwargs: service)
 
-    folder_id = drive_service.ensure_published_folder(
-        "credentials", "https://drive.google.com/drive/folders/source-1"
-    )
-    first_move = drive_service.move_drive_file_to_folder(
-        "credentials", "file-1", "source-1", folder_id
-    )
-    second_move = drive_service.move_drive_file_to_folder(
-        "credentials", "file-1", "source-1", folder_id
-    )
+    folder_id = drive_service.ensure_published_folder("credentials", "https://drive.google.com/drive/folders/source-1")
+    first_move = drive_service.move_drive_file_to_folder("credentials", "file-1", "source-1", folder_id)
+    second_move = drive_service.move_drive_file_to_folder("credentials", "file-1", "source-1", folder_id)
 
     assert folder_id == "published-1"
     assert files.create_kwargs["body"]["name"] == "Published"

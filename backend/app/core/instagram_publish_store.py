@@ -92,9 +92,7 @@ class InstagramPublishStore:
     def find_published_record(self, source_folder_id: str, file_id: str) -> Optional[dict[str, Any]]:
         """Find a record that has already obtained an Instagram media id."""
         with self._lock:
-            return self._find_file_record_in_data(
-                self._read(), source_folder_id, file_id, published_only=True
-            )
+            return self._find_file_record_in_data(self._read(), source_folder_id, file_id, published_only=True)
 
     @staticmethod
     def _mark_duplicate(item: dict[str, Any], record: dict[str, Any]) -> None:

@@ -126,9 +126,7 @@ def _item_progress(item: dict[str, Any]) -> float:
 def _progress_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     items = job.get("items", [])
     total = len(items)
-    completed_count = sum(
-        1 for item in items if item.get("status") == "skipped" or item.get("stage") == "completed"
-    )
+    completed_count = sum(1 for item in items if item.get("status") == "skipped" or item.get("stage") == "completed")
     failed_count = sum(
         1
         for item in items
@@ -158,7 +156,9 @@ def _progress_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     current_item_percent = None
     if current_item is not None:
         current_stage = current_item.get("stage") or current_stage or "queued"
-        current_stage_label = current_item.get("stage_label") or _STAGE_META.get(current_stage, {}).get("label", "處理中")
+        current_stage_label = current_item.get("stage_label") or _STAGE_META.get(current_stage, {}).get(
+            "label", "處理中"
+        )
         current_sequence = current_item.get("sequence")
         current_file_name = current_item.get("file_name")
         current_item_percent = round(_item_progress(current_item))
