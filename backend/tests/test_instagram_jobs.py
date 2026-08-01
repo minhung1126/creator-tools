@@ -80,6 +80,9 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     )
     monkeypatch.setattr(service, "upload_public_file", lambda *args, **kwargs: "https://cdn.example/reel.mp4")
     monkeypatch.setattr(service, "validate_reel_file", lambda path: {"size_bytes": 5})
+    monkeypatch.setattr(service, "ensure_published_folder", lambda *args, **kwargs: "published-folder")
+    moved = []
+    monkeypatch.setattr(service, "move_drive_file_to_folder", lambda *args, **kwargs: moved.append(args))
     deleted = []
     monkeypatch.setattr(service, "delete_public_file", lambda config, object_key: deleted.append(object_key))
 
@@ -106,6 +109,7 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     job = {
         "id": "job",
         "status": "queued",
+        "source_folder_id": "source-folder",
         "share_to_feed": True,
         "items": [
             {
@@ -137,8 +141,12 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     assert first["items"][0]["creation_id"] == "creation-1"
     second = service.process_job(job=first, credentials=None, client=client, r2=object())
     assert [item["status"] for item in second["items"]] == ["published", "published"]
+    assert [item["stage"] for item in second["items"]] == ["completed", "completed"]
+    assert second["progress"]["completed_count"] == 2
+    assert second["progress"]["percent"] == 100
     assert client.created == ["A", "B"]
     assert len(deleted) == 2
+    assert len(moved) == 2
     assert all(item["r2_deleted"] for item in second["items"])
     assert all(item["public_url"] is None for item in second["items"])
 
@@ -147,6 +155,8 @@ def test_r2_cleanup_failure_does_not_republish(monkeypatch):
     store = MemoryStore()
     monkeypatch.setattr(service, "instagram_publish_store", store)
     monkeypatch.setattr(service, "ensure_lifecycle", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "ensure_published_folder", lambda *args, **kwargs: "published-folder")
+    monkeypatch.setattr(service, "move_drive_file_to_folder", lambda *args, **kwargs: {})
 
     def fail_delete(*args, **kwargs):
         raise RuntimeError("denied")
@@ -164,6 +174,7 @@ def test_r2_cleanup_failure_does_not_republish(monkeypatch):
     job = {
         "id": "job",
         "status": "published",
+        "source_folder_id": "source-folder",
         "items": [
             {
                 "sequence": 1,
@@ -184,6 +195,81 @@ def test_r2_cleanup_failure_does_not_republish(monkeypatch):
     assert client.published == 0
 
 
+def test_drive_move_failure_does_not_republish_and_retry_moves_only(monkeypatch):
+    store = MemoryStore()
+    monkeypatch.setattr(service, "instagram_publish_store", store)
+    monkeypatch.setattr(service, "ensure_lifecycle", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "download_drive_file",
+        lambda credentials, file_id, destination: Path(destination).write_bytes(b"video"),
+    )
+    monkeypatch.setattr(service, "upload_public_file", lambda *args, **kwargs: "https://cdn.example/reel.mp4")
+    monkeypatch.setattr(service, "validate_reel_file", lambda path: {"size_bytes": 5})
+    monkeypatch.setattr(service, "delete_public_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "ensure_published_folder", lambda *args, **kwargs: "published-folder")
+    attempts = []
+    moved = []
+
+    def move_file(*args, **kwargs):
+        if not attempts:
+            attempts.append(args)
+            raise RuntimeError("Drive permission denied")
+        moved.append(args)
+        return {"id": "file-1", "parents": ["published-folder"]}
+
+    monkeypatch.setattr(service, "move_drive_file_to_folder", move_file)
+
+    class Client:
+        def __init__(self):
+            self.created = 0
+            self.published = 0
+
+        def create_reel_container(self, url, caption, share):
+            self.created += 1
+            return "creation-1"
+
+        def wait_for_container(self, creation_id):
+            return None
+
+        def publish_container(self, creation_id):
+            self.published += 1
+            return "media-1"
+
+    client = Client()
+    job = {
+        "id": "job",
+        "status": "queued",
+        "source_folder_id": "source-folder",
+        "share_to_feed": True,
+        "items": [
+            {
+                "sequence": 1,
+                "file_id": "file-1",
+                "file_name": "one.mp4",
+                "caption": "A",
+                "status": "queued",
+                "public_url": None,
+                "object_key": None,
+                "creation_id": None,
+                "media_id": None,
+            }
+        ],
+    }
+
+    first = service.process_job(job=job, credentials=None, client=client, r2=object())
+    assert first["status"] == "completed_with_warnings"
+    assert first["items"][0]["status"] == "published"
+    assert first["items"][0]["drive_move_error"]
+    assert client.published == 1
+
+    second = service.process_job(job=first, credentials=None, client=client, r2=object())
+    assert second["status"] == "completed"
+    assert second["items"][0]["drive_moved"] is True
+    assert second["items"][0]["drive_move_error"] is None
+    assert client.published == 1
+
+
 def test_r2_public_url_rejects_http_and_private_ip():
     for value in ("http://example.com", "https://127.0.0.1"):
         try:
@@ -191,3 +277,65 @@ def test_r2_public_url_rejects_http_and_private_ip():
         except ValueError:
             continue
         raise AssertionError(f"accepted unsafe URL: {value}")
+
+
+def test_public_job_reports_current_child_task_stage():
+    job = {
+        "id": "job",
+        "status": "running",
+        "items": [
+            {
+                "sequence": 1,
+                "file_id": "1",
+                "file_name": "one.mp4",
+                "status": "queued",
+                "stage": "uploading_r2",
+                "stage_label": "上傳到 Cloudflare R2",
+                "progress_percent": 38,
+            },
+            {
+                "sequence": 2,
+                "file_id": "2",
+                "file_name": "two.mp4",
+                "status": "queued",
+                "stage": "queued",
+                "stage_label": "排隊中",
+                "progress_percent": 0,
+            },
+        ],
+    }
+
+    result = service.public_job(job)
+
+    assert result["progress"] == {
+        "total": 2,
+        "completed_count": 0,
+        "failed_count": 0,
+        "paused_count": 0,
+        "percent": 19,
+        "current_item_sequence": 1,
+        "current_file_name": "one.mp4",
+        "current_stage": "uploading_r2",
+        "current_stage_label": "上傳到 Cloudflare R2",
+        "current_item_percent": 38,
+    }
+    assert result["results"][0]["stage"] == "uploading_r2"
+
+
+def test_retry_resets_only_the_child_task_checkpoint():
+    item = {
+        "status": "failed",
+        "stage": "creating_container",
+        "progress_percent": 60,
+        "error": "Meta API error",
+        "public_url": "https://cdn.example/reel.mp4",
+        "creation_id": "creation-1",
+    }
+
+    service.reset_item_for_retry(item)
+
+    assert item["status"] == "queued"
+    assert item["stage"] == "queued"
+    assert item["error"] is None
+    assert item["public_url"] == "https://cdn.example/reel.mp4"
+    assert item["creation_id"] == "creation-1"
