@@ -3,6 +3,7 @@ import { ExternalLink } from 'lucide-react';
 
 const HTTP_PROTOCOL = /^https?:\/\//i;
 const OTHER_PROTOCOL = /^[a-z][a-z\d+.-]*:/i;
+const DOMAIN_NAME = /^(?:[a-z\d](?:[a-z\d-]*[a-z\d])?\.)+[a-z]{2,}(?::\d+)?(?:[/?#]|$)/i;
 
 function normalizeHttpUrl(value) {
   const trimmed = String(value || '').trim();
@@ -18,7 +19,10 @@ function normalizeHttpUrl(value) {
 }
 
 function looksLikeUrl(value) {
-  return HTTP_PROTOCOL.test(value) || /^www\./i.test(value) || value.includes('/');
+  return HTTP_PROTOCOL.test(value)
+    || OTHER_PROTOCOL.test(value)
+    || DOMAIN_NAME.test(value)
+    || value.includes('/');
 }
 
 export function sourceUrlFromValue(value, sourceType = 'url') {
@@ -26,8 +30,7 @@ export function sourceUrlFromValue(value, sourceType = 'url') {
   if (!trimmed) return '';
 
   if (sourceType === 'url' || looksLikeUrl(trimmed)) {
-    const directUrl = normalizeHttpUrl(trimmed);
-    if (directUrl) return directUrl;
+    return normalizeHttpUrl(trimmed);
   }
 
   const encodedValue = encodeURIComponent(trimmed);
