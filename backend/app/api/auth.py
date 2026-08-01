@@ -77,7 +77,7 @@ def get_google_auth_url(response: Response):
             key=OAUTH_FLOW_COOKIE,
             value=flow_cookie,
             httponly=True,
-            secure=settings.is_production,
+            secure=settings.cookie_secure,
             samesite="lax",
             max_age=OAUTH_FLOW_MAX_AGE,
         )
@@ -134,7 +134,7 @@ def google_oauth_callback(
             key=SESSION_COOKIE,
             value=session_id,
             httponly=True,
-            secure=settings.is_production,
+            secure=settings.cookie_secure,
             samesite="lax",
             max_age=SESSION_MAX_AGE
         )

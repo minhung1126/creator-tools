@@ -1,10 +1,9 @@
 import hashlib
 import mimetypes
-import os
 import re
 import secrets
-import tempfile
 import logging
+import tempfile
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -73,7 +72,6 @@ class PublishInput(BaseModel):
 class InstagramSettings(BaseModel):
     drive_folder_id: str = ""
     spreadsheet_id: str = ""
-    instagram_api_version: str = "v25.0"
     r2_account_id: str = ""
     r2_access_key_id: str = ""
     r2_secret_access_key: str = ""
@@ -81,8 +79,8 @@ class InstagramSettings(BaseModel):
     r2_public_base_url: str = ""
 
 
-def cfg(key: str, env: str = ""):
-    return runtime_config.get(key, "") or os.getenv(env or key.upper(), "")
+def cfg(key: str):
+    return runtime_config.get(key, "")
 
 
 def session_fingerprint(request: Request) -> str:
@@ -120,7 +118,7 @@ def refresh_connection() -> dict:
     client = InstagramClient(
         connection["instagram_user_id"],
         refreshed["access_token"],
-        cfg("instagram_api_version", "INSTAGRAM_API_VERSION") or "v25.0",
+        settings.instagram_api_version,
     )
     profile = client.profile()
     credential_store.update_instagram_profile(profile.get("username", ""), profile.get("account_type", ""))
@@ -143,18 +141,18 @@ def get_connected_client(refresh_if_needed: bool = True) -> InstagramClient:
     return InstagramClient(
         connection["instagram_user_id"],
         token,
-        cfg("instagram_api_version", "INSTAGRAM_API_VERSION") or "v25.0",
+        settings.instagram_api_version,
     )
 
 
 def get_r2() -> R2Config:
-    secret = credential_store.get_secret("r2_secret_access_key") or settings.R2_SECRET_ACCESS_KEY
+    secret = credential_store.get_secret("r2_secret_access_key")
     values = {
-        "account_id": cfg("r2_account_id", "R2_ACCOUNT_ID"),
-        "access_key_id": cfg("r2_access_key_id", "R2_ACCESS_KEY_ID"),
+        "account_id": cfg("r2_account_id"),
+        "access_key_id": cfg("r2_access_key_id"),
         "secret_access_key": secret,
-        "bucket_name": cfg("r2_bucket_name", "R2_BUCKET_NAME"),
-        "public_base_url": cfg("r2_public_base_url", "R2_PUBLIC_BASE_URL"),
+        "bucket_name": cfg("r2_bucket_name"),
+        "public_base_url": cfg("r2_public_base_url"),
     }
     if not all(values.values()):
         raise RuntimeError("Cloudflare R2 設定不完整")
@@ -185,7 +183,7 @@ def get_instagram_auth_url(request: Request, response: Response, creds: Credenti
             "redirect_uri": settings.get_instagram_redirect_uri(),
         }, salt=INSTAGRAM_OAUTH_STATE_SALT),
         httponly=True,
-        secure=settings.is_production,
+        secure=settings.cookie_secure,
         samesite="lax",
         max_age=OAUTH_FLOW_MAX_AGE,
     )
@@ -227,7 +225,7 @@ def instagram_oauth_callback(
         user_id = short_lived.get("user_id") or short_lived.get("id")
         token = long_lived["access_token"]
         profile = InstagramClient(
-            str(user_id or "me"), token, cfg("instagram_api_version", "INSTAGRAM_API_VERSION") or "v25.0"
+            str(user_id or "me"), token, settings.instagram_api_version
         ).profile()
         user_id = profile.get("id") or user_id
         if not user_id:
@@ -292,16 +290,14 @@ def disconnect_instagram(creds: Credentials = Depends(require_credentials)):
 def get_instagram_settings(creds: Credentials = Depends(require_credentials)):
     del creds
     return {
-        "drive_folder_id": cfg("instagram_drive_folder_id", "DEFAULT_DRIVE_FOLDER_ID"),
-        "spreadsheet_id": cfg("instagram_spreadsheet_id", "DEFAULT_SPREADSHEET_ID"),
-        "instagram_api_version": cfg("instagram_api_version", "INSTAGRAM_API_VERSION") or "v25.0",
-        "r2_account_id": cfg("r2_account_id", "R2_ACCOUNT_ID"),
-        "r2_access_key_id": cfg("r2_access_key_id", "R2_ACCESS_KEY_ID"),
-        "r2_bucket_name": cfg("r2_bucket_name", "R2_BUCKET_NAME"),
-        "r2_public_base_url": cfg("r2_public_base_url", "R2_PUBLIC_BASE_URL"),
-        "r2_secret_access_key_configured": bool(
-            credential_store.has_secret("r2_secret_access_key") or settings.R2_SECRET_ACCESS_KEY
-        ),
+        "drive_folder_id": cfg("instagram_drive_folder_id"),
+        "spreadsheet_id": cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID,
+        "instagram_api_version": settings.instagram_api_version,
+        "r2_account_id": cfg("r2_account_id"),
+        "r2_access_key_id": cfg("r2_access_key_id"),
+        "r2_bucket_name": cfg("r2_bucket_name"),
+        "r2_public_base_url": cfg("r2_public_base_url"),
+        "r2_secret_access_key_configured": credential_store.has_secret("r2_secret_access_key"),
     }
 
 
@@ -314,7 +310,6 @@ def save_instagram_settings(payload: InstagramSettings, creds: Credentials = Dep
     runtime_config.update({
         "instagram_drive_folder_id": values["drive_folder_id"].strip(),
         "instagram_spreadsheet_id": values["spreadsheet_id"].strip(),
-        "instagram_api_version": values["instagram_api_version"].strip() or "v25.0",
         "r2_account_id": values["r2_account_id"].strip(),
         "r2_access_key_id": values["r2_access_key_id"].strip(),
         "r2_bucket_name": values["r2_bucket_name"].strip(),
@@ -353,7 +348,7 @@ def test_r2(creds: Credentials = Depends(require_credentials)):
 
 @router.post("/drive-videos")
 def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_credentials)):
-    folder = payload.folder_url_or_id or cfg("instagram_drive_folder_id", "DEFAULT_DRIVE_FOLDER_ID")
+    folder = payload.folder_url_or_id or cfg("instagram_drive_folder_id")
     if not folder:
         raise HTTPException(status_code=400, detail="請輸入 Google Drive 資料夾")
     try:
@@ -365,8 +360,8 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
 
 @router.post("/publish-reels")
 def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
-    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id", "DEFAULT_SPREADSHEET_ID")
-    folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id", "DEFAULT_DRIVE_FOLDER_ID")
+    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id") or settings.DEFAULT_SPREADSHEET_ID
+    folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
     if not spreadsheet or not folder:
         raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
     active = [(item.file_id, normalize_text(item.person)) for item in payload.assignments if normalize_text(item.person)]
