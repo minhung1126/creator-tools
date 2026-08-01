@@ -35,8 +35,7 @@ META_MAX_HORIZONTAL_PIXELS = 1920
 META_MIN_FRAME_RATE = 23
 META_MAX_FRAME_RATE = 60
 META_MAX_VIDEO_BITRATE = 25_000_000
-META_MAX_AUDIO_BITRATE = 128_000
-META_AUDIO_SAMPLE_RATE = 48_000
+META_MAX_AUDIO_SAMPLE_RATE = 48_000
 META_VIDEO_CODECS = {"h264", "hevc"}
 META_AUDIO_CODECS = {"aac"}
 VIDEO_SUFFIXES = {".mp4", ".mov"}
@@ -75,7 +74,7 @@ _PIPELINE_STAGE_COUNT = len(PIPELINE_STAGES)
 
 
 class ReelValidationError(ValueError):
-    """A downloaded video violates a documented Meta Reels requirement."""
+    """A downloaded video violates a hard Meta Reels upload requirement."""
 
 
 def _now() -> str:
@@ -247,7 +246,7 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def _check_meta_constraints(
+def _check_hard_reel_constraints(
     *,
     suffix: str | None = None,
     size_bytes: float | None = None,
@@ -279,7 +278,7 @@ def _preflight(file: dict[str, Any]) -> tuple[bool, str | None, dict[str, Any]]:
         "height": height,
     }
     try:
-        _check_meta_constraints(
+        _check_hard_reel_constraints(
             suffix=Path(file.get("name", "")).suffix,
             size_bytes=size,
             duration_seconds=duration,
@@ -328,9 +327,9 @@ def _probe_reel_file(path: Path) -> dict[str, Any] | None:
 
 
 def validate_reel_file(path: Path) -> dict[str, Any]:
-    """Validate a downloaded file against Meta's documented Reels requirements."""
+    """Validate a downloaded file against hard Meta Reels upload requirements."""
     size_bytes = path.stat().st_size
-    _check_meta_constraints(
+    _check_hard_reel_constraints(
         suffix=path.suffix,
         size_bytes=size_bytes,
     )
@@ -367,7 +366,7 @@ def validate_reel_file(path: Path) -> dict[str, Any]:
             "video_bitrate": video_bitrate,
         }
     )
-    _check_meta_constraints(duration_seconds=duration, width=width)
+    _check_hard_reel_constraints(duration_seconds=duration, width=width)
     if frame_rate is not None and not META_MIN_FRAME_RATE <= frame_rate <= META_MAX_FRAME_RATE:
         raise ReelValidationError("影片 frame rate 必須介於 Meta 規格的 23–60 FPS")
     if video_bitrate is not None and video_bitrate > META_MAX_VIDEO_BITRATE:
@@ -387,10 +386,10 @@ def validate_reel_file(path: Path) -> dict[str, Any]:
         )
         if audio_codec and audio_codec not in META_AUDIO_CODECS:
             raise ReelValidationError("音訊編碼必須為 Meta 支援的 AAC")
-        if audio_sample_rate is not None and audio_sample_rate != META_AUDIO_SAMPLE_RATE:
-            raise ReelValidationError("音訊 sample rate 必須為 Meta 規格的 48 kHz")
-        if audio_bitrate is not None and audio_bitrate > META_MAX_AUDIO_BITRATE:
-            raise ReelValidationError("音訊 bitrate 超過 Meta 規格的 128 kbps")
+        if audio_sample_rate is not None and audio_sample_rate > META_MAX_AUDIO_SAMPLE_RATE:
+            raise ReelValidationError("音訊 sample rate 不得超過 Meta 規格的 48 kHz")
+        # Meta lists 128 kbps as an audio bitrate value, but does not define
+        # it as an upload-blocking maximum. Keep it for diagnostics only.
     return metadata
 
 

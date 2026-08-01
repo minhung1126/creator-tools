@@ -480,7 +480,16 @@ POST /api/v1/instagram/publish-jobs/{id}/retry
 
 每片會保存 `file_id`、來源資料夾 ID、`queued`、`uploaded`、`container_created`、`published`、`failed`、`paused`、creation/media ID，以及 `drive_moved`、`drive_move_error`、R2 清理狀態。第一片失敗會暫停後續；retry 會沿用已保存的 creation ID。結果保存於 `data/instagram_publish_jobs.json`；同一來源資料夾中的同一個 Drive `file_id` 若已有發布中或已發布紀錄，新的工作會略過以避免重複上傳。既有 `published` 紀錄若尚未有搬移欄位，按該工作的 retry 也會只補做 Drive 搬移。
 
-Reels preflight 只採用 Meta 官方列出的限制：MOV/MP4、AAC 48 kHz、H.264/HEVC、23–60 FPS、水平寬度最多 1920 pixels、影片 bitrate 最多 25 Mbps、音訊 bitrate 128 kbps、3 秒至 15 分鐘、檔案最多 1 GB。9:16 是 Meta 的建議比例，不會被本專案當成硬限制；若 Drive 缺少 metadata，會保留影片並在下載後檢查，最終仍以 Meta API 的實際驗證結果為準。規格來源：[Meta 官方 Instagram API Reels Publishing collection](https://www.postman.com/meta/instagram/folder/23987686-8cdc2637-eebc-4770-aa59-7b0a0bba5a64)。
+Reels preflight 只阻擋 Meta 明確列出的硬限制：
+
+- 容器為 MOV 或 MP4。
+- 音訊使用 AAC，sample rate 不高於 48 kHz。
+- 影片使用 H.264 或 HEVC，frame rate 為 23–60 FPS。
+- 水平寬度最多 1920 pixels。
+- 影片 bitrate 最多 25 Mbps。
+- 長度為 3 秒至 15 分鐘，檔案最多 1 GB。
+
+`9:16` 是建議比例，不是禁止上傳條件；音訊 bitrate 的 `128 kbps` 也只保留在媒體資訊中，不作為硬性阻擋條件。若 Drive 缺少 metadata，會保留影片並在下載後檢查，最終仍以 Meta API 的實際驗證結果為準。規格來源：[Meta 官方 Instagram API Reels Publishing collection](https://www.postman.com/meta/instagram/folder/23987686-8cdc2637-eebc-4770-aa59-7b0a0bba5a64)。
 
 Sheet 至少包含：
 

@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, CheckSquare, FileSpreadsheet, Info, RefreshCw, Send, Users } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, CheckSquare, FileSpreadsheet, Info, RefreshCw, Send, Shuffle, Users } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -31,6 +31,18 @@ function formatVideoMeta(video) {
   const dimensions = video.width && video.height ? `${video.width}×${video.height}` : '尺寸未提供';
   const duration = video.duration_seconds ? `${video.duration_seconds.toFixed(1)} 秒` : 'duration 未提供';
   return `${video.created_time || '建立時間未提供'} · ${dimensions} · ${duration}`;
+}
+
+function PreviewField({ label, value }) {
+  const hasValue = value !== null && value !== undefined && String(value).trim() !== '';
+  return (
+    <div className="glass-panel" style={{ padding: 14 }}>
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginBottom: 7 }}>{label}</div>
+      <div style={{ color: hasValue ? '#fff' : '#fbbf24', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.5 }}>
+        {hasValue ? String(value) : '此欄位目前是空白，請記得編輯試算表'}
+      </div>
+    </div>
+  );
 }
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
@@ -84,6 +96,9 @@ export default function InstagramReelsPage() {
   const [teams, setTeams] = useState([]);
   const [people, setPeople] = useState([]);
   const [enabledPeople, setEnabledPeople] = useState([]);
+  const [randomPreview, setRandomPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [previewError, setPreviewError] = useState('');
   const [videos, setVideos] = useState([]);
   const [assignments, setAssignments] = useState({});
   const [selectedVideoIds, setSelectedVideoIds] = useState([]);
@@ -97,6 +112,7 @@ export default function InstagramReelsPage() {
   const [job, setJob] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
   const publishOperationId = useRef(null);
+  const previewRequestId = useRef(0);
 
   const updateConfig = (patch) => setConfig((current) => ({ ...current, ...patch }));
   const selectedWorksheet = worksheets.find((item) => item.title === config.worksheet_name);
@@ -104,6 +120,43 @@ export default function InstagramReelsPage() {
     () => people.filter((person) => enabledPeople.includes(person)),
     [people, enabledPeople],
   );
+  const { spreadsheet_id: spreadsheetId, worksheet_name: worksheetName, team, caption_column: captionColumn } = config;
+
+  const loadRandomPreview = useCallback(async () => {
+    const requestId = previewRequestId.current + 1;
+    previewRequestId.current = requestId;
+
+    if (!spreadsheetId.trim() || !worksheetName || !team || !captionColumn) {
+      setRandomPreview(null);
+      setPreviewError('');
+      setLoadingPreview(false);
+      return;
+    }
+
+    setLoadingPreview(true);
+    setRandomPreview(null);
+    setPreviewError('');
+    try {
+      const preview = await api.getRandomMemberPreview(
+        spreadsheetId,
+        worksheetName,
+        team,
+        [captionColumn],
+      );
+      if (requestId !== previewRequestId.current) return;
+      setRandomPreview(preview);
+    } catch (error) {
+      if (requestId !== previewRequestId.current) return;
+      setRandomPreview(null);
+      setPreviewError(error.message);
+    } finally {
+      if (requestId === previewRequestId.current) setLoadingPreview(false);
+    }
+  }, [spreadsheetId, worksheetName, team, captionColumn]);
+
+  useEffect(() => {
+    loadRandomPreview();
+  }, [loadRandomPreview]);
 
   useEffect(() => {
     if (!job?.id || !ACTIVE_JOB_STATUSES.has(job.status)) return undefined;
@@ -466,6 +519,23 @@ export default function InstagramReelsPage() {
       </div>}
       {config.team && !people.length && !errorMsg && <p className="section-desc">正在讀取團體人物…</p>}
       <label><input type="checkbox" checked={config.share_to_feed} onChange={(event) => updateConfig({ share_to_feed: event.target.checked })} /> 同時分享到動態消息</label>
+    </section>
+
+    <section className="glass-panel card-padding" style={{ display: 'grid', gap: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}><Shuffle size={19} /> Reels 內文隨機抽查</h2>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 5 }}>從「{config.team || '尚未選擇團體'}」隨機抽一位真實成員，顯示目前 Reels Content 欄位的內容，確認發布時會套用正確內文。</p>
+        </div>
+        <button className="btn btn-primary" onClick={loadRandomPreview} disabled={loadingPreview || !config.spreadsheet_id.trim() || !config.worksheet_name || !config.team || !config.caption_column}><RefreshCw size={16} className={loadingPreview ? 'spin' : ''} /> {loadingPreview ? '抽查中...' : randomPreview ? '換一位成員' : '隨機抽查'}</button>
+      </div>
+      {previewError && <div className="error-alert" style={{ marginTop: 14 }}><AlertCircle size={18} /><span>{previewError}</span></div>}
+      {randomPreview && (
+        <div style={{ marginTop: 16 }}>
+          <div style={{ color: '#fff', marginBottom: 12 }}><strong>抽中成員：{randomPreview.person}</strong></div>
+          <PreviewField label={`Reels Content：${config.caption_column}`} value={randomPreview.values?.[config.caption_column]} />
+        </div>
+      )}
     </section>
 
     {errorMsg && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMsg}</span></div>}
