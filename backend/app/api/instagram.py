@@ -21,7 +21,12 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.services.drive_service import extract_drive_folder_id, get_drive_video_thumbnail, list_drive_videos
+from backend.app.services.drive_service import (
+    extract_drive_folder_id,
+    get_drive_video_thumbnail,
+    list_drive_videos,
+    move_drive_file_to_folder,
+)
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -424,6 +429,50 @@ def drive_videos(payload: DriveInput, creds: Credentials = Depends(require_crede
     except Exception as exc:
         logger.error("Failed to list Drive videos: %s", type(exc).__name__, exc_info=True)
         raise HTTPException(status_code=500, detail="讀取 Drive 影片失敗，請稍後再試。") from exc
+
+
+@router.get("/publish-history")
+def get_publish_history(creds: Credentials = Depends(require_credentials)):
+    del creds
+    records = instagram_publish_store.list_history()
+    return {"records": records, "total": len(records)}
+
+
+@router.delete("/publish-history/{job_id}/{file_id}")
+def delete_publish_history(job_id: str, file_id: str, creds: Credentials = Depends(require_credentials)):
+    record = instagram_publish_store.get_history_item(job_id, file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 歷史紀錄")
+
+    drive_restored = False
+    if record.get("drive_moved"):
+        published_folder_id = record.get("published_folder_id")
+        source_folder_id = record.get("source_folder_id")
+        if not published_folder_id or not source_folder_id:
+            raise HTTPException(status_code=409, detail="找不到 Drive 資料夾資訊，請先手動將影片移回來源資料夾。")
+        try:
+            move_drive_file_to_folder(
+                creds,
+                file_id,
+                extract_drive_folder_id(published_folder_id),
+                extract_drive_folder_id(source_folder_id),
+            )
+            drive_restored = True
+        except Exception as exc:
+            logger.error("Failed to restore Drive file %s from Instagram history: %s", file_id, type(exc).__name__)
+            raise HTTPException(status_code=502, detail="影片無法移回 Drive 來源資料夾，歷史紀錄尚未刪除。") from exc
+
+    try:
+        deleted = instagram_publish_store.delete_history_item(job_id, file_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="找不到 Instagram 歷史紀錄")
+    return {
+        "deleted": deleted,
+        "drive_restored": drive_restored,
+        "message": "歷史紀錄已刪除，可重新讀取 Drive 影片並上傳。",
+    }
 
 
 @router.get("/drive-videos/{file_id}/thumbnail")
