@@ -19,14 +19,28 @@ class R2Config:
         return f"https://{self.account_id}.r2.cloudflarestorage.com"
 
 
-def upload_public_file(config: R2Config, local_path: Path, object_key: str, content_type: str):
-    client = boto3.client(
+def create_client(config: R2Config):
+    return boto3.client(
         "s3",
         endpoint_url=config.endpoint_url,
         region_name="auto",
         aws_access_key_id=config.access_key_id,
         aws_secret_access_key=config.secret_access_key,
     )
+
+
+def test_r2_connection(config: R2Config):
+    client = create_client(config)
+    client.head_bucket(Bucket=config.bucket_name)
+    return {
+        "ok": True,
+        "bucket_name": config.bucket_name,
+        "public_base_url": config.public_base_url.rstrip("/"),
+    }
+
+
+def upload_public_file(config: R2Config, local_path: Path, object_key: str, content_type: str):
+    client = create_client(config)
     client.upload_file(
         str(local_path),
         config.bucket_name,
