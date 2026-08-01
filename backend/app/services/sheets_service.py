@@ -192,6 +192,59 @@ def get_random_member_preview(
     }
 
 
+def get_copyable_sheet_table(
+    credentials: Credentials,
+    spreadsheet_id_or_url: str,
+    worksheet_name: str,
+) -> Dict[str, Any]:
+    """Return raw displayed cell strings while adding normalized team/person keys for filtering."""
+    spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
+    service = get_sheets_service(credentials)
+    result = service.spreadsheets().values().get(
+        spreadsheetId=spreadsheet_id,
+        range=quote_sheet_name(worksheet_name),
+        valueRenderOption="FORMATTED_VALUE",
+        dateTimeRenderOption="FORMATTED_STRING",
+    ).execute()
+    values = result.get("values", [])
+    if not values:
+        return {
+            "spreadsheet_id": spreadsheet_id,
+            "worksheet_name": worksheet_name,
+            "columns": [],
+            "rows": [],
+        }
+
+    raw_headers = [str(value) for value in values[0]]
+    headers = [normalize_text(value) for value in raw_headers]
+    team_index = headers.index("所屬團體") if "所屬團體" in headers else -1
+    person_index = headers.index("人") if "人" in headers else -1
+    columns = [
+        {"key": f"column_{index}", "label": header or f"未命名欄位 {index + 1}", "index": index}
+        for index, header in enumerate(raw_headers)
+    ]
+
+    rows = []
+    for row_number, row in enumerate(values[1:], start=2):
+        raw_cells = [str(row[index]) if index < len(row) else "" for index in range(len(columns))]
+        team = normalize_text(raw_cells[team_index]) if team_index >= 0 else ""
+        person = normalize_text(raw_cells[person_index]) if person_index >= 0 else ""
+        rows.append({
+            "row_number": row_number,
+            "cells": raw_cells,
+            "team": team,
+            "person": person,
+            "person_option": person or (team_option_label(team) if team else ""),
+        })
+
+    return {
+        "spreadsheet_id": spreadsheet_id,
+        "worksheet_name": worksheet_name,
+        "columns": columns,
+        "rows": rows,
+    }
+
+
 def get_all_rows_for_sheet(
     credentials: Credentials,
     spreadsheet_id_or_url: str,
