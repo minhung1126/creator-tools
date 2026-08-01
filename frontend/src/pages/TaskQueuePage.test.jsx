@@ -29,8 +29,8 @@ describe('TaskQueuePage', () => {
     expect(screen.getByRole('button', { name: '未完成隊列' })).toHaveClass('active');
     expect(screen.getAllByText('Instagram video').length).toBeGreaterThan(0);
     expect(screen.getAllByText('YouTube running video').length).toBeGreaterThan(0);
-    expect(screen.queryByText('YouTube paused video')).not.toBeInTheDocument();
-    expect([...document.querySelectorAll('.task-row')].map((row) => row.id)).toEqual(['task-ig-1', 'task-yt-1']);
+    expect(screen.getAllByText('YouTube paused video').length).toBeGreaterThan(0);
+    expect([...document.querySelectorAll('.task-row')].map((row) => row.id)).toEqual(['task-ig-1', 'task-yt-1', 'task-yt-2']);
   });
 
   it('renders one row per video and filters by platform', () => {

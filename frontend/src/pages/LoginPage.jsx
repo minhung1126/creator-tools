@@ -1,16 +1,39 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { 
   Video, 
   LogIn, 
   CheckCircle2, 
   AlertCircle, 
-  Lock
+  Lock,
+  RefreshCw,
 } from 'lucide-react';
 
 export default function LoginPage({ initialError }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [errorMsg, setErrorMsg] = useState(initialError || null);
+  const [authConfig, setAuthConfig] = useState(null);
+  const [checkingConfig, setCheckingConfig] = useState(true);
+
+  const checkLoginReadiness = useCallback(async () => {
+    setCheckingConfig(true);
+    try {
+      const config = await api.getAuthConfig();
+      setAuthConfig(config);
+      if (!config.has_client_id || !config.has_client_secret) {
+        setErrorMsg('Google 登入尚未完成系統設定，請聯絡管理者補齊 OAuth 憑證。');
+      } else {
+        setErrorMsg(null);
+      }
+    } catch (error) {
+      setAuthConfig(null);
+      setErrorMsg(error.message);
+    } finally {
+      setCheckingConfig(false);
+    }
+  }, []);
+
+  useEffect(() => { checkLoginReadiness(); }, [checkLoginReadiness]);
 
   const handleGoogleLogin = async () => {
     setLoggingIn(true);
@@ -29,6 +52,8 @@ export default function LoginPage({ initialError }) {
       setLoggingIn(false);
     }
   };
+
+  const loginReady = Boolean(authConfig?.has_client_id && authConfig?.has_client_secret);
 
   return (
     <div className="login-container">
@@ -72,7 +97,14 @@ export default function LoginPage({ initialError }) {
         {errorMsg && (
           <div className="login-error-alert">
             <AlertCircle size={18} />
-            <span>{errorMsg}</span>
+            <div style={{ display: 'grid', gap: 8 }}>
+              <span>{errorMsg}</span>
+              {!loginReady && !checkingConfig && (
+                <button type="button" className="btn btn-secondary" onClick={checkLoginReadiness}>
+                  <RefreshCw size={15} />重新檢查
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -81,9 +113,14 @@ export default function LoginPage({ initialError }) {
           <button 
             className="btn btn-primary login-btn"
             onClick={handleGoogleLogin}
-            disabled={loggingIn}
+            disabled={loggingIn || checkingConfig || !loginReady}
           >
-            {loggingIn ? (
+            {checkingConfig ? (
+              <>
+                <span className="login-spinner"></span>
+                正在檢查登入服務...
+              </>
+            ) : loggingIn ? (
               <>
                 <span className="login-spinner"></span>
                 正在傳送至 Google 授權...

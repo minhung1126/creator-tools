@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
@@ -99,7 +99,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
-  const applyConfig = (config) => {
+  const applyConfig = useCallback((config) => {
     setSpreadsheetId(config.spreadsheetId);
     setPlaylistId(config.playlistId);
     setWorksheetName(config.worksheetName);
@@ -107,7 +107,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setDescriptionColumn(config.descriptionColumn);
     setSelectedTeam(config.selectedTeam);
     setEnabledPeople(config.enabledPeople);
-  };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,7 +142,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       });
 
     return () => { cancelled = true; };
-  }, [videoType, authUser, sysSettings.default_spreadsheet_id, sysSettings.default_playlist_id]);
+  }, [videoType, authUser, defaults, sysSettings, applyConfig]);
 
   useEffect(() => {
     if (!hydrated) return undefined;
@@ -176,7 +176,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     if (nextColumns.length && !nextColumns.includes(descriptionColumn)) {
       setDescriptionColumn(nextColumns.includes(defaults.description) ? defaults.description : nextColumns[0]);
     }
-  }, [worksheets, worksheetName]);
+  }, [worksheets, worksheetName, titleColumn, descriptionColumn, defaults.title, defaults.description]);
 
   useEffect(() => {
     if (!selectedTeam || !worksheetName || !spreadsheetId || !authUser) {
@@ -206,7 +206,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     if (bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
   }, [availablePeople, bulkPerson]);
 
-  const loadRandomPreview = async () => {
+  const loadRandomPreview = useCallback(async () => {
     if (!spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
       setRandomPreview(null);
       setPreviewError('請先選擇工作表、團體、標題欄位與描述欄位');
@@ -228,7 +228,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     } finally {
       setLoadingPreview(false);
     }
-  };
+  }, [spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn]);
 
   useEffect(() => {
     if (!hydrated || !authUser || !spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
@@ -237,9 +237,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       return;
     }
     loadRandomPreview();
-  }, [hydrated, authUser, spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn]);
+  }, [hydrated, authUser, spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn, loadRandomPreview]);
 
-  const loadSheetResources = async ({ showToast = false } = {}) => {
+  const loadSheetResources = useCallback(async ({ showToast = false } = {}) => {
     if (!spreadsheetId) {
       if (showToast) toast.warning('請先填寫主要試算表 ID / URL');
       return;
@@ -271,11 +271,11 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     } finally {
       setLoadingSheet(false);
     }
-  };
+  }, [spreadsheetId, worksheetName, defaults.worksheet, toast]);
 
   useEffect(() => {
     if (hydrated && authUser && spreadsheetId) loadSheetResources();
-  }, [hydrated, videoType]);
+  }, [hydrated, authUser, spreadsheetId, videoType, loadSheetResources]);
 
   const handleWorksheetChange = async (nextWorksheet) => {
     setWorksheetName(nextWorksheet);

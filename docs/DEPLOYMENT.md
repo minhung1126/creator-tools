@@ -52,7 +52,7 @@ docker compose logs -f creator-tools
   實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。不要刪除或覆蓋舊的 `instagram_publish_jobs.json`；服務啟動時會以 deterministic legacy key 將歷史 job/item 匯入 SQLite，重跑 migration 不會重複建立任務或歷史通知。
 - 任務 worker 與 API 共用 SQLite；Instagram 與 YouTube 各自使用 concurrency 1 的 lane。取消是協作式 checkpoint 停止，服務重啟會把中斷中的 `running`/`cancel_requested` 任務改為 `paused`，不會自動重新發布或回滾已完成的外部操作。
 - 不要把 `.env`、`data/credential_store.json` 或 `data/sessions.json` 提交到 Git。
-- Health check：`https://creator-tools.ymin.io/api/v1/health`。
+- Health check：`https://creator-tools.ymin.io/api/v1/health`。除了 HTTP 200，也要確認 JSON 的 `ready: true`；`configuration` 與 `warnings` 只揭露設定是否齊全，不會回傳任何金鑰。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
 - Meta Instagram Login Redirect URI：`https://creator-tools.ymin.io/api/v1/instagram/auth/callback`。
 

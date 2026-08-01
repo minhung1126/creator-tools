@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, Link2, RefreshCw, Save, TestTube2, Unlink, XCircle } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
@@ -26,7 +26,7 @@ export default function InstagramSettingsPage({ refreshKey = 0 }) {
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [confirmR2Save, setConfirmR2Save] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [settings, status] = await Promise.all([api.getInstagramSettings(), api.getInstagramAuthStatus()]);
@@ -34,8 +34,8 @@ export default function InstagramSettingsPage({ refreshKey = 0 }) {
       setSavedForm(settings || {});
       setAuthStatus(status || { connected: false, account: null });
     } catch (error) { toast.error(error.message); } finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, [refreshKey]);
+  }, [toast]);
+  useEffect(() => { load(); }, [refreshKey, load]);
 
   const connect = async () => {
     try { const result = await api.getInstagramAuthUrl(); window.location.assign(result.auth_url); }

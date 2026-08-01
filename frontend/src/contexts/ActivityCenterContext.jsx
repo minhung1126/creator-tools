@@ -3,6 +3,36 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 
 const ActivityCenterContext = createContext(null);
+const TASK_PAGE_SIZE = 100;
+const TASK_PAGE_CONCURRENCY = 4;
+
+function mergeTasks(current, changed) {
+  const byId = new Map(current.map((task) => [task.id, task]));
+  changed.forEach((task) => byId.set(task.id, task));
+  return [...byId.values()];
+}
+
+async function getAllTasks() {
+  const firstPage = await api.getTasks({ offset: 0, limit: TASK_PAGE_SIZE });
+  const firstItems = firstPage.items || firstPage.tasks || [];
+  const total = Number(firstPage.total ?? firstItems.length);
+  if (total <= firstItems.length) return firstPage;
+
+  const offsets = [];
+  for (let offset = firstItems.length; offset < total; offset += TASK_PAGE_SIZE) {
+    offsets.push(offset);
+  }
+  const pages = [];
+  for (let index = 0; index < offsets.length; index += TASK_PAGE_CONCURRENCY) {
+    const chunk = offsets.slice(index, index + TASK_PAGE_CONCURRENCY);
+    pages.push(...await Promise.all(chunk.map((offset) => api.getTasks({ offset, limit: TASK_PAGE_SIZE }))));
+  }
+  return {
+    ...firstPage,
+    items: [firstItems, ...pages.map((page) => page.items || page.tasks || [])].flat(),
+    total,
+  };
+}
 
 const notificationToastType = {
   task_failed: 'error',
@@ -32,7 +62,7 @@ export function ActivityCenterProvider({ children }) {
       if (!background) setRefreshing(true);
       const results = await Promise.allSettled([
         api.getActivitySummary(),
-        api.getTasks({ offset: 0, limit: 100 }),
+        background ? api.getTasks({ offset: 0, limit: TASK_PAGE_SIZE, sort: 'updated_desc' }) : getAllTasks(),
         api.getNotifications({ offset: 0, limit: 100 }),
       ]);
       const [summaryResult, tasksResult, notificationsResult] = results;
@@ -42,7 +72,8 @@ export function ActivityCenterProvider({ children }) {
         successCount += 1;
       }
       if (tasksResult.status === 'fulfilled') {
-        setTasks(tasksResult.value.items || tasksResult.value.tasks || []);
+        const changedTasks = tasksResult.value.items || tasksResult.value.tasks || [];
+        setTasks((current) => (background ? mergeTasks(current, changedTasks) : changedTasks));
         successCount += 1;
       }
       if (notificationsResult.status === 'fulfilled') {

@@ -585,6 +585,7 @@ class TaskRepository:
         operation: Optional[str] = None,
         status: Optional[str] = None,
         batch_id: Optional[str] = None,
+        sort: str = "submission",
         offset: int = 0,
         limit: int = 50,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -602,10 +603,15 @@ class TaskRepository:
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         safe_offset = max(int(offset), 0)
         safe_limit = min(max(int(limit), 1), 100)
+        order_by = (
+            "updated_at DESC, id DESC"
+            if sort == "updated_desc"
+            else "created_at ASC, queue_sequence ASC, sequence_in_batch ASC, id ASC"
+        )
         with self.db.connection() as connection:
             total = int(connection.execute(f"SELECT COUNT(*) AS count FROM tasks {where}", values).fetchone()["count"])
             rows = connection.execute(
-                f"SELECT * FROM tasks {where} ORDER BY created_at ASC, queue_sequence ASC, sequence_in_batch ASC, id ASC LIMIT ? OFFSET ?",
+                f"SELECT * FROM tasks {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
                 [*values, safe_limit, safe_offset],
             ).fetchall()
             public = []
@@ -859,7 +865,7 @@ class TaskRepository:
             self._recompute_batch(connection, task["batch_id"], notify=False)
             return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task["id"],)).fetchone())
 
-    def claim_batch(self, queue_lane: str) -> list[dict[str, Any]]:
+    def claim_batch(self, queue_lane: str, *, limit: int = 50) -> list[dict[str, Any]]:
         """Claim the next contiguous batch in a lane as one worker unit.
 
         Instagram's Graph API can combine child requests, but doing so safely
@@ -870,14 +876,16 @@ class TaskRepository:
         """
 
         lane = queue_lane if queue_lane in LANES else "youtube"
+        safe_limit = min(max(int(limit), 1), 50)
         with self.db.transaction() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
                 WHERE queue_lane = ? AND status = 'queued' AND cancel_requested_at IS NULL
                 ORDER BY queue_sequence ASC, id ASC
+                LIMIT ?
                 """,
-                (lane,),
+                (lane, safe_limit),
             ).fetchall()
             if not rows:
                 return []
@@ -1304,6 +1312,79 @@ class TaskRepository:
                     task_id=current["id"],
                     batch_id=batch_id,
                 )
+            self._recompute_batch(connection, batch_id)
+            return len(rows)
+
+    def pause_or_cancel_claimed_tasks(
+        self,
+        batch_id: str,
+        *,
+        after_sequence: Optional[int] = None,
+        reason: str,
+    ) -> int:
+        """Pause claimed siblings while honoring cancellation requests.
+
+        Instagram tasks are claimed as one bounded worker unit.  A failure in
+        an earlier child therefore has to release the later claimed children.
+        A child that was canceled while the batch was running must become
+        canceled, not paused, otherwise the user's cancellation is silently
+        lost and the task becomes retryable again.
+        """
+
+        with self.db.transaction() as connection:
+            clauses = ["batch_id = ?", "status IN ('running','cancel_requested')"]
+            values: list[Any] = [batch_id]
+            if after_sequence is not None:
+                clauses.append("sequence_in_batch > ?")
+                values.append(after_sequence)
+            rows = connection.execute(
+                f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY sequence_in_batch", values
+            ).fetchall()
+            now = utc_now()
+            for row in rows:
+                current = _task_dict(row)
+                canceled = current["status"] == "cancel_requested"
+                next_status = "canceled" if canceled else "paused"
+                next_stage = next_status
+                connection.execute(
+                    """
+                    UPDATE tasks SET status=?,stage=?,stage_label=?,updated_at=?,finished_at=?,canceled_at=?,error=?
+                    WHERE id=? AND status IN ('running','cancel_requested')
+                    """,
+                    (
+                        next_status,
+                        next_stage,
+                        STAGE_LABELS[next_stage],
+                        now,
+                        now if canceled else None,
+                        now if canceled else None,
+                        None if canceled else _safe_error(reason),
+                        current["id"],
+                    ),
+                )
+                event_type = "canceled" if canceled else "paused_by_batch_failure"
+                self._insert_event(
+                    connection,
+                    task_id=current["id"],
+                    batch_id=batch_id,
+                    event_type=event_type,
+                    from_status=current["status"],
+                    to_status=next_status,
+                    message=current.get("cancel_reason") if canceled else (_safe_error(reason) or reason),
+                    event_key=f"task:{current['id']}:{event_type}:attempt:{current.get('attempt', 1)}",
+                    created_at=now,
+                )
+                if not canceled:
+                    self._insert_notification(
+                        connection,
+                        event_key=f"task:{current['id']}:paused:attempt:{current.get('attempt', 1)}",
+                        notification_type="task_paused",
+                        severity="warning",
+                        title="後續影片任務已暫停",
+                        message=_safe_error(reason) or "前一支影片失敗，請確認後重試。",
+                        task_id=current["id"],
+                        batch_id=batch_id,
+                    )
             self._recompute_batch(connection, batch_id)
             return len(rows)
 

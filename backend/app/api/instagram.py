@@ -188,6 +188,27 @@ def get_r2() -> R2Config:
     return R2Config(**values)
 
 
+def validate_publish_connections() -> None:
+    """Fail before creating tasks when required external services are unusable."""
+
+    try:
+        get_connected_client(refresh_if_needed=True).profile()
+    except Exception as exc:
+        logger.warning("Instagram publish preflight failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=409,
+            detail="Instagram 連線無法使用，請到 Instagram / R2 設定重新授權後再試。",
+        ) from exc
+    try:
+        test_r2_connection(get_r2())
+    except Exception as exc:
+        logger.warning("R2 publish preflight failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=409,
+            detail="R2 連線無法使用，請到 Instagram / R2 設定檢查並測試 R2 後再試。",
+        ) from exc
+
+
 def _unified_instagram_batch_specs(job: dict) -> list[dict]:
     """Translate the existing preparation result into one SQLite task/video."""
 
@@ -574,6 +595,7 @@ def create_publish_job(payload: PublishInput, creds: Credentials = Depends(requi
         raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
     if not any(normalize_text(item.person) for item in payload.assignments):
         raise HTTPException(status_code=400, detail="請至少為一支影片指定人物")
+    validate_publish_connections()
     try:
         job = prepare_job(
             credentials=creds,
@@ -639,8 +661,7 @@ def stop_blocking_publish_jobs(job_id: str, creds: Credentials = Depends(require
         {
             "batch_id": job_id,
             "blocked_item_count": len(blocking_items),
-            "ready_to_recreate": result["cancel_requested_count"] == 0
-            and result["canceled_immediately_count"] > 0,
+            "ready_to_recreate": result["cancel_requested_count"] == 0 and result["canceled_immediately_count"] > 0,
         }
     )
     return result

@@ -58,3 +58,28 @@ def test_tracker_without_meta_header_still_counts_local_requests(tmp_path):
     assert usage["requests_today"] == 1
     assert usage["meta_usage"]["available"] is False
     assert usage["usage_percent"] is None
+
+
+def test_tracker_counts_batch_children_and_outer_http_request(tmp_path):
+    tracker = InstagramApiUsageTracker(tmp_path / "instagram_api_usage.json")
+    batch_response = response(
+        headers={"x-app-usage": json.dumps({"call_volume": 22, "cpu_time": 3, "total_time": 4})},
+        payload=[
+            {"code": 200, "body": json.dumps({"id": "container-1"})},
+            {"code": 200, "body": json.dumps({"id": "container-2"})},
+        ],
+    )
+
+    usage = tracker.record_batch_response(
+        [
+            {"method": "POST", "path": "user-1/media"},
+            {"method": "POST", "path": "user-1/media"},
+        ],
+        batch_response,
+        batch_response.json(),
+    )
+
+    assert usage["requests_today"] == 2
+    assert usage["http_requests_today"] == 1
+    assert usage["batch_http_requests_today"] == 1
+    assert usage["methods"] == [{"endpoint": "POST create media container", "calls": 2}]

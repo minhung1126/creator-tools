@@ -72,6 +72,19 @@ def test_list_tasks_shows_oldest_submitted_task_first(tmp_path):
     ]
 
 
+def test_list_tasks_can_poll_most_recent_updates(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        make_specs(2),
+    )
+    repo.update_task(created["tasks"][0]["id"], stage="updating_metadata")
+
+    items, _ = repo.list_tasks(limit=1, sort="updated_desc")
+
+    assert [task["id"] for task in items] == [created["tasks"][0]["id"]]
+
+
 def test_retry_batch_requeues_and_claims_tasks_in_batch_order(tmp_path):
     repo = make_repo(tmp_path)
     created = repo.create_batch_and_tasks(
@@ -130,6 +143,35 @@ def test_lanes_are_independent_and_claim_keeps_order(tmp_path):
     assert first_instagram["id"] == instagram["tasks"][0]["id"]
     assert first_youtube["id"] == youtube["tasks"][0]["id"]
     assert repo.claim_next("instagram")["id"] == instagram["tasks"][1]["id"]
+
+
+def test_instagram_batch_claim_is_bounded_and_preserves_remaining_order(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "instagram", "operation": "instagram.reels_publish", "failure_policy": "pause_remaining_in_batch"},
+        make_specs(55, "instagram", "instagram.reels_publish"),
+    )
+
+    first_claim = repo.claim_batch("instagram", limit=50)
+
+    assert len(first_claim) == 50
+    assert [task["id"] for task in first_claim] == [task["id"] for task in created["tasks"][:50]]
+    assert [task["status"] for task in repo.get_batch_internal(created["batch"]["id"])["tasks"][-5:]] == ["queued"] * 5
+
+
+def test_batch_failure_does_not_overwrite_a_claimed_sibling_cancellation(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "instagram", "operation": "instagram.reels_publish", "failure_policy": "pause_remaining_in_batch"},
+        make_specs(3, "instagram", "instagram.reels_publish"),
+    )
+    claimed = repo.claim_batch("instagram")
+    repo.request_cancel(claimed[1]["id"])
+
+    repo.pause_or_cancel_claimed_tasks(created["batch"]["id"], after_sequence=1, reason="前一支失敗")
+
+    tasks = repo.get_batch_internal(created["batch"]["id"])["tasks"]
+    assert [task["status"] for task in tasks] == ["running", "canceled", "paused"]
 
 
 def test_queued_cancel_is_never_claimed_and_running_cancel_is_cooperative(tmp_path):
