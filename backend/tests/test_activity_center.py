@@ -106,6 +106,22 @@ def test_cancel_all_covers_both_lanes_and_is_idempotent(tmp_path):
     assert repo.activity_summary()["tasks"]["canceled"] == 4
 
 
+def test_cancel_all_does_not_repeat_a_running_cancel_request(tmp_path):
+    repo = make_repo(tmp_path)
+    repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        make_specs(1),
+    )
+    repo.claim_next("youtube")
+    first = repo.cancel_all()
+    second = repo.cancel_all()
+    assert first["requested_count"] == 1
+    assert first["cancel_requested_count"] == 1
+    assert second["requested_count"] == 1
+    assert second["cancel_requested_count"] == 1
+    assert NotificationRepository(repo.db).unread_count() == 1
+
+
 def test_retry_preserves_checkpoint_but_get_task_is_a_safe_public_dto(tmp_path):
     repo = make_repo(tmp_path)
     created = repo.create_batch_and_tasks(
@@ -125,6 +141,17 @@ def test_retry_preserves_checkpoint_but_get_task_is_a_safe_public_dto(tmp_path):
     assert retried["status"] == "queued"
     assert retried["attempt"] == 2
     assert retried["checkpoint"]["media_id"] == "media-1"
+
+
+def test_all_skipped_batch_gets_one_summary_notification(tmp_path):
+    repo = make_repo(tmp_path)
+    repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        make_specs(1, status="skipped"),
+    )
+    items, total = NotificationRepository(repo.db).list()
+    assert total == 1
+    assert items[0]["type"] == "batch_completed"
 
 
 def test_notification_event_key_is_deduplicated(tmp_path):

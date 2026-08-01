@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TaskDetail from '../components/TaskDetail';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
 
@@ -56,7 +57,7 @@ const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
 
 export default function InstagramReelsPage({ setActiveTab }) {
   const toast = useToast();
-  const { refresh, tasks } = useActivityCenter();
+  const { refresh, tasks, cancelTask, retryTask } = useActivityCenter();
   const remembered = useMemo(readRememberedConfig, []);
   const [config, setConfig] = useState({
     drive_folder_id: remembered.drive_folder_id || '',
@@ -152,6 +153,8 @@ export default function InstagramReelsPage({ setActiveTab }) {
         file_id: task.video_id,
         file_name: task.video_title,
         status: task.status === 'succeeded' || task.status === 'succeeded_with_warnings' ? 'published' : task.status,
+        task_status: task.status,
+        retryable: task.retryable,
         stage: task.stage,
         stage_label: task.stage_label,
         progress_percent: task.progress_percent,
@@ -420,6 +423,14 @@ export default function InstagramReelsPage({ setActiveTab }) {
     }
   };
 
+  const runTaskAction = async (action, taskId) => {
+    try {
+      await action(taskId);
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+
   const selectableVideos = videos.filter((video) => !video.already_published);
   const assignedCount = selectableVideos.filter((video) => assignments[video.id]).length;
   const jobIsActive = Boolean(job?.status && ACTIVE_JOB_STATUSES.has(job.status));
@@ -520,7 +531,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
       <div className="glass-panel execution-bar"><div><strong style={{ color: '#fff' }}>將處理目前清單中的 {assignedCount} 支影片</strong><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>人物為「不發布」的影片會安全略過。</p></div><button className="btn btn-success" onClick={() => setConfirmPublish(true)} disabled={publishing || jobIsActive || !assignedCount}><Send size={18} />{publishing || jobIsActive ? '處理中…' : '建立發布工作'}</button></div>
     </div>}
 
-    {job && <section className="glass-panel card-padding" style={{ display: 'grid', gap: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}><div><h2>發布工作 {jobIsActive ? '處理中' : job.status === 'paused' ? '已暫停' : job.status === 'failed' ? '失敗' : '結果'}</h2><p className="section-desc">Job ID：{job.id}</p>{job.r2_cleanup_failed_count > 0 && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.r2_cleanup_failed_count} 支影片尚未從 R2 清理，可重試清理。</p>}{(job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.drive_move_pending_count || job.drive_move_failed_count} 支影片尚未移入 Drive Published，可重試搬移。</p>}</div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary" onClick={reloadJob}><RefreshCw size={16} />重新讀取</button>{(job.status === 'paused' || job.r2_cleanup_failed_count > 0 || job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <button className="btn btn-primary" onClick={retryJob} disabled={publishing || jobIsActive}><Send size={16} />重試未完成項目</button>}</div></div>{job.results?.map((item) => <div key={`${item.file_id}-${item.sequence}`} className="glass-panel" style={{ padding: 12, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}><div><strong>{item.sequence}. {item.file_name || item.file_id}</strong><p className="section-desc">{item.person} · {STATUS_LABELS[item.status] || item.status}</p>{item.stage_label && item.stage !== 'completed' && <p className="section-desc">目前步驟：{item.stage_label}</p>}{item.error && <p style={{ color: '#f87171' }}>錯誤：{item.error}</p>}{item.drive_move_error && <p style={{ color: '#fbbf24' }}>Drive：{item.drive_move_error}</p>}{item.drive_moved && <p className="section-desc">已移入 Drive Published</p>}{item.r2_delete_error && <p style={{ color: '#fbbf24' }}>R2：{item.r2_delete_error}</p>}{item.r2_deleted && <p className="section-desc">R2 暫存影片已刪除</p>}{item.preflight && <p className="section-desc">{item.preflight.width || '?'}×{item.preflight.height || '?'} · {item.preflight.duration_seconds ? `${item.preflight.duration_seconds} 秒` : 'duration 未提供'} · {item.preflight.size_bytes || 0} bytes</p>}</div><span className={`badge ${item.stage === 'r2_cleanup_failed' || item.stage === 'drive_move_failed' || item.status === 'failed' ? 'badge-disconnected' : item.status === 'published' || item.stage === 'completed' ? 'badge-connected' : 'badge-info'}`}>{item.stage_label || STATUS_LABELS[item.status] || item.status}</span></div>)}</section>}
+    {job && <section className="glass-panel card-padding" style={{ display: 'grid', gap: 12 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}><div><h2>發布工作 {jobIsActive ? '處理中' : job.status === 'paused' ? '已暫停' : job.status === 'failed' ? '失敗' : '結果'}</h2><p className="section-desc">Job ID：{job.id}</p>{job.r2_cleanup_failed_count > 0 && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.r2_cleanup_failed_count} 支影片尚未從 R2 清理，可重試清理。</p>}{(job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <p className="section-desc" style={{ color: '#fbbf24' }}>有 {job.drive_move_pending_count || job.drive_move_failed_count} 支影片尚未移入 Drive Published，可重試搬移。</p>}</div><div style={{ display: 'flex', gap: 8 }}><button className="btn btn-secondary" onClick={reloadJob}><RefreshCw size={16} />重新讀取</button>{(job.status === 'paused' || job.r2_cleanup_failed_count > 0 || job.drive_move_failed_count > 0 || job.drive_move_pending_count > 0) && <button className="btn btn-primary" onClick={retryJob} disabled={publishing || jobIsActive}><Send size={16} />重試未完成項目</button>}</div></div>{job.results?.map((item) => { const taskStatus = item.task_status || (item.status === 'published' ? 'succeeded' : item.status); const task = { id: item.task_id, batch_id: job.batch_id || job.id, batch_short_code: (job.batch_id || job.id || '').slice(0, 8).toUpperCase(), platform: 'instagram', operation: 'instagram.reels_publish', video_id: item.file_id, video_title: item.file_name, status: taskStatus, stage: item.stage, stage_label: item.stage_label, progress_percent: item.progress_percent, retryable: item.retryable, error: item.error, cancel_too_late: item.cancel_too_late }; return <div key={`${item.file_id}-${item.sequence}`} className="glass-panel" style={{ padding: 12, display: 'grid', gap: 10 }}><div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}><div><strong>{item.sequence}. {item.file_name || item.file_id}</strong><p className="section-desc">{item.person} · {STATUS_LABELS[item.status] || item.status}</p>{item.stage_label && item.stage !== 'completed' && <p className="section-desc">目前步驟：{item.stage_label}</p>}{item.error && <p style={{ color: '#f87171' }}>錯誤：{item.error}</p>}{item.drive_move_error && <p style={{ color: '#fbbf24' }}>Drive：{item.drive_move_error}</p>}{item.drive_moved && <p className="section-desc">已移入 Drive Published</p>}{item.r2_delete_error && <p style={{ color: '#fbbf24' }}>R2：{item.r2_delete_error}</p>}{item.r2_deleted && <p className="section-desc">R2 暫存影片已刪除</p>}{item.preflight && <p className="section-desc">{item.preflight.width || '?'}×{item.preflight.height || '?'} · {item.preflight.duration_seconds ? `${item.preflight.duration_seconds} 秒` : 'duration 未提供'} · {item.preflight.size_bytes || 0} bytes</p>}</div><span className={`badge ${item.stage === 'r2_cleanup_failed' || item.stage === 'drive_move_failed' || item.status === 'failed' ? 'badge-disconnected' : item.status === 'published' || item.stage === 'completed' ? 'badge-connected' : 'badge-info'}`}>{item.stage_label || STATUS_LABELS[item.status] || item.status}</span></div>{item.task_id && <TaskDetail task={task} compact onCancel={() => runTaskAction(cancelTask, item.task_id)} onRetry={() => runTaskAction(retryTask, item.task_id)} />}</div>; })}</section>}
     <ConfirmDialog open={confirmPublish} title="建立 Instagram 發布工作" message={`將依 Drive 檔名由 A 到 Z 處理 ${assignedCount} 支 Reels，確定繼續？`} confirmText="開始處理" onConfirm={publish} onCancel={() => setConfirmPublish(false)} />
     <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
   </div>;

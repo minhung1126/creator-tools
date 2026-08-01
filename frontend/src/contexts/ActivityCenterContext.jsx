@@ -51,7 +51,9 @@ export function ActivityCenterProvider({ children }) {
         setUnreadCount(notificationsResult.value.unread_count ?? nextNotifications.filter((item) => !item.read_at).length);
         const nextKeys = new Set(nextNotifications.map((item) => item.event_key));
         if (seenNotificationKeys.current === null) {
-          nextKeys.forEach((key) => seenNotificationKeys.current.add(key));
+          // Existing persisted notices are the initial snapshot, not live
+          // arrivals.  Seed the set without showing a toast on first load.
+          seenNotificationKeys.current = nextKeys;
         } else {
           nextNotifications
             .filter((item) => !seenNotificationKeys.current.has(item.event_key))
@@ -59,7 +61,7 @@ export function ActivityCenterProvider({ children }) {
               const type = notificationToastType[item.type] || (item.severity === 'error' ? 'error' : item.severity === 'warning' ? 'warning' : 'info');
               toast[type]?.(`${item.title}：${item.message}`);
             });
-          seenNotificationKeys.current = nextKeys;
+          nextKeys.forEach((key) => seenNotificationKeys.current.add(key));
         }
         successCount += 1;
       }

@@ -24,6 +24,19 @@ function isCanceled(task) {
   return ['canceled', 'canceled_with_warnings'].includes(task.status);
 }
 
+function deriveBatchStatus(batchTasks) {
+  if (!batchTasks.length) return 'queued';
+  if (batchTasks.some((task) => task.status === 'cancel_requested')) return 'cancel_requested';
+  if (batchTasks.some((task) => task.status === 'running')) return 'running';
+  if (batchTasks.some((task) => task.status === 'queued')) return 'queued';
+  if (batchTasks.some((task) => task.status === 'paused')) return 'paused';
+  if (batchTasks.some((task) => ['canceled', 'canceled_with_warnings'].includes(task.status))) {
+    return batchTasks.every((task) => ['canceled', 'canceled_with_warnings'].includes(task.status)) ? 'canceled' : 'partially_canceled';
+  }
+  if (batchTasks.some((task) => task.status === 'failed')) return 'failed';
+  return batchTasks.some((task) => task.status === 'succeeded_with_warnings') ? 'completed_with_warnings' : 'completed';
+}
+
 export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focusedBatchId }) {
   const {
     tasks, summary, loading, refreshing, error, refresh, cancelTask, retryTask, cancelAll, cancelBatch, retryBatch,
@@ -75,17 +88,19 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
   }, {}), [filteredTasks]);
 
   const activeTasks = tasks.filter((task) => TASK_ACTIVE_STATUSES.includes(task.status));
+  const selectedBatchTasks = selectedBatchId ? tasks.filter((task) => task.batch_id === selectedBatchId) : [];
   const selectedBatch = selectedBatchId ? {
     id: selectedBatchId,
-    batch_short_code: tasks.find((task) => task.batch_id === selectedBatchId)?.batch_short_code,
-    platform: tasks.find((task) => task.batch_id === selectedBatchId)?.platform,
-    status: 'running',
-    tasks: tasks.filter((task) => task.batch_id === selectedBatchId),
+    batch_short_code: selectedBatchTasks[0]?.batch_short_code,
+    platform: selectedBatchTasks[0]?.platform,
+    status: deriveBatchStatus(selectedBatchTasks),
+    tasks: selectedBatchTasks,
   } : null;
   const runningCount = activeTasks.filter((task) => task.status === 'running').length;
+  const unfinishedTasks = tasks.filter((task) => ['queued', 'running', 'cancel_requested', 'paused'].includes(task.status));
   const queuedPausedCount = tasks.filter((task) => ['queued', 'paused'].includes(task.status)).length;
-  const instagramCount = activeTasks.filter((task) => task.platform === 'instagram').length;
-  const youtubeCount = activeTasks.filter((task) => task.platform === 'youtube').length;
+  const instagramCount = unfinishedTasks.filter((task) => task.platform === 'instagram').length;
+  const youtubeCount = unfinishedTasks.filter((task) => task.platform === 'youtube').length;
 
   const execute = async (action, id) => {
     setBusyId(id);
@@ -120,7 +135,7 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
       />
       <div className="task-queue-header">
         <div><div className="section-header"><ListTodo size={24} color="var(--primary)" /><h1>任務隊列</h1></div><p className="section-desc">每支影片都是獨立任務；批次只用來檢視順序與整批操作。</p></div>
-        <div className="task-queue-header-actions"><button className="btn btn-secondary" type="button" onClick={() => refresh()} disabled={refreshing}><RefreshCw size={15} className={refreshing ? 'spin' : ''} />重新整理</button><button className="btn btn-danger" type="button" disabled={!activeTasks.length || busyId === 'all'} onClick={() => setCancelAllOpen(true)}><XCircle size={15} />取消所有未完成任務</button></div>
+        <div className="task-queue-header-actions"><button className="btn btn-secondary" type="button" onClick={() => refresh()} disabled={refreshing}><RefreshCw size={15} className={refreshing ? 'spin' : ''} />重新整理</button><button className="btn btn-danger" type="button" disabled={!unfinishedTasks.length || busyId === 'all'} onClick={() => setCancelAllOpen(true)}><XCircle size={15} />取消所有未完成任務</button></div>
       </div>
       <div className="task-summary-strip"><span>未完成 <strong>{summary?.tasks?.active ?? activeTasks.length}</strong></span><span>需要處理 <strong>{(summary?.tasks?.paused || 0) + (summary?.tasks?.failed || 0)}</strong></span><span>已完成 <strong>{summary?.tasks?.completed || 0}</strong></span><span>通知未讀 <strong>{summary?.unread_notification_count || 0}</strong></span></div>
       <div className="task-filter-bar">

@@ -15,9 +15,8 @@ describe('ActivityCenterProvider', () => {
   it('loads the durable summary and notification count', async () => {
     vi.spyOn(api, 'getActivitySummary').mockResolvedValue({ tasks: { active: 2 } });
     vi.spyOn(api, 'getTasks').mockResolvedValue({ items: [] });
-    vi.spyOn(api, 'getNotifications').mockResolvedValue({ items: [], unread_count: 3 });
+    vi.spyOn(api, 'getNotifications').mockResolvedValue({ items: [{ event_key: 'existing', read_at: null }], unread_count: 3 });
     render(<ToastProvider><ActivityCenterProvider><Probe /></ActivityCenterProvider></ToastProvider>);
     await waitFor(() => expect(screen.getByText('2:3')).toBeInTheDocument());
   });
 });
-

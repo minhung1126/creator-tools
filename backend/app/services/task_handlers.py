@@ -279,10 +279,10 @@ def process_youtube_metadata_task(
         context.raise_if_cancel_requested()
         context.update(stage="validating_video", progress_percent=20)
         details = fetch_video_details(credentials, [task.get("video_id")])
+        context.raise_if_cancel_requested()
         current = next((item for item in details if item.get("id") == task.get("video_id")), None)
         if not current:
             return context.finish("skipped", stage="skipped", progress_percent=100, error="YouTube 找不到此影片或目前帳號無權存取。", retryable=False)
-        context.raise_if_cancel_requested()
         context.update(stage="updating_metadata", progress_percent=70)
         update_single_video_metadata(
             credentials,
@@ -316,6 +316,8 @@ def process_youtube_publish_cleanup_task(
     try:
         context.raise_if_cancel_requested()
         current_details = fetch_video_details(credentials, [task.get("video_id")])
+        if not checkpoint.get("privacy_updated_at"):
+            context.raise_if_cancel_requested()
         current_video = next((item for item in current_details if item.get("id") == task.get("video_id")), None)
         if not current_video:
             return context.finish("skipped", stage="skipped", progress_percent=100, error="YouTube 找不到此影片或目前帳號無權存取。", retryable=False)

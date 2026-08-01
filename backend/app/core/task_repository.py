@@ -338,6 +338,7 @@ class TaskRepository:
         *,
         batch_id: Optional[str] = None,
         legacy_job_id: Optional[str] = None,
+        notify: bool = True,
     ) -> dict[str, Any]:
         """Insert one batch and every child task in a single transaction."""
 
@@ -370,7 +371,7 @@ class TaskRepository:
                     platform,
                     operation,
                     failure_policy,
-                    "queued" if any(spec.get("status", "queued") in UNFINISHED_STATUSES for spec in specs) else "completed",
+                    "queued" if specs else "completed",
                     len(specs),
                     now,
                     now,
@@ -460,7 +461,7 @@ class TaskRepository:
                 tasks.append(
                     _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
                 )
-            final_batch = self._recompute_batch(connection, actual_batch_id, notify=False)
+            final_batch = self._recompute_batch(connection, actual_batch_id, notify=notify)
             return {"batch": final_batch, "tasks": tasks, "created": True}
 
     def _tasks_for_batch_connection(self, connection, batch_id: str) -> list[dict[str, Any]]:
@@ -568,7 +569,7 @@ class TaskRepository:
         }
         safe["batch_short_code"] = _short_code(str(batch.get("id") or ""))
         safe["tasks"] = [self.public_task(task) for task in batch.get("tasks", [])]
-        counts: dict[str, int] = {}
+        counts: dict[str, int] = dict(batch.get("counts") or {})
         for task in batch.get("tasks", []):
             counts[task.get("status", "unknown")] = counts.get(task.get("status", "unknown"), 0) + 1
         safe["counts"] = counts
@@ -620,7 +621,17 @@ class TaskRepository:
                 f"SELECT * FROM task_batches {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 [*values, safe_limit, safe_offset],
             ).fetchall()
-            return [self.public_batch(_batch_dict(row)) for row in rows], total
+            batches = []
+            for row in rows:
+                batch = _batch_dict(row)
+                count_rows = connection.execute(
+                    "SELECT status, COUNT(*) AS count FROM tasks WHERE batch_id = ? GROUP BY status",
+                    (batch["id"],),
+                ).fetchall()
+                batch["counts"] = {str(count_row["status"]): int(count_row["count"]) for count_row in count_rows}
+                batch["tasks"] = []
+                batches.append(self.public_batch(batch))
+            return batches, total
 
     def update_task(
         self,
@@ -953,9 +964,16 @@ class TaskRepository:
             requested = 0
             now = utc_now()
             touched_batches: set[str] = set()
+            transitioned = 0
             for row in rows:
                 current = _task_dict(row)
                 touched_batches.add(current["batch_id"])
+                if current["status"] == "cancel_requested":
+                    # It is already in the requested state. Keep it in the
+                    # response for the complete target-set semantics, but do
+                    # not append another event or notification on a repeat.
+                    requested += 1
+                    continue
                 if current["status"] in {"queued", "paused"}:
                     connection.execute(
                         """
@@ -967,19 +985,16 @@ class TaskRepository:
                     immediate += 1
                     next_status = "canceled"
                 else:
-                    if current["status"] == "running":
-                        requested += 1
-                    else:
-                        requested += 1
-                    if current["status"] != "cancel_requested":
-                        connection.execute(
-                            """
-                            UPDATE tasks SET status='cancel_requested',stage='cancel_requested',stage_label=?,
-                              updated_at=?,cancel_requested_at=?,cancel_scope='all',cancel_reason=? WHERE id=?
-                            """,
-                            (STAGE_LABELS["cancel_requested"], now, now, _safe_error(reason), current["id"]),
-                        )
+                    requested += 1
+                    connection.execute(
+                        """
+                        UPDATE tasks SET status='cancel_requested',stage='cancel_requested',stage_label=?,
+                          updated_at=?,cancel_requested_at=?,cancel_scope='all',cancel_reason=? WHERE id=?
+                        """,
+                        (STAGE_LABELS["cancel_requested"], now, now, _safe_error(reason), current["id"]),
+                    )
                     next_status = "cancel_requested"
+                transitioned += 1
                 self._insert_event(
                     connection,
                     task_id=current["id"],
@@ -994,8 +1009,8 @@ class TaskRepository:
             for batch_id in touched_batches:
                 self._recompute_batch(connection, batch_id)
             affected = len(rows)
-            global_event = f"cancel-all:{now}"
-            if affected:
+            global_event = f"cancel-all:{','.join(sorted(current['id'] for current in (_task_dict(row) for row in rows)))}"
+            if transitioned:
                 self._insert_notification(
                     connection,
                     event_key=global_event,
@@ -1339,9 +1354,11 @@ class TaskRepository:
         with self.db.connection() as connection:
             rows = connection.execute(
                 """
-                SELECT * FROM tasks
-                WHERE platform='instagram' AND status IN ('succeeded','succeeded_with_warnings')
-                ORDER BY COALESCE(finished_at, updated_at) DESC
+                SELECT tasks.*, task_batches.legacy_job_id AS legacy_job_id
+                FROM tasks
+                JOIN task_batches ON task_batches.id = tasks.batch_id
+                WHERE tasks.platform='instagram' AND tasks.status IN ('succeeded','succeeded_with_warnings')
+                ORDER BY COALESCE(tasks.finished_at, tasks.updated_at) DESC
                 """
             ).fetchall()
             history = []
@@ -1356,6 +1373,7 @@ class TaskRepository:
                         "record_id": f"{task['batch_id']}:{task.get('video_id') or task['id']}",
                         "job_id": task["batch_id"],
                         "batch_id": task["batch_id"],
+                        "legacy_job_id": task.get("legacy_job_id"),
                         "created_at": task.get("created_at"),
                         "updated_at": task.get("updated_at"),
                         "published_at": checkpoint.get("published_at") or task.get("finished_at"),
@@ -1537,6 +1555,7 @@ def migrate_legacy_instagram_jobs(
             specs,
             batch_id=f"legacy_batch_{stable_batch[:28]}",
             legacy_job_id=str(legacy_job_id),
+            notify=False,
         )
         if result.get("created"):
             imported += 1

@@ -9,6 +9,7 @@ export const TASK_STATUS_LABELS = {
   succeeded_with_warnings: '已完成但有警告',
   canceled: '已取消',
   canceled_with_warnings: '已取消但清理有警告',
+  partially_canceled: '部分取消',
 };
 
 export const TASK_OPERATION_LABELS = {
@@ -42,4 +43,3 @@ export function isTaskActive(task) {
 export function isTaskRetryable(task) {
   return Boolean(task?.retryable && ['failed', 'paused', 'canceled', 'canceled_with_warnings', 'succeeded_with_warnings'].includes(task?.status));
 }
-

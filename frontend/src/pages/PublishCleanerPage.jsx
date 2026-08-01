@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
+import TaskDetail from '../components/TaskDetail';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
@@ -20,7 +21,7 @@ import {
 
 export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab }) {
   const toast = useToast();
-  const { refresh } = useActivityCenter();
+  const { refresh, tasks, cancelTask, retryTask } = useActivityCenter();
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
@@ -32,6 +33,7 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
+  const [taskBusyId, setTaskBusyId] = useState(null);
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
@@ -76,6 +78,17 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   };
 
   const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
+  const resultTasks = result?.batch_id ? tasks.filter((task) => task.batch_id === result.batch_id) : [];
+  const runTaskAction = async (action, taskId) => {
+    setTaskBusyId(taskId);
+    try {
+      await action(taskId);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setTaskBusyId(null);
+    }
+  };
 
   const metadataBlock = (title, description) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -188,6 +201,7 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
           <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> 已建立公開與清理任務</h3>
           <p style={{ color: 'var(--text-muted)' }}>批次 ID：{result.batch_id} · 已建立 {result.total_count || result.task_ids?.length || 0} 支影片任務，其中 {result.skipped_count || 0} 支略過。</p>
           <button className="btn btn-secondary" type="button" style={{ marginTop: 12 }} onClick={() => setActiveTab?.('task_queue')}>到任務隊列查看</button>
+          {resultTasks.map((task) => <TaskDetail key={task.id} task={task} compact busy={taskBusyId === task.id} onCancel={() => runTaskAction(cancelTask, task.id)} onRetry={() => runTaskAction(retryTask, task.id)} />)}
           {result.results && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 16 }}>
             {result.results.map((item, index) => (
               <div key={`${item.video_id}-${index}`} className="result-item" style={{ alignItems: 'flex-start', background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>

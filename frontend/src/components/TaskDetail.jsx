@@ -13,6 +13,7 @@ export default function TaskDetail({ task, onCancel, onRetry, busy = false, comp
   const [cancelOpen, setCancelOpen] = useState(false);
   if (!task) return null;
   const canCancel = ['queued', 'running', 'paused'].includes(task.status);
+  const cancelRequested = task.status === 'cancel_requested';
   const retryable = isTaskRetryable(task);
   return (
     <>
@@ -47,11 +48,10 @@ export default function TaskDetail({ task, onCancel, onRetry, busy = false, comp
         </div>
         <div className="task-detail-actions">
           {retryable && <button className="btn btn-secondary" type="button" disabled={busy} onClick={() => onRetry?.(task)}><RefreshCw size={14} />重試</button>}
-          {canCancel && <button className="btn btn-danger" type="button" disabled={busy} onClick={() => setCancelOpen(true)}><Ban size={14} />{task.status === 'cancel_requested' ? '取消中…' : '取消'}</button>}
+          {(canCancel || cancelRequested) && <button className="btn btn-danger" type="button" disabled={busy || cancelRequested} onClick={() => setCancelOpen(true)}><Ban size={14} />{cancelRequested ? '取消中…' : '取消'}</button>}
           {task.status === 'succeeded' && <span className="task-success-note"><CheckCircle2 size={14} />外部操作已完成</span>}
         </div>
       </div>
     </>
   );
 }
-

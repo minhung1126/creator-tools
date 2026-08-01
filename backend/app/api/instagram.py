@@ -300,6 +300,8 @@ def _legacy_job_adapter(batch_id: str) -> dict:
                 "file_id": task.get("video_id"),
                 "file_name": task.get("video_title"),
                 "status": compatibility_status,
+                "task_status": status,
+                "retryable": task.get("retryable"),
                 "stage": task.get("stage"),
                 "stage_label": task.get("stage_label"),
                 "progress_percent": task.get("progress_percent"),
@@ -573,6 +575,9 @@ def get_publish_history(creds: Credentials = Depends(require_credentials)):
     records = instagram_publish_store.list_history()
     existing_keys = {(record.get("job_id"), record.get("file_id")) for record in records}
     for record in task_repository.list_instagram_history():
+        legacy_key = (record.get("legacy_job_id"), record.get("file_id"))
+        if record.get("legacy_job_id") and legacy_key in existing_keys:
+            continue
         if (record.get("job_id"), record.get("file_id")) not in existing_keys:
             records.append(record)
     records.sort(key=lambda record: record.get("published_at") or "", reverse=True)
@@ -583,6 +588,16 @@ def get_publish_history(creds: Credentials = Depends(require_credentials)):
 def delete_publish_history(job_id: str, file_id: str, creds: Credentials = Depends(require_credentials)):
     record = instagram_publish_store.get_history_item(job_id, file_id)
     sqlite_record = False
+    migrated_record = None
+    if record:
+        migrated_record = next(
+            (
+                item
+                for item in task_repository.list_instagram_history()
+                if item.get("legacy_job_id") == job_id and item.get("file_id") == file_id
+            ),
+            None,
+        )
     if not record:
         record = next(
             (
@@ -621,6 +636,8 @@ def delete_publish_history(job_id: str, file_id: str, creds: Credentials = Depen
             deleted = instagram_publish_store.delete_history_item(job_id, file_id)
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if deleted and migrated_record:
+            task_repository.release_instagram_history(migrated_record["batch_id"], file_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="找不到 Instagram 歷史紀錄")
     return {
