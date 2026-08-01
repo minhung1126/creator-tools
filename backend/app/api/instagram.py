@@ -1,12 +1,7 @@
 import hashlib
 import logging
-import mimetypes
-import re
 import secrets
-import tempfile
-from collections import Counter
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from threading import RLock
 from typing import List, Optional
 from urllib.parse import quote
@@ -26,7 +21,7 @@ from backend.app.core.security import (
     sign_timed_data,
     verify_timed_data,
 )
-from backend.app.services.drive_service import download_drive_file, list_drive_videos
+from backend.app.services.drive_service import list_drive_videos
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -37,17 +32,11 @@ from backend.app.services.instagram_oauth_service import (
 )
 from backend.app.services.instagram_publish_service import prepare_job, process_job, public_job
 from backend.app.services.instagram_service import InstagramClient
-from backend.app.services.r2_service import R2Config, delete_public_file, test_r2_connection, upload_public_file
-from backend.app.services.sheets_service import (
-    get_all_rows_for_sheet,
-    get_sheet_headers,
-    matches_team_person,
-    normalize_text,
-)
+from backend.app.services.r2_service import R2Config, test_r2_connection
+from backend.app.services.sheets_service import normalize_text
 
 router = APIRouter(prefix="/instagram", tags=["Instagram Reels"])
 logger = logging.getLogger(__name__)
-MAX_FILE_SIZE = 1024 * 1024 * 1024
 OAUTH_FLOW_COOKIE = "creator_tools_instagram_oauth_flow"
 OAUTH_FLOW_MAX_AGE = 10 * 60
 TOKEN_REFRESH_WINDOW = timedelta(days=7)
@@ -465,133 +454,4 @@ def retry_publish_job(job_id: str, creds: Credentials = Depends(require_credenti
 
 @router.post("/publish-reels")
 def publish_reels(payload: PublishInput, creds: Credentials = Depends(require_credentials)):
-    spreadsheet = payload.spreadsheet_url_or_id or cfg("instagram_spreadsheet_id")
-    folder = payload.drive_folder_url_or_id or cfg("instagram_drive_folder_id")
-    if not spreadsheet or not folder:
-        raise HTTPException(status_code=400, detail="Google Sheet 與 Drive 資料夾皆為必填")
-    active = [
-        (item.file_id, normalize_text(item.person)) for item in payload.assignments if normalize_text(item.person)
-    ]
-    if not active:
-        raise HTTPException(status_code=400, detail="請至少為一支影片指定人物")
-    team = normalize_text(payload.team)
-    caption_column = normalize_text(payload.caption_column)
-    try:
-        headers = get_sheet_headers(creds, spreadsheet, payload.worksheet_name)
-        missing = [name for name in ("所屬團體", "人", caption_column) if name not in headers]
-        if missing:
-            raise HTTPException(status_code=400, detail=f"工作表缺少欄位：{', '.join(missing)}")
-        rows = get_all_rows_for_sheet(creds, spreadsheet, payload.worksheet_name)
-        files = list_drive_videos(creds, folder)
-        file_map = {item["id"]: item for item in files}
-        positions = {item["id"]: index for index, item in enumerate(files)}
-        active.sort(key=lambda item: positions.get(item[0], 999999))
-        prepared, results = [], []
-        for file_id, person in active:
-            file = file_map.get(file_id)
-            if not file:
-                results.append(
-                    {"file_id": file_id, "person": person, "status": "skipped", "reason": "Drive 找不到影片"}
-                )
-                continue
-            suffix = Path(file["name"]).suffix.lower()
-            if suffix not in {".mp4", ".mov"} or file["size"] > MAX_FILE_SIZE:
-                results.append(
-                    {
-                        "file_id": file_id,
-                        "file_name": file["name"],
-                        "person": person,
-                        "status": "skipped",
-                        "reason": "影片需為 MP4/MOV 且不超過 1 GB",
-                    }
-                )
-                continue
-            matching = [row for row in rows if matches_team_person(row, team, person)]
-            captions = {str(row.get(caption_column) or "") for row in matching}
-            caption = next(iter(captions), "")
-            if len(captions) != 1 or not caption.strip():
-                results.append(
-                    {
-                        "file_id": file_id,
-                        "file_name": file["name"],
-                        "person": person,
-                        "status": "skipped",
-                        "reason": "找不到唯一且非空白的內文",
-                    }
-                )
-                continue
-            prepared.append((file, person, caption))
-        client = get_connected_client(refresh_if_needed=True)
-        r2 = get_r2()
-        paused = False
-        for index, (file, person, caption) in enumerate(prepared):
-            if paused:
-                results.append(
-                    {
-                        "file_id": file["id"],
-                        "file_name": file["name"],
-                        "person": person,
-                        "status": "paused",
-                        "reason": "前一支影片發布失敗，流程已暫停",
-                    }
-                )
-                continue
-            try:
-                with tempfile.TemporaryDirectory(prefix="creator-tools-instagram-") as directory:
-                    local = Path(directory) / file["name"]
-                    download_drive_file(creds, file["id"], local)
-                    if local.stat().st_size > MAX_FILE_SIZE:
-                        raise RuntimeError("下載後檔案超過 1 GB")
-                    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "-", file["name"]).strip("-._") or "reel.mp4"
-                    prefix = datetime.now(timezone.utc).strftime("instagram-reels/%Y/%m/%d")
-                    object_key = f"{prefix}/{index + 1:03d}-{file['id']}-{safe_name}"
-                    public_url = upload_public_file(
-                        r2, local, object_key, file["mime_type"] or mimetypes.guess_type(file["name"])[0] or "video/mp4"
-                    )
-                    published = client.publish_reel(public_url, caption, payload.share_to_feed)
-                    r2_deleted = True
-                    r2_delete_error = None
-                    try:
-                        delete_public_file(r2, object_key)
-                    except Exception as cleanup_exc:
-                        logger.error("Legacy R2 cleanup failed: %s", type(cleanup_exc).__name__, exc_info=True)
-                        r2_deleted = False
-                        r2_delete_error = "R2 影片刪除失敗，請重試。"
-                results.append(
-                    {
-                        "file_id": file["id"],
-                        "file_name": file["name"],
-                        "person": person,
-                        "status": "published",
-                        "public_url": None if r2_deleted else public_url,
-                        "object_key": object_key,
-                        "r2_deleted": r2_deleted,
-                        "r2_delete_error": r2_delete_error,
-                        **published,
-                    }
-                )
-            except Exception:
-                results.append(
-                    {
-                        "file_id": file["id"],
-                        "file_name": file["name"],
-                        "person": person,
-                        "status": "failed",
-                        "reason": "Instagram 發布步驟失敗",
-                    }
-                )
-                paused = True
-        counts = Counter(item["status"] for item in results)
-        return {
-            "results": results,
-            "published_count": counts["published"],
-            "skipped_count": counts["skipped"],
-            "failed_count": counts["failed"],
-            "paused_count": counts["paused"],
-            "sort_order": "created_time_ascending",
-        }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Legacy Instagram publish flow failed: %s", type(exc).__name__, exc_info=True)
-        raise HTTPException(status_code=500, detail="Instagram 發布流程失敗，請稍後再試。") from exc
+    return create_publish_job(payload, creds)
