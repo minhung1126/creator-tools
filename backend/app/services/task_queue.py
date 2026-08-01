@@ -61,6 +61,11 @@ class TaskQueue:
         return True
 
     def run_once(self, lane: str) -> Optional[dict]:
+        if lane == "instagram":
+            tasks = self.repository.claim_batch(lane)
+            if not tasks:
+                return None
+            return self.dispatcher.dispatch_batch(tasks)
         task = self.repository.claim_next(lane)
         if task is None:
             return None
@@ -79,4 +84,3 @@ class TaskQueue:
 
 
 task_queue = TaskQueue()
-

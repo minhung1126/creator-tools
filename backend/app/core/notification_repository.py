@@ -70,7 +70,11 @@ class NotificationRepository:
 
     def unread_count(self) -> int:
         with self.db.connection() as connection:
-            return int(connection.execute("SELECT COUNT(*) AS count FROM notifications WHERE read_at IS NULL").fetchone()["count"])
+            return int(
+                connection.execute("SELECT COUNT(*) AS count FROM notifications WHERE read_at IS NULL").fetchone()[
+                    "count"
+                ]
+            )
 
     def create(
         self,
@@ -97,4 +101,3 @@ class NotificationRepository:
 
 
 notification_repository = NotificationRepository()
-

@@ -4,6 +4,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
+import InstagramApiUsageBanner from '../components/InstagramApiUsageBanner';
 import TaskDetail from '../components/TaskDetail';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -87,6 +88,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [job, setJob] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+  const [apiUsageRefreshKey, setApiUsageRefreshKey] = useState(0);
   const previewRequestId = useRef(0);
 
   const updateConfig = (patch) => setConfig((current) => ({ ...current, ...patch }));
@@ -390,6 +392,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
         assignments: active,
       });
       setJob(result);
+      setApiUsageRefreshKey((key) => key + 1);
       await refresh({ background: true });
       toast.success(`已建立 ${result.total_count || result.results?.length || active.length} 支影片任務。`);
     } catch (error) {
@@ -403,6 +406,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
     if (!job?.id) return;
     try {
       setJob(await api.getInstagramPublishJob(job.id));
+      setApiUsageRefreshKey((key) => key + 1);
     } catch (error) {
       toast.error(error.message);
     }
@@ -435,6 +439,12 @@ export default function InstagramReelsPage({ setActiveTab }) {
   const assignedCount = selectableVideos.filter((video) => assignments[video.id]).length;
   const jobIsActive = Boolean(job?.status && ACTIVE_JOB_STATUSES.has(job.status));
   const liveProgress = job?.progress || {};
+  useEffect(() => {
+    if (!jobIsActive) return undefined;
+    const interval = setInterval(() => setApiUsageRefreshKey((key) => key + 1), 15000);
+    return () => clearInterval(interval);
+  }, [jobIsActive]);
+
   const openVideoPreview = (video) => {
     if (!video.thumbnail_url) return;
     setPreviewImage({
@@ -445,6 +455,8 @@ export default function InstagramReelsPage({ setActiveTab }) {
   };
 
   return <div className="section-gap">
+    <InstagramApiUsageBanner refreshKey={apiUsageRefreshKey} />
+
     <div>
       <h1>Instagram Reels 自動發布</h1>
       <p className="section-desc">先設定 Reels 的工作表與內文欄，再在獨立區塊篩選團體和人物。Drive 影片依檔名由 A 到 Z 顯示；發布成功後會自動移入 Published 資料夾。</p>

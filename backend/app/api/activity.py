@@ -171,4 +171,3 @@ def mark_activity_notification_read(notification_id: int, creds: Credentials = D
 def mark_all_activity_notifications_read(creds: Credentials = Depends(require_credentials)):
     del creds
     return {"marked_count": notification_repository.mark_all_read()}
-

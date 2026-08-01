@@ -211,6 +211,68 @@ def test_first_failure_pauses_and_retry_reuses_creation_id(monkeypatch, tmp_path
     assert all(item["public_url"] is None for item in second["items"])
 
 
+def test_real_client_batch_shape_uses_ordered_meta_phases(monkeypatch):
+    store = MemoryStore()
+    monkeypatch.setattr(service, "instagram_publish_store", store)
+    monkeypatch.setattr(service, "ensure_lifecycle", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "ensure_published_folder", lambda *args, **kwargs: "published-folder")
+    monkeypatch.setattr(service, "move_drive_file_to_folder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(service, "delete_public_file", lambda *args, **kwargs: None)
+
+    class BatchClient:
+        def __init__(self):
+            self.created = []
+            self.waited = []
+            self.published = []
+
+        def create_reel_containers(self, reels):
+            self.created.append(reels)
+            return [f"container-{index}" for index, _ in enumerate(reels, start=1)]
+
+        def wait_for_containers(self, creation_ids):
+            self.waited.append(list(creation_ids))
+
+        def publish_containers(self, creation_ids):
+            self.published.append(list(creation_ids))
+            return [f"media-{creation_id}" for creation_id in creation_ids]
+
+    client = BatchClient()
+    job = {
+        "id": "job",
+        "status": "queued",
+        "source_folder_id": "source-folder",
+        "share_to_feed": True,
+        "items": [
+            {
+                "sequence": 1,
+                "file_id": "1",
+                "file_name": "one.mp4",
+                "caption": "A",
+                "status": "queued",
+                "public_url": "https://cdn.example/one.mp4",
+                "object_key": "one.mp4",
+            },
+            {
+                "sequence": 2,
+                "file_id": "2",
+                "file_name": "two.mp4",
+                "caption": "B",
+                "status": "queued",
+                "public_url": "https://cdn.example/two.mp4",
+                "object_key": "two.mp4",
+            },
+        ],
+    }
+
+    result = service.process_job(job=job, credentials=None, client=client, r2=object())
+
+    assert result["status"] == "completed"
+    assert [item["status"] for item in result["items"]] == ["published", "published"]
+    assert [[reel["caption"] for reel in call] for call in client.created] == [["A", "B"]]
+    assert client.waited == [["container-1", "container-2"]]
+    assert client.published == [["container-1", "container-2"]]
+
+
 def test_r2_cleanup_failure_does_not_republish(monkeypatch):
     store = MemoryStore()
     monkeypatch.setattr(service, "instagram_publish_store", store)

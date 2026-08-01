@@ -279,12 +279,17 @@ class TaskRepository:
             (next_status, now, completed_at, batch_id),
         )
 
-        if notify and next_status != previous_status and next_status in {
-            "completed",
-            "completed_with_warnings",
-            "canceled",
-            "partially_canceled",
-        }:
+        if (
+            notify
+            and next_status != previous_status
+            and next_status
+            in {
+                "completed",
+                "completed_with_warnings",
+                "canceled",
+                "partially_canceled",
+            }
+        ):
             counts = {status: statuses.count(status) for status in TERMINAL_STATUSES}
             max_attempt = connection.execute(
                 "SELECT COALESCE(MAX(attempt), 1) AS attempt FROM tasks WHERE batch_id = ?", (batch_id,)
@@ -458,9 +463,7 @@ class TaskRepository:
                     event_key=f"task:{task_id}:created:{spec.get('attempt') or 1}",
                     created_at=task_now,
                 )
-                tasks.append(
-                    _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
-                )
+                tasks.append(_task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()))
             final_batch = self._recompute_batch(connection, actual_batch_id, notify=notify)
             return {"batch": final_batch, "tasks": tasks, "created": True}
 
@@ -587,7 +590,12 @@ class TaskRepository:
     ) -> tuple[list[dict[str, Any]], int]:
         clauses: list[str] = []
         values: list[Any] = []
-        for field, value in (("platform", platform), ("operation", operation), ("status", status), ("batch_id", batch_id)):
+        for field, value in (
+            ("platform", platform),
+            ("operation", operation),
+            ("status", status),
+            ("batch_id", batch_id),
+        ):
             if value:
                 clauses.append(f"{field} = ?")
                 values.append(value)
@@ -597,7 +605,7 @@ class TaskRepository:
         with self.db.connection() as connection:
             total = int(connection.execute(f"SELECT COUNT(*) AS count FROM tasks {where}", values).fetchone()["count"])
             rows = connection.execute(
-                f"SELECT * FROM tasks {where} ORDER BY created_at DESC, sequence_in_batch DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM tasks {where} ORDER BY created_at ASC, queue_sequence ASC, sequence_in_batch ASC, id ASC LIMIT ? OFFSET ?",
                 [*values, safe_limit, safe_offset],
             ).fetchall()
             public = []
@@ -606,7 +614,9 @@ class TaskRepository:
                 public.append(self.public_task(task, connection=connection))
             return public, total
 
-    def list_batches(self, *, offset: int = 0, limit: int = 50, platform: Optional[str] = None) -> tuple[list[dict[str, Any]], int]:
+    def list_batches(
+        self, *, offset: int = 0, limit: int = 50, platform: Optional[str] = None
+    ) -> tuple[list[dict[str, Any]], int]:
         clauses: list[str] = []
         values: list[Any] = []
         if platform:
@@ -616,7 +626,9 @@ class TaskRepository:
         safe_offset = max(int(offset), 0)
         safe_limit = min(max(int(limit), 1), 100)
         with self.db.connection() as connection:
-            total = int(connection.execute(f"SELECT COUNT(*) AS count FROM task_batches {where}", values).fetchone()["count"])
+            total = int(
+                connection.execute(f"SELECT COUNT(*) AS count FROM task_batches {where}", values).fetchone()["count"]
+            )
             rows = connection.execute(
                 f"SELECT * FROM task_batches {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 [*values, safe_limit, safe_offset],
@@ -720,7 +732,13 @@ class TaskRepository:
                     created_at=now,
                 )
             if changed_status:
-                self._task_notifications(connection, current, next_status, error if error is not _UNSET else current.get("error"), cancel_too_late)
+                self._task_notifications(
+                    connection,
+                    current,
+                    next_status,
+                    error if error is not _UNSET else current.get("error"),
+                    cancel_too_late,
+                )
             self._recompute_batch(connection, current["batch_id"])
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             return _task_dict(row)
@@ -784,7 +802,9 @@ class TaskRepository:
                 task_id=task_id,
                 batch_id=batch_id,
             )
-        if bool(cancel_too_late) or (status in TERMINAL_STATUSES and bool(previous.get("cancel_requested_at")) and status.startswith("succeeded")):
+        if bool(cancel_too_late) or (
+            status in TERMINAL_STATUSES and bool(previous.get("cancel_requested_at")) and status.startswith("succeeded")
+        ):
             event_key = f"task:{task_id}:cancel-too-late:attempt:{attempt}"
             self._insert_notification(
                 connection,
@@ -839,7 +859,74 @@ class TaskRepository:
             self._recompute_batch(connection, task["batch_id"], notify=False)
             return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task["id"],)).fetchone())
 
-    def request_cancel(self, task_id: str, *, scope: str = "task", reason: str = "使用者要求取消") -> Optional[dict[str, Any]]:
+    def claim_batch(self, queue_lane: str) -> list[dict[str, Any]]:
+        """Claim the next contiguous batch in a lane as one worker unit.
+
+        Instagram's Graph API can combine child requests, but doing so safely
+        requires the worker to see the complete ordered group before it starts
+        the first external call.  This method keeps the existing
+        ``claim_next`` API for single-task consumers while allowing the
+        Instagram lane to claim one contiguous submitted batch atomically.
+        """
+
+        lane = queue_lane if queue_lane in LANES else "youtube"
+        with self.db.transaction() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM tasks
+                WHERE queue_lane = ? AND status = 'queued' AND cancel_requested_at IS NULL
+                ORDER BY queue_sequence ASC, id ASC
+                """,
+                (lane,),
+            ).fetchall()
+            if not rows:
+                return []
+            first_batch_id = str(rows[0]["batch_id"])
+            claim_rows = []
+            for row in rows:
+                if str(row["batch_id"]) != first_batch_id:
+                    break
+                claim_rows.append(row)
+            if not claim_rows:
+                return []
+
+            now = utc_now()
+            claimed_ids: list[str] = []
+            for row in claim_rows:
+                task_id = str(row["id"])
+                updated = connection.execute(
+                    """
+                    UPDATE tasks
+                    SET status='running', stage='running', stage_label=?, started_at=COALESCE(started_at,?),
+                        updated_at=?, queued_at=COALESCE(queued_at,?)
+                    WHERE id=? AND status='queued' AND cancel_requested_at IS NULL
+                    """,
+                    (STAGE_LABELS["running"], now, now, now, task_id),
+                )
+                if updated.rowcount != 1:
+                    continue
+                claimed_ids.append(task_id)
+                self._insert_event(
+                    connection,
+                    task_id=task_id,
+                    batch_id=first_batch_id,
+                    event_type="claimed",
+                    from_status="queued",
+                    to_status="running",
+                    message="Worker 已取得批次任務",
+                    event_key=f"task:{task_id}:claimed:attempt:{row['attempt']}:{now}",
+                    created_at=now,
+                )
+            if claimed_ids:
+                self._recompute_batch(connection, first_batch_id, notify=False)
+            return [
+                _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+                for task_id in claimed_ids
+            ]
+
+    def request_cancel(
+        self, task_id: str, *, scope: str = "task", reason: str = "使用者要求取消"
+    ) -> Optional[dict[str, Any]]:
         with self.db.transaction() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
@@ -1009,7 +1096,9 @@ class TaskRepository:
             for batch_id in touched_batches:
                 self._recompute_batch(connection, batch_id)
             affected = len(rows)
-            global_event = f"cancel-all:{','.join(sorted(current['id'] for current in (_task_dict(row) for row in rows)))}"
+            global_event = (
+                f"cancel-all:{','.join(sorted(current['id'] for current in (_task_dict(row) for row in rows)))}"
+            )
             if transitioned:
                 self._insert_notification(
                     connection,
@@ -1086,7 +1175,9 @@ class TaskRepository:
             return False
         if status == "succeeded_with_warnings":
             checkpoint = task.get("checkpoint") or {}
-            if not any(checkpoint.get(key) for key in ("drive_move_error", "r2_delete_error", "playlist_cleanup_error")):
+            if not any(
+                checkpoint.get(key) for key in ("drive_move_error", "r2_delete_error", "playlist_cleanup_error")
+            ):
                 return False
         if status == "succeeded" and task.get("cancel_too_late"):
             return False
@@ -1132,7 +1223,7 @@ class TaskRepository:
     def retry_batch(self, batch_id: str) -> list[dict[str, Any]]:
         with self.db.transaction() as connection:
             rows = connection.execute(
-                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY sequence_in_batch", (batch_id,)
+                "SELECT * FROM tasks WHERE batch_id = ? ORDER BY sequence_in_batch ASC, id ASC", (batch_id,)
             ).fetchall()
             eligible = [task for task in (_task_dict(row) for row in rows) if self._eligible_for_retry(task)]
             if not eligible:
@@ -1259,7 +1350,9 @@ class TaskRepository:
                 self._recompute_batch(connection, batch_id, notify=False)
             return len(rows)
 
-    def pause_queued_without_credentials(self, *, message: str = "找不到持久化 Google credential，請重新登入後確認並重試。") -> int:
+    def pause_queued_without_credentials(
+        self, *, message: str = "找不到持久化 Google credential，請重新登入後確認並重試。"
+    ) -> int:
         with self.db.transaction() as connection:
             rows = connection.execute("SELECT * FROM tasks WHERE status = 'queued'").fetchall()
             now = utc_now()
@@ -1299,8 +1392,20 @@ class TaskRepository:
 
     def activity_summary(self) -> dict[str, Any]:
         with self.db.connection() as connection:
-            rows = connection.execute("SELECT platform,status,COUNT(*) AS count FROM tasks GROUP BY platform,status").fetchall()
-            counts = {"total": 0, "active": 0, "queued": 0, "running": 0, "cancel_requested": 0, "paused": 0, "failed": 0, "completed": 0, "canceled": 0}
+            rows = connection.execute(
+                "SELECT platform,status,COUNT(*) AS count FROM tasks GROUP BY platform,status"
+            ).fetchall()
+            counts = {
+                "total": 0,
+                "active": 0,
+                "queued": 0,
+                "running": 0,
+                "cancel_requested": 0,
+                "paused": 0,
+                "failed": 0,
+                "completed": 0,
+                "canceled": 0,
+            }
             by_platform: dict[str, dict[str, int]] = {}
             for row in rows:
                 platform = str(row["platform"])
@@ -1315,11 +1420,22 @@ class TaskRepository:
                 if status == "canceled_with_warnings":
                     counts["canceled"] += count
                 by_platform.setdefault(platform, {})[status] = count
-            unread = int(connection.execute("SELECT COUNT(*) AS count FROM notifications WHERE read_at IS NULL").fetchone()["count"])
+            unread = int(
+                connection.execute("SELECT COUNT(*) AS count FROM notifications WHERE read_at IS NULL").fetchone()[
+                    "count"
+                ]
+            )
             batch_count = int(connection.execute("SELECT COUNT(*) AS count FROM task_batches").fetchone()["count"])
-            return {"tasks": counts, "by_platform": by_platform, "batch_count": batch_count, "unread_notification_count": unread}
+            return {
+                "tasks": counts,
+                "by_platform": by_platform,
+                "batch_count": batch_count,
+                "unread_notification_count": unread,
+            }
 
-    def find_instagram_record(self, source_folder_id: str, file_id: str, *, published_only: bool = False) -> Optional[dict[str, Any]]:
+    def find_instagram_record(
+        self, source_folder_id: str, file_id: str, *, published_only: bool = False
+    ) -> Optional[dict[str, Any]]:
         """Find active/published SQLite reservations for legacy de-duplication."""
 
         target_folder = _folder_id(source_folder_id)
@@ -1338,7 +1454,11 @@ class TaskRepository:
                 has_media = bool(checkpoint.get("media_id"))
                 is_published = has_media or task.get("status") in {"succeeded", "succeeded_with_warnings"}
                 is_reserved = is_published or task.get("status") in {"queued", "running", "cancel_requested", "paused"}
-                if task_folder != target_folder or (published_only and not is_published) or (not published_only and not is_reserved):
+                if (
+                    task_folder != target_folder
+                    or (published_only and not is_published)
+                    or (not published_only and not is_reserved)
+                ):
                     continue
                 return {
                     "task_id": task["id"],
@@ -1506,7 +1626,9 @@ def migrate_legacy_instagram_jobs(
                 )
                 if key in item
             }
-            stable = hashlib.sha256(f"{legacy_job_id}:{item.get('sequence', index)}:{item.get('file_id', '')}".encode()).hexdigest()
+            stable = hashlib.sha256(
+                f"{legacy_job_id}:{item.get('sequence', index)}:{item.get('file_id', '')}".encode()
+            ).hexdigest()
             specs.append(
                 {
                     "id": f"legacy_task_{stable[:28]}",

@@ -42,6 +42,79 @@ def test_atomic_batch_enqueue_assigns_contiguous_lane_sequences(tmp_path):
     assert len({task["id"] for task in created["tasks"]}) == 5
 
 
+def test_list_tasks_shows_oldest_submitted_task_first(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        [
+            {
+                **make_specs(1)[0],
+                "id": "latest-task",
+                "created_at": "2026-01-01T00:00:03+00:00",
+                "sequence_in_batch": 2,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "oldest-task",
+                "created_at": "2026-01-01T00:00:01+00:00",
+                "sequence_in_batch": 1,
+            },
+        ],
+    )
+
+    items, total = repo.list_tasks(limit=100)
+
+    assert total == 2
+    assert [task["id"] for task in items] == ["oldest-task", "latest-task"]
+    assert [task["id"] for task in repo.get_batch_internal(created["batch"]["id"])["tasks"]] == [
+        "oldest-task",
+        "latest-task",
+    ]
+
+
+def test_retry_batch_requeues_and_claims_tasks_in_batch_order(tmp_path):
+    repo = make_repo(tmp_path)
+    created = repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        [
+            {
+                **make_specs(1)[0],
+                "id": "retry-third",
+                "sequence_in_batch": 3,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "retry-first",
+                "sequence_in_batch": 1,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+            {
+                **make_specs(1)[0],
+                "id": "retry-second",
+                "sequence_in_batch": 2,
+                "status": "failed",
+                "stage": "failed",
+                "retryable": True,
+            },
+        ],
+    )
+
+    retried = repo.retry_batch(created["batch"]["id"])
+
+    assert [task["id"] for task in retried] == ["retry-first", "retry-second", "retry-third"]
+    assert [task["queue_sequence"] for task in retried] == [4, 5, 6]
+    assert [repo.claim_next("youtube")["id"] for _ in range(3)] == [
+        "retry-first",
+        "retry-second",
+        "retry-third",
+    ]
+
+
 def test_lanes_are_independent_and_claim_keeps_order(tmp_path):
     repo = make_repo(tmp_path)
     instagram = repo.create_batch_and_tasks(
@@ -126,11 +199,18 @@ def test_retry_preserves_checkpoint_but_get_task_is_a_safe_public_dto(tmp_path):
     repo = make_repo(tmp_path)
     created = repo.create_batch_and_tasks(
         {"platform": "instagram", "operation": "instagram.reels_publish", "failure_policy": "pause_remaining_in_batch"},
-        [{
-            **make_specs(1, "instagram", "instagram.reels_publish")[0],
-            "payload": {"caption": "private caption", "object_key": "private-key"},
-            "checkpoint": {"media_id": "media-1", "object_key": "private-key", "drive_moved": False, "r2_delete_error": "denied"},
-        }],
+        [
+            {
+                **make_specs(1, "instagram", "instagram.reels_publish")[0],
+                "payload": {"caption": "private caption", "object_key": "private-key"},
+                "checkpoint": {
+                    "media_id": "media-1",
+                    "object_key": "private-key",
+                    "drive_moved": False,
+                    "r2_delete_error": "denied",
+                },
+            }
+        ],
     )
     task_id = created["tasks"][0]["id"]
     repo.update_task(task_id, status="succeeded_with_warnings", stage="cleaning_r2", error="denied", retryable=True)
@@ -180,11 +260,13 @@ def test_restart_pauses_interrupted_task_and_keeps_checkpoint(tmp_path):
     repo = make_repo(tmp_path)
     repo.create_batch_and_tasks(
         {"platform": "youtube", "operation": "youtube.publish_cleanup", "failure_policy": "pause_remaining_in_batch"},
-        [{
-            **make_specs(1, "youtube", "youtube.publish_cleanup")[0],
-            "payload": {"playlist_item_id": "playlist-item"},
-            "checkpoint": {"privacy_updated_at": "2026-01-01T00:00:00+00:00"},
-        }],
+        [
+            {
+                **make_specs(1, "youtube", "youtube.publish_cleanup")[0],
+                "payload": {"playlist_item_id": "playlist-item"},
+                "checkpoint": {"privacy_updated_at": "2026-01-01T00:00:00+00:00"},
+            }
+        ],
     )
     claimed = repo.claim_next("youtube")
     repo.request_cancel(claimed["id"])
@@ -198,7 +280,25 @@ def test_restart_pauses_interrupted_task_and_keeps_checkpoint(tmp_path):
 def test_legacy_migration_is_idempotent_and_has_no_unread_history_notice(tmp_path):
     legacy_path = tmp_path / "instagram_publish_jobs.json"
     legacy_path.write_text(
-        json.dumps({"version": 1, "jobs": {"legacy-job": {"status": "completed", "items": [{"sequence": 1, "file_id": "drive-1", "file_name": "one.mp4", "status": "published", "media_id": "media-1"}]}}}),
+        json.dumps(
+            {
+                "version": 1,
+                "jobs": {
+                    "legacy-job": {
+                        "status": "completed",
+                        "items": [
+                            {
+                                "sequence": 1,
+                                "file_id": "drive-1",
+                                "file_name": "one.mp4",
+                                "status": "published",
+                                "media_id": "media-1",
+                            }
+                        ],
+                    }
+                },
+            }
+        ),
         encoding="utf-8",
     )
     repo = make_repo(tmp_path)

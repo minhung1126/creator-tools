@@ -28,6 +28,7 @@ from backend.app.services.drive_service import (
     list_drive_videos,
     move_drive_file_to_folder,
 )
+from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -333,10 +334,38 @@ def _legacy_job_adapter(batch_id: str) -> dict:
             "failed_count": failed,
             "paused_count": paused,
             "percent": round(sum(float(task.get("progress_percent") or 0) for task in tasks) / total) if total else 100,
-            "current_item_sequence": next((task.get("sequence_in_batch") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), None),
-            "current_file_name": next((task.get("video_title") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), None),
-            "current_stage": next((task.get("stage") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), "completed" if total else "queued"),
-            "current_stage_label": next((task.get("stage_label") for task in tasks if task.get("status") in {"queued", "running", "paused", "failed"}), "發布工作完成" if total else "準備中"),
+            "current_item_sequence": next(
+                (
+                    task.get("sequence_in_batch")
+                    for task in tasks
+                    if task.get("status") in {"queued", "running", "paused", "failed"}
+                ),
+                None,
+            ),
+            "current_file_name": next(
+                (
+                    task.get("video_title")
+                    for task in tasks
+                    if task.get("status") in {"queued", "running", "paused", "failed"}
+                ),
+                None,
+            ),
+            "current_stage": next(
+                (
+                    task.get("stage")
+                    for task in tasks
+                    if task.get("status") in {"queued", "running", "paused", "failed"}
+                ),
+                "completed" if total else "queued",
+            ),
+            "current_stage_label": next(
+                (
+                    task.get("stage_label")
+                    for task in tasks
+                    if task.get("status") in {"queued", "running", "paused", "failed"}
+                ),
+                "發布工作完成" if total else "準備中",
+            ),
         },
         "results": result_items,
     }
@@ -485,6 +514,14 @@ def get_instagram_settings(creds: Credentials = Depends(require_credentials)):
         "r2_public_base_url": cfg("r2_public_base_url"),
         "r2_secret_access_key_configured": credential_store.has_secret("r2_secret_access_key"),
     }
+
+
+@router.get("/api-usage")
+def get_instagram_api_usage(creds: Credentials = Depends(require_credentials)):
+    """Return locally observed Meta usage without making another Instagram request."""
+
+    del creds
+    return instagram_api_usage_tracker.get_usage()
 
 
 @router.put("/settings")

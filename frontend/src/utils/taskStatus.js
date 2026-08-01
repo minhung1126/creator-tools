@@ -19,6 +19,7 @@ export const TASK_OPERATION_LABELS = {
 };
 
 export const TASK_ACTIVE_STATUSES = ['queued', 'running', 'cancel_requested'];
+export const TASK_UNFINISHED_QUEUE_STATUSES = ['running', 'queued'];
 export const TASK_NEEDS_ATTENTION = ['paused', 'failed', 'succeeded_with_warnings', 'canceled_with_warnings'];
 
 export function taskStatusLabel(status) {
