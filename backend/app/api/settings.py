@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal
 
 from fastapi import APIRouter, Depends
 from google.oauth2.credentials import Credentials
@@ -12,13 +12,6 @@ from backend.app.core.runtime_config import runtime_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
-
-
-class ResourceSettingsModel(BaseModel):
-    """Legacy aggregate payload kept for backwards compatibility."""
-
-    default_spreadsheet_id: Optional[str] = None
-    default_playlist_id: Optional[str] = None
 
 
 class SharedResourceSettingsModel(BaseModel):
@@ -66,10 +59,17 @@ def _read_draft_config(video_type: str) -> Dict:
         return {}
 
 
-@router.get("")
-def get_system_settings(creds: Credentials = Depends(require_credentials)):
+@router.get("/shared")
+def get_shared_settings(creds: Credentials = Depends(require_credentials)):
     del creds
-    rc = runtime_config.get_all()
+    return {
+        "default_spreadsheet_id": runtime_config.get("default_spreadsheet_id", ""),
+    }
+
+
+@router.get("/system")
+def get_system_info(creds: Credentials = Depends(require_credentials)):
+    del creds
     return {
         "host": settings.base_url,
         "public_base_url": settings.base_url,
@@ -77,32 +77,6 @@ def get_system_settings(creds: Credentials = Depends(require_credentials)):
         "frontend_url": settings.frontend_url,
         "redirect_uri": settings.get_redirect_uri(),
         "google_client_configured": bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
-        "default_spreadsheet_id": rc.get("default_spreadsheet_id", ""),
-        "default_playlist_id": rc.get("default_playlist_id", ""),
-    }
-
-
-@router.post("")
-def update_system_settings(payload: ResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
-    update_data = {}
-    if payload.default_spreadsheet_id is not None:
-        update_data["default_spreadsheet_id"] = payload.default_spreadsheet_id
-    if payload.default_playlist_id is not None:
-        update_data["default_playlist_id"] = payload.default_playlist_id
-    runtime_config.update(update_data)
-    logger.info("System settings updated: %s", list(update_data.keys()))
-    return {
-        "status": "success",
-        "message": "Settings updated and saved successfully",
-        "settings": get_system_settings(creds),
-    }
-
-
-@router.get("/shared")
-def get_shared_settings(creds: Credentials = Depends(require_credentials)):
-    del creds
-    return {
-        "default_spreadsheet_id": runtime_config.get("default_spreadsheet_id", ""),
     }
 
 

@@ -34,7 +34,7 @@ const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
 
 async function waitForJobToFinish(jobId) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const current = await api.getInstagramPublishJob(jobId);
+    const current = await api.getTaskBatch(jobId);
     if (!ACTIVE_JOB_STATUSES.has(current.status)) return current;
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
   }
@@ -96,11 +96,11 @@ export default function InstagramHistoryPage() {
     const targetKey = recordKey(record);
     setRetryingRecordId(targetKey);
     try {
-      const queued = await api.retryInstagramPublishJob(record.job_id);
+      const queued = await api.retryTaskBatch(record.job_id);
       toast.info('已加入重試隊列；這次只會處理 Drive／R2 後續清理，不會重新發布 Instagram。');
-      const finished = ACTIVE_JOB_STATUSES.has(queued.status)
+      const finished = ACTIVE_JOB_STATUSES.has(queued.batch?.status)
         ? await waitForJobToFinish(record.job_id)
-        : queued;
+        : queued.batch;
       await loadHistory({ showSpinner: false });
       if (!finished) {
         toast.warning('重試仍在處理中，請稍後刷新歷史紀錄。');

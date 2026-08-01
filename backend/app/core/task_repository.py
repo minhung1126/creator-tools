@@ -1468,6 +1468,82 @@ class TaskRepository:
                 }
         return None
 
+    def cancel_instagram_reservations(
+        self,
+        source_folder_id: str,
+        file_ids: Iterable[str],
+        *,
+        exclude_batch_id: Optional[str] = None,
+        reason: str = "使用者要求停止占用影片的舊 Instagram 工作",
+    ) -> dict[str, Any]:
+        """Cancel unfinished Instagram tasks that reserve the selected Drive files.
+
+        Queued and paused tasks are canceled immediately. Running tasks retain
+        cooperative cancellation semantics so an in-flight Meta operation is
+        never silently released and published twice.
+        """
+
+        target_folder = _folder_id(source_folder_id)
+        target_file_ids = {str(file_id).strip() for file_id in file_ids if str(file_id).strip()}
+        if not target_folder or not target_file_ids:
+            return {
+                "requested_count": 0,
+                "canceled_immediately_count": 0,
+                "cancel_requested_count": 0,
+                "task_ids": [],
+                "batch_ids": [],
+            }
+
+        placeholders = ",".join("?" for _ in target_file_ids)
+        values: list[Any] = [*sorted(target_file_ids)]
+        batch_clause = ""
+        if exclude_batch_id:
+            batch_clause = " AND batch_id != ?"
+            values.append(exclude_batch_id)
+        with self.db.connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM tasks
+                WHERE platform='instagram'
+                  AND video_id IN ({placeholders})
+                  AND status IN ('queued','running','paused','cancel_requested')
+                  {batch_clause}
+                ORDER BY created_at DESC, id DESC
+                """,
+                values,
+            ).fetchall()
+
+        matching_ids = []
+        for row in rows:
+            task = _task_dict(row)
+            payload = task.get("payload") or {}
+            task_folder = _folder_id(payload.get("source_folder_id") or payload.get("folder"))
+            if task_folder == target_folder:
+                matching_ids.append(task["id"])
+
+        immediate = 0
+        requested = 0
+        batch_ids: set[str] = set()
+        stopped_ids: list[str] = []
+        for task_id in matching_ids:
+            stopped = self.request_cancel(task_id, scope="blocking_instagram_job", reason=reason)
+            if not stopped:
+                continue
+            stopped_ids.append(task_id)
+            batch_ids.add(stopped["batch_id"])
+            if stopped.get("status") == "canceled":
+                immediate += 1
+            elif stopped.get("status") == "cancel_requested":
+                requested += 1
+
+        return {
+            "requested_count": len(stopped_ids),
+            "canceled_immediately_count": immediate,
+            "cancel_requested_count": requested,
+            "task_ids": stopped_ids,
+            "batch_ids": sorted(batch_ids),
+        }
+
     def list_instagram_history(self) -> list[dict[str, Any]]:
         """Return safe published records for the existing Instagram history UI."""
 

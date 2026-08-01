@@ -55,6 +55,46 @@ function PreviewField({ label, value }) {
 }
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
+const TERMINAL_JOB_STATUSES = new Set(['failed', 'skipped', 'succeeded', 'succeeded_with_warnings', 'canceled', 'canceled_with_warnings']);
+
+function jobFromTaskBatch(batch) {
+  const tasks = batch?.tasks || [];
+  const active = tasks.find((task) => !TERMINAL_JOB_STATUSES.has(task.status));
+  const completed = tasks.filter((task) => TERMINAL_JOB_STATUSES.has(task.status) && task.status !== 'failed').length;
+  return {
+    ...batch,
+    batch_id: batch?.id,
+    total_count: tasks.length,
+    skipped_count: tasks.filter((task) => task.status === 'skipped').length,
+    failed_count: tasks.filter((task) => task.status === 'failed').length,
+    paused_count: tasks.filter((task) => task.status === 'paused').length,
+    r2_cleanup_failed_count: tasks.filter((task) => task.status === 'succeeded_with_warnings').length,
+    results: tasks.map((task) => ({
+      task_id: task.id,
+      sequence: task.sequence_in_batch,
+      file_id: task.video_id,
+      file_name: task.video_title,
+      status: task.status,
+      task_status: task.status,
+      retryable: task.retryable,
+      stage: task.stage,
+      stage_label: task.stage_label,
+      progress_percent: task.progress_percent,
+      error: task.error,
+      cancel_too_late: task.cancel_too_late,
+    })),
+    progress: {
+      total: tasks.length,
+      completed_count: completed,
+      failed_count: tasks.filter((task) => task.status === 'failed').length,
+      paused_count: tasks.filter((task) => task.status === 'paused').length,
+      percent: tasks.length ? Math.round(tasks.reduce((sum, task) => sum + Number(task.progress_percent || 0), 0) / tasks.length) : 0,
+      current_item_sequence: active?.sequence_in_batch,
+      current_file_name: active?.video_title,
+      current_stage_label: active?.stage_label || '發布工作完成',
+    },
+  };
+}
 
 export default function InstagramReelsPage({ setActiveTab }) {
   const toast = useToast();
@@ -391,10 +431,10 @@ export default function InstagramReelsPage({ setActiveTab }) {
         share_to_feed: config.share_to_feed,
         assignments: active,
       });
-      setJob(result);
+      setJob(jobFromTaskBatch(result.batch));
       setApiUsageRefreshKey((key) => key + 1);
       await refresh({ background: true });
-      toast.success(`已建立 ${result.total_count || result.results?.length || active.length} 支影片任務。`);
+      toast.success(`已建立 ${result.total_count || active.length} 支影片任務。`);
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -405,7 +445,7 @@ export default function InstagramReelsPage({ setActiveTab }) {
   const reloadJob = async () => {
     if (!job?.id) return;
     try {
-      setJob(await api.getInstagramPublishJob(job.id));
+      setJob(jobFromTaskBatch(await api.getTaskBatch(job.id)));
       setApiUsageRefreshKey((key) => key + 1);
     } catch (error) {
       toast.error(error.message);
@@ -416,8 +456,8 @@ export default function InstagramReelsPage({ setActiveTab }) {
     if (!job?.id) return;
     setPublishing(true);
     try {
-      const result = await api.retryInstagramPublishJob(job.id);
-      setJob(result);
+      const result = await api.retryTaskBatch(job.id);
+      setJob(jobFromTaskBatch(result.batch));
       await refresh({ background: true });
       toast.success('未完成的 Instagram 影片已重新排入隊列。');
     } catch (error) {
