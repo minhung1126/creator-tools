@@ -11,6 +11,10 @@ from backend.app.core.config import settings
 from backend.app.core.database import Database, database
 from backend.app.services.instagram_errors import InstagramApiError, parse_retry_after
 
+# Meta's live content_publishing_limit response is authoritative. This is only
+# a local recovery-time estimate for the case where Meta does not provide one.
+CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS = 24.0
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -200,7 +204,7 @@ class InstagramLimiter:
                 _, recovery_iso = parse_retry_after(error.retry_after, now=current_time)
                 recovery = _parse_time(recovery_iso)
             if recovery is None and error.content_publishing_limit:
-                recovery = current_time + timedelta(hours=max(float(settings.INSTAGRAM_PUBLISHING_LIMIT_HOURS), 1))
+                recovery = current_time + timedelta(hours=CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS)
             if recovery is None:
                 base = max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 1)
                 cap = max(float(settings.INSTAGRAM_COOLDOWN_MAX_SECONDS), base)
@@ -244,7 +248,7 @@ class InstagramLimiter:
     def record_content_publishing_limit(self, *, endpoint: str = "content_publishing_limit") -> InstagramApiError:
         error = InstagramApiError.cooldown(
             endpoint=endpoint,
-            estimated_recovery_at=_iso(_now() + timedelta(hours=max(float(settings.INSTAGRAM_PUBLISHING_LIMIT_HOURS), 1))),
+            estimated_recovery_at=_iso(_now() + timedelta(hours=CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS)),
             reason="Instagram 24 小時發布額度已用盡",
             content_publishing_limit=True,
         )
