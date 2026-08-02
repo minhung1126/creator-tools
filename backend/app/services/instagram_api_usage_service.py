@@ -13,6 +13,9 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Mapping
 
+from backend.app.core.config import settings
+from backend.app.services.instagram_errors import CONTENT_PUBLISHING_LIMIT_MARKERS, RATE_LIMIT_CODES
+
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -101,9 +104,13 @@ class InstagramApiUsageTracker:
             "http_requests_today": 0,
             "total_http_requests": 0,
             "batch_http_requests_today": 0,
+            "rate_limit_events_today": 0,
+            "total_rate_limit_events": 0,
             "methods": {},
             "last_meta_usage": None,
             "last_meta_usage_at": None,
+            "publishing_limit": None,
+            "publishing_limit_at": None,
             "last_error": None,
             "updated_at": None,
         }
@@ -128,10 +135,14 @@ class InstagramApiUsageTracker:
         data.setdefault("http_requests_today", data.get("requests_today", 0))
         data.setdefault("total_http_requests", data.get("total_requests", 0))
         data.setdefault("batch_http_requests_today", 0)
+        data.setdefault("rate_limit_events_today", 0)
+        data.setdefault("total_rate_limit_events", 0)
         if not isinstance(data.get("methods"), dict):
             data["methods"] = {}
         data.setdefault("last_meta_usage", None)
         data.setdefault("last_meta_usage_at", None)
+        data.setdefault("publishing_limit", None)
+        data.setdefault("publishing_limit_at", None)
         data.setdefault("last_error", None)
         data.setdefault("updated_at", None)
         if data.get("request_date") != today:
@@ -139,6 +150,7 @@ class InstagramApiUsageTracker:
             data["requests_today"] = 0
             data["http_requests_today"] = 0
             data["batch_http_requests_today"] = 0
+            data["rate_limit_events_today"] = 0
             data["methods"] = {}
         if not isinstance(data.get("last_meta_usage"), dict):
             data["last_meta_usage"] = None
@@ -174,6 +186,18 @@ class InstagramApiUsageTracker:
         response_data = response_data if isinstance(response_data, dict) else {}
         error = response_data.get("error")
         status_code = getattr(response, "status_code", None)
+        error_payload = error if isinstance(error, Mapping) else {}
+        try:
+            meta_code = int(error_payload.get("code")) if error_payload.get("code") is not None else None
+        except (TypeError, ValueError):
+            meta_code = None
+        error_text = " ".join(
+            str(error_payload.get(key) or "")
+            for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
+        ).casefold()
+        rate_limited = status_code == 429 or meta_code in RATE_LIMIT_CODES or any(
+            marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS
+        )
         endpoint = self._endpoint_label(method, path)
         now = self._now()
 
@@ -185,6 +209,10 @@ class InstagramApiUsageTracker:
             data["total_http_requests"] = int(data.get("total_http_requests", 0)) + 1
             method_data = data["methods"].setdefault(endpoint, {"calls": 0})
             method_data["calls"] = int(method_data.get("calls", 0)) + 1
+            if rate_limited:
+                method_data["rate_limit_count"] = int(method_data.get("rate_limit_count", 0)) + 1
+                data["rate_limit_events_today"] = int(data.get("rate_limit_events_today", 0)) + 1
+                data["total_rate_limit_events"] = int(data.get("total_rate_limit_events", 0)) + 1
             if meta_usage is not None:
                 data["last_meta_usage"] = meta_usage
                 data["last_meta_usage_at"] = now
@@ -197,6 +225,10 @@ class InstagramApiUsageTracker:
                     "code": error_payload.get("code"),
                     "error_subcode": error_payload.get("error_subcode"),
                     "message": message[:200],
+                    "fbtrace_id": error_payload.get("fbtrace_id") or response_data.get("fbtrace_id"),
+                    "retry_after": headers.get("retry-after") or headers.get("Retry-After"),
+                    "x_app_usage": meta_usage,
+                    "rate_limited": rate_limited,
                     "at": now,
                 }
             data["updated_at"] = now
@@ -254,6 +286,26 @@ class InstagramApiUsageTracker:
                         child_status = child.get("code")
                         break
             error_payload = outer_error if isinstance(outer_error, Mapping) else child_error
+            try:
+                meta_code = int(error_payload.get("code")) if isinstance(error_payload, Mapping) and error_payload.get("code") is not None else None
+            except (TypeError, ValueError):
+                meta_code = None
+            error_text = " ".join(
+                str(error_payload.get(key) or "")
+                for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
+            ).casefold() if isinstance(error_payload, Mapping) else ""
+            rate_limited = status_code == 429 or meta_code in RATE_LIMIT_CODES or any(
+                marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS
+            )
+            if rate_limited:
+                data["rate_limit_events_today"] = int(data.get("rate_limit_events_today", 0)) + 1
+                data["total_rate_limit_events"] = int(data.get("total_rate_limit_events", 0)) + 1
+                if request_specs:
+                    endpoint = self._endpoint_label(
+                        str(request_specs[0].get("method") or "GET"), str(request_specs[0].get("path") or "")
+                    )
+                    method_data = data["methods"].setdefault(endpoint, {"calls": 0})
+                    method_data["rate_limit_count"] = int(method_data.get("rate_limit_count", 0)) + 1
             if error_payload is not None or (isinstance(status_code, int) and status_code >= 400):
                 error_payload = error_payload or {}
                 data["last_error"] = {
@@ -262,6 +314,10 @@ class InstagramApiUsageTracker:
                     "code": error_payload.get("code"),
                     "error_subcode": error_payload.get("error_subcode"),
                     "message": str(error_payload.get("message") or error_payload.get("error_user_msg") or "")[:200],
+                    "fbtrace_id": error_payload.get("fbtrace_id") if isinstance(error_payload, Mapping) else None,
+                    "retry_after": headers.get("retry-after") or headers.get("Retry-After"),
+                    "x_app_usage": meta_usage,
+                    "rate_limited": rate_limited,
                     "at": now,
                 }
             data["updated_at"] = now
@@ -271,6 +327,30 @@ class InstagramApiUsageTracker:
     def get_usage(self) -> dict[str, Any]:
         with self._lock:
             return self._format_usage(self._load_unlocked())
+
+    def record_publishing_limit(self, value: Mapping[str, Any] | None) -> None:
+        if not isinstance(value, Mapping):
+            return
+        normalized = {}
+        for key in ("used", "total", "remaining"):
+            try:
+                normalized[key] = max(int(value.get(key)), 0)
+            except (TypeError, ValueError):
+                return
+        with self._lock:
+            data = self._load_unlocked()
+            data["publishing_limit"] = normalized
+            data["publishing_limit_at"] = self._now()
+            data["updated_at"] = data["publishing_limit_at"]
+            self._save_unlocked(data)
+
+    def should_throttle(self) -> bool:
+        usage = self.get_usage().get("usage_percent")
+        return usage is not None and usage >= float(settings.INSTAGRAM_USAGE_SOFT_THRESHOLD)
+
+    def should_pause_new_tasks(self) -> bool:
+        usage = self.get_usage().get("usage_percent")
+        return usage is not None and usage >= float(settings.INSTAGRAM_USAGE_HARD_THRESHOLD)
 
     def _format_usage(self, data: dict[str, Any]) -> dict[str, Any]:
         meta_usage = data.get("last_meta_usage") or {}
@@ -284,6 +364,8 @@ class InstagramApiUsageTracker:
             "http_requests_today": int(data.get("http_requests_today", 0)),
             "total_http_requests": int(data.get("total_http_requests", 0)),
             "batch_http_requests_today": int(data.get("batch_http_requests_today", 0)),
+            "rate_limit_events_today": int(data.get("rate_limit_events_today", 0)),
+            "total_rate_limit_events": int(data.get("total_rate_limit_events", 0)),
             "methods": [
                 {"endpoint": endpoint, **values}
                 for endpoint, values in sorted(methods.items())
@@ -298,6 +380,8 @@ class InstagramApiUsageTracker:
                 "remaining_percent": max(100 - usage_percent, 0) if usage_percent is not None else None,
                 "observed_at": data.get("last_meta_usage_at"),
             },
+            "publishing_limit": data.get("publishing_limit"),
+            "publishing_limit_observed_at": data.get("publishing_limit_at"),
             "usage_percent": usage_percent,
             "remaining_percent": max(100 - usage_percent, 0) if usage_percent is not None else None,
             "updated_at": data.get("updated_at"),

@@ -97,6 +97,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [previewImage, setPreviewImage] = useState(null);
   const [taskBusyId, setTaskBusyId] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
+  const [quotaEstimate, setQuotaEstimate] = useState(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   const applyConfig = useCallback((config) => {
@@ -370,12 +372,23 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     }
   };
 
-  const requestExecute = () => {
+  const requestExecute = async () => {
     if (!worksheetName) return toast.warning('請先選擇工作表');
     if (!titleColumn || !descriptionColumn) return toast.warning('請先選擇標題與描述欄位');
     if (titleColumn === descriptionColumn) return toast.warning('標題與描述不能使用同一欄位');
     if (!selectedTeam) return toast.warning('請先選擇所屬團體');
     if (!videos.length) return toast.warning('請先讀取草稿影片');
+    const activeCount = videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length;
+    if (!activeCount) return toast.warning('目前沒有指定人物的影片');
+    setEstimateLoading(true);
+    try {
+      setQuotaEstimate(await api.estimateYoutubeQuota({ operation: 'youtube.metadata_update', itemCount: activeCount }));
+    } catch (error) {
+      setQuotaEstimate(null);
+      toast.warning(`無法取得 quota 預估，仍可建立任務：${error.message}`);
+    } finally {
+      setEstimateLoading(false);
+    }
     setConfirmOpen(true);
   };
 
@@ -394,7 +407,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
   return (
     <div className="section-gap">
-      <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」處理 ${videos.length} 支影片。未指定人物的影片會略過。`} confirmText="確認開始覆寫" cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
+      <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」處理 ${videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length} 支影片。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} units。${quotaEstimate.can_complete_today ? '預計今天可完成。' : '預計部分任務會等待下一次官方重設。'}` : '未指定人物的影片會略過。'} `} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
       <YouTubeQuotaBanner refreshKey={quotaRefreshKey} />
 
       <div>

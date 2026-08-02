@@ -23,6 +23,8 @@ _CONFIG_FILE = _DATA_DIR / "runtime_config.json"
 _PERSISTABLE_FIELDS = {
     "default_spreadsheet_id",
     "default_playlist_id",
+    "youtube_general_quota_limit",
+    "youtube_quota_safety_buffer_units",
     "youtube_draft_video_config",
     "youtube_draft_shorts_config",
     "instagram_drive_folder_id",

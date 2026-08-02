@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from backend.app.core.database import DATA_DIR, Database, database
+from backend.app.core.instagram_limiter import InstagramLimiter
+from backend.app.core.youtube_quota_limiter import YouTubeQuotaLimiter
 
 ACTIVE_STATUSES = {"queued", "running", "cancel_requested"}
 UNFINISHED_STATUSES = {"queued", "running", "cancel_requested", "paused"}
@@ -46,6 +48,9 @@ STAGE_LABELS = {
     "creating_container": "建立 Instagram container",
     "container_created": "Instagram container 已建立",
     "waiting_container": "等待 Instagram 處理影片",
+    "waiting_rate_limit": "等待 Meta 限流解除",
+    "waiting_youtube_quota": "等待 YouTube 配額重設",
+    "external_state_unknown": "等待確認 Instagram 外部狀態",
     "publishing": "發布 Instagram Reel",
     "published": "Instagram 已發布",
     "moving_drive": "移入 Google Drive Published",
@@ -159,9 +164,16 @@ def _batch_dict(row, *, public: bool = False) -> dict[str, Any]:
 
 
 class TaskRepository:
-    def __init__(self, db: Database = database):
+    def __init__(
+        self,
+        db: Database = database,
+        instagram_limiter: Optional[InstagramLimiter] = None,
+        youtube_limiter: Optional[YouTubeQuotaLimiter] = None,
+    ):
         self.db = db
         self.db.initialize()
+        self.instagram_limiter = instagram_limiter or InstagramLimiter(self.db)
+        self.youtube_limiter = youtube_limiter or YouTubeQuotaLimiter(self.db)
 
     @staticmethod
     def _new_id(prefix: str) -> str:
@@ -418,9 +430,9 @@ class TaskRepository:
                     INSERT INTO tasks
                       (id,batch_id,platform,operation,queue_lane,queue_sequence,sequence_in_batch,
                        video_id,video_title,thumbnail_url,status,stage,stage_label,progress_percent,
-                       attempt,retryable,created_at,queued_at,updated_at,finished_at,cancel_too_late,
+                       attempt,retryable,created_at,queued_at,next_attempt_at,updated_at,finished_at,cancel_too_late,
                        error,payload_json,checkpoint_json,result_json,legacy_item_sequence)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         task_id,
@@ -441,6 +453,7 @@ class TaskRepository:
                         1 if bool(spec.get("retryable", status not in {"skipped", "succeeded"})) else 0,
                         task_now,
                         task_now if status == "queued" else None,
+                        spec.get("next_attempt_at") if status == "queued" else None,
                         task_now,
                         finished_at,
                         1 if bool(spec.get("cancel_too_late")) else 0,
@@ -540,14 +553,22 @@ class TaskRepository:
                 "started_at",
                 "updated_at",
                 "finished_at",
-                "cancel_requested_at",
+                 "cancel_requested_at",
                 "canceled_at",
                 "cancel_scope",
                 "cancel_reason",
                 "cancel_too_late",
-                "error",
-            )
+                 "error",
+                 "next_attempt_at",
+             )
         }
+        checkpoint = task.get("checkpoint") or {}
+        safe["youtube_public_pending_cleanup"] = bool(
+            task.get("platform") == "youtube"
+            and task.get("operation") == "youtube.publish_cleanup"
+            and checkpoint.get("privacy_updated_at")
+            and not checkpoint.get("playlist_removed_at")
+        )
         safe["queue_position"] = self._queue_position(connection, task)
         safe["batch_short_code"] = _short_code(str(task.get("batch_id") or ""))
         return safe
@@ -686,6 +707,9 @@ class TaskRepository:
             if result:
                 next_result.update(sanitize_payload(result))
             now = utc_now()
+            next_attempt_at = current.get("next_attempt_at")
+            if next_status in TERMINAL_STATUSES or next_status == "running":
+                next_attempt_at = None
             finished_at = current.get("finished_at")
             if next_status in TERMINAL_STATUSES:
                 finished_at = finished_at or now
@@ -695,6 +719,7 @@ class TaskRepository:
                 "stage_label = ?",
                 "progress_percent = ?",
                 "updated_at = ?",
+                "next_attempt_at = ?",
                 "finished_at = ?",
                 "checkpoint_json = ?",
                 "result_json = ?",
@@ -705,6 +730,7 @@ class TaskRepository:
                 next_label,
                 next_progress,
                 now,
+                next_attempt_at,
                 finished_at,
                 _json_dumps(next_checkpoint),
                 _json_dumps(next_result),
@@ -826,25 +852,26 @@ class TaskRepository:
     def claim_next(self, queue_lane: str) -> Optional[dict[str, Any]]:
         lane = queue_lane if queue_lane in LANES else "youtube"
         with self.db.transaction() as connection:
+            now = utc_now()
             row = connection.execute(
                 """
                 SELECT * FROM tasks
                 WHERE queue_lane = ? AND status = 'queued' AND cancel_requested_at IS NULL
+                  AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?))
                 ORDER BY queue_sequence ASC, id ASC LIMIT 1
                 """,
-                (lane,),
+                (lane, now),
             ).fetchone()
             if row is None:
                 return None
             task = _task_dict(row)
             # The condition is repeated in the UPDATE so a cancellation that
             # committed between a read and a write can never be claimed.
-            now = utc_now()
             updated = connection.execute(
                 """
                 UPDATE tasks
                 SET status='running', stage='running', stage_label=?, started_at=COALESCE(started_at,?),
-                    updated_at=?, queued_at=COALESCE(queued_at,?)
+                    updated_at=?, queued_at=COALESCE(queued_at,?), next_attempt_at=NULL
                 WHERE id=? AND status='queued' AND cancel_requested_at IS NULL
                 """,
                 (STAGE_LABELS["running"], now, now, now, task["id"]),
@@ -878,14 +905,16 @@ class TaskRepository:
         lane = queue_lane if queue_lane in LANES else "youtube"
         safe_limit = min(max(int(limit), 1), 50)
         with self.db.transaction() as connection:
+            now = utc_now()
             rows = connection.execute(
                 """
                 SELECT * FROM tasks
                 WHERE queue_lane = ? AND status = 'queued' AND cancel_requested_at IS NULL
+                  AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?))
                 ORDER BY queue_sequence ASC, id ASC
                 LIMIT ?
                 """,
-                (lane, safe_limit),
+                (lane, now, safe_limit),
             ).fetchall()
             if not rows:
                 return []
@@ -898,15 +927,14 @@ class TaskRepository:
             if not claim_rows:
                 return []
 
-            now = utc_now()
             claimed_ids: list[str] = []
             for row in claim_rows:
                 task_id = str(row["id"])
                 updated = connection.execute(
                     """
                     UPDATE tasks
-                    SET status='running', stage='running', stage_label=?, started_at=COALESCE(started_at,?),
-                        updated_at=?, queued_at=COALESCE(queued_at,?)
+                     SET status='running', stage='running', stage_label=?, started_at=COALESCE(started_at,?),
+                         updated_at=?, queued_at=COALESCE(queued_at,?), next_attempt_at=NULL
                     WHERE id=? AND status='queued' AND cancel_requested_at IS NULL
                     """,
                     (STAGE_LABELS["running"], now, now, now, task_id),
@@ -1007,7 +1035,7 @@ class TaskRepository:
             connection.execute(
                 """
                 UPDATE tasks SET status=?,stage=?,stage_label=?,updated_at=?,finished_at=?,canceled_at=?,
-                  retryable=?,error=? WHERE id=?
+                  retryable=?,error=?,next_attempt_at=NULL WHERE id=?
                 """,
                 (
                     next_status,
@@ -1191,7 +1219,287 @@ class TaskRepository:
             return False
         return True
 
+    def _retry_due_at(
+        self,
+        task: dict[str, Any],
+        limiter_state: Optional[dict[str, Any]] = None,
+        youtube_state: Optional[dict[str, Any]] = None,
+    ) -> Optional[str]:
+        if task.get("platform") == "youtube":
+            usage = youtube_state
+            if usage is None:
+                try:
+                    usage = self.youtube_limiter.get_usage()
+                except Exception:
+                    return None
+            if usage.get("state") in {"safety_blocked", "confirmed_exhausted"}:
+                return str(usage.get("blocked_until") or usage.get("reset_at"))
+            return None
+        if task.get("platform") != "instagram":
+            return None
+        checkpoint = task.get("checkpoint") or {}
+        if checkpoint.get("media_id"):
+            return None
+        state = limiter_state
+        if state is None:
+            try:
+                state = self.instagram_limiter.get_state()
+            except Exception:
+                return None
+        return str(state.get("cooldown_until")) if state.get("is_cooling") else None
+
+    def defer_task(
+        self,
+        task_id: str,
+        *,
+        next_attempt_at: str,
+        error: Any,
+        checkpoint: Optional[dict[str, Any]] = None,
+        message: str = "Instagram 受到 Meta 限流，已延後自動重試。",
+    ) -> Optional[dict[str, Any]]:
+        """Return a running task to the durable queue without marking it failed."""
+
+        with self.db.transaction() as connection:
+            row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            current = _task_dict(row)
+            if current.get("status") in TERMINAL_STATUSES:
+                return current
+            current_checkpoint = dict(current.get("checkpoint") or {})
+            if checkpoint:
+                current_checkpoint.update(sanitize_payload(checkpoint))
+            now = utc_now()
+            safe_error = _safe_error(error)
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status='queued', stage='waiting_rate_limit', stage_label=?, updated_at=?,
+                    next_attempt_at=?, started_at=NULL, finished_at=NULL, retryable=1,
+                    error=?, checkpoint_json=?
+                WHERE id=? AND status IN ('running','cancel_requested','queued')
+                """,
+                (
+                    STAGE_LABELS["waiting_rate_limit"],
+                    now,
+                    next_attempt_at,
+                    safe_error,
+                    _json_dumps(current_checkpoint),
+                    task_id,
+                ),
+            )
+            event_key = f"task:{task_id}:rate-limit:attempt:{current.get('attempt', 1)}:{next_attempt_at}"
+            self._insert_event(
+                connection,
+                task_id=task_id,
+                batch_id=current["batch_id"],
+                event_type="rate_limit_deferred",
+                from_status=current["status"],
+                to_status="queued",
+                message=message,
+                event_key=event_key,
+                created_at=now,
+            )
+            self._insert_notification(
+                connection,
+                event_key=event_key,
+                notification_type="instagram_rate_limited",
+                severity="warning",
+                title="等待 Meta 限流解除",
+                message=safe_error or message,
+                task_id=task_id,
+                batch_id=current["batch_id"],
+            )
+            self._recompute_batch(connection, current["batch_id"], notify=False)
+            return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+
+    def defer_task_until(
+        self,
+        task_id: str,
+        *,
+        next_attempt_at: str,
+        error: Any,
+        stage: str,
+        stage_label: Optional[str] = None,
+        event_type: str = "task_deferred",
+        notification_type: Optional[str] = None,
+        notification_severity: str = "warning",
+        notification_title: str = "任務已延後",
+        message: str = "任務已延後，系統將自動重試。",
+        checkpoint: Optional[dict[str, Any]] = None,
+        notify: bool = True,
+    ) -> Optional[dict[str, Any]]:
+        """Return work to the durable queue with a caller-selected reason.
+
+        Instagram and YouTube use different breaker semantics, so their
+        public convenience methods remain separate while all queue mutation
+        lives here.
+        """
+
+        normalized_stage = stage or "queued"
+        label = stage_label or STAGE_LABELS.get(normalized_stage, normalized_stage)
+        with self.db.transaction() as connection:
+            row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+            if row is None:
+                return None
+            current = _task_dict(row)
+            if current.get("status") in TERMINAL_STATUSES:
+                return current
+            current_checkpoint = dict(current.get("checkpoint") or {})
+            if checkpoint:
+                current_checkpoint.update(sanitize_payload(checkpoint))
+            now = utc_now()
+            safe_error = _safe_error(error)
+            connection.execute(
+                """
+                UPDATE tasks
+                SET status='queued', stage=?, stage_label=?, updated_at=?, next_attempt_at=?,
+                    started_at=NULL, finished_at=NULL, retryable=1, error=?, checkpoint_json=?
+                WHERE id=? AND status IN ('running','cancel_requested','queued')
+                """,
+                (
+                    normalized_stage,
+                    label,
+                    now,
+                    next_attempt_at,
+                    safe_error,
+                    _json_dumps(current_checkpoint),
+                    task_id,
+                ),
+            )
+            event_key = f"task:{task_id}:{event_type}:attempt:{current.get('attempt', 1)}:{next_attempt_at}"
+            self._insert_event(
+                connection,
+                task_id=task_id,
+                batch_id=current["batch_id"],
+                event_type=event_type,
+                from_status=current["status"],
+                to_status="queued",
+                message=safe_error or message,
+                event_key=event_key,
+                created_at=now,
+            )
+            if notify and notification_type:
+                self._insert_notification(
+                    connection,
+                    event_key=event_key,
+                    notification_type=notification_type,
+                    severity=notification_severity,
+                    title=notification_title,
+                    message=safe_error or message,
+                    task_id=task_id,
+                    batch_id=current["batch_id"],
+                    created_at=now,
+                )
+            self._recompute_batch(connection, current["batch_id"], notify=False)
+            return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
+
+    def defer_youtube_quota_task(
+        self,
+        task_id: str,
+        *,
+        next_attempt_at: str,
+        error: Any,
+        checkpoint: Optional[dict[str, Any]] = None,
+    ) -> Optional[dict[str, Any]]:
+        return self.defer_task_until(
+            task_id,
+            next_attempt_at=next_attempt_at,
+            error=error,
+            stage="waiting_youtube_quota",
+            event_type="youtube_quota_deferred",
+            notification_type=None,
+            message="YouTube 配額已用盡，任務會在官方重設後自動重試。",
+            checkpoint=checkpoint,
+            notify=False,
+        )
+
+    def defer_youtube_lane(
+        self,
+        *,
+        next_attempt_at: str,
+        quota_date: str,
+        bucket: str = "general",
+        state: str = "confirmed_exhausted",
+        exclude_task_id: Optional[str] = None,
+        message: str = "Google 已回報 YouTube 配額暫時不可用，後續任務將於官方重設後自動重試。",
+    ) -> int:
+        """Move queued YouTube work behind the same durable breaker.
+
+        Task events are retained for auditability, but the notification uses a
+        quota-date/bucket/state key so a large lane creates one notice only.
+        """
+
+        with self.db.transaction() as connection:
+            clauses = ["queue_lane='youtube'", "platform='youtube'", "status='queued'"]
+            values: list[Any] = []
+            if exclude_task_id:
+                clauses.append("id <> ?")
+                values.append(exclude_task_id)
+            rows = connection.execute(
+                f"SELECT * FROM tasks WHERE {' AND '.join(clauses)} ORDER BY queue_sequence, id", values
+            ).fetchall()
+            now = utc_now()
+            batch_ids: set[str] = set()
+            for row in rows:
+                current = _task_dict(row)
+                batch_ids.add(current["batch_id"])
+                connection.execute(
+                    """
+                    UPDATE tasks
+                    SET stage='waiting_youtube_quota', stage_label=?, next_attempt_at=?, updated_at=?, retryable=1
+                    WHERE id=? AND status='queued'
+                    """,
+                    (STAGE_LABELS["waiting_youtube_quota"], next_attempt_at, now, current["id"]),
+                )
+                self._insert_event(
+                    connection,
+                    task_id=current["id"],
+                    batch_id=current["batch_id"],
+                    event_type="youtube_quota_lane_deferred",
+                    from_status="queued",
+                    to_status="queued",
+                    message=message,
+                    event_key=(
+                        f"task:{current['id']}:youtube-quota-lane:{quota_date}:{bucket}:{state}:"
+                        f"attempt:{current.get('attempt', 1)}"
+                    ),
+                    created_at=now,
+                )
+            for batch_id in batch_ids:
+                self._recompute_batch(connection, batch_id, notify=False)
+            event_key = f"youtube-quota:{quota_date}:{bucket}:{state}"
+            title = "YouTube 配額已停止新的請求"
+            notification_type = (
+                "youtube_quota_exhausted" if state == "confirmed_exhausted" else "youtube_quota_safety_blocked"
+            )
+            severity = "error" if state == "confirmed_exhausted" else "warning"
+            count = len(rows) + (1 if exclude_task_id else 0)
+            notice = f"{message} 目前約有 {count} 支 YouTube 任務等待自動重試。"
+            self._insert_notification(
+                connection,
+                event_key=event_key,
+                notification_type=notification_type,
+                severity=severity,
+                title=title,
+                message=notice,
+                created_at=now,
+            )
+            return len(rows)
+
     def retry_task(self, task_id: str) -> Optional[dict[str, Any]]:
+        limiter_state = None
+        youtube_state = None
+        try:
+            limiter_state = self.instagram_limiter.get_state()
+        except Exception:
+            limiter_state = None
+        try:
+            preview = self.get_task_internal(task_id)
+            if preview and preview.get("platform") == "youtube":
+                youtube_state = self.youtube_limiter.get_usage()
+        except Exception:
+            youtube_state = None
         with self.db.transaction() as connection:
             row = connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
             if row is None:
@@ -1201,18 +1509,33 @@ class TaskRepository:
                 raise ValueError("目前沒有可重試的未完成階段")
             now = utc_now()
             next_attempt = int(current.get("attempt") or 1) + 1
+            next_attempt_at = self._retry_due_at(current, limiter_state, youtube_state)
+            next_stage = (
+                ("waiting_youtube_quota" if current.get("platform") == "youtube" else "waiting_rate_limit")
+                if next_attempt_at
+                else "queued"
+            )
             max_sequence = connection.execute(
                 "SELECT COALESCE(MAX(queue_sequence), 0) AS sequence FROM tasks WHERE queue_lane = ?",
                 (current["queue_lane"],),
             ).fetchone()["sequence"]
             connection.execute(
                 """
-                UPDATE tasks SET status='queued',stage='queued',stage_label=?,progress_percent=0,attempt=?,
-                  retryable=1,queue_sequence=?,queued_at=?,started_at=NULL,updated_at=?,finished_at=NULL,
+                UPDATE tasks SET status='queued',stage=?,stage_label=?,progress_percent=0,attempt=?,
+                  retryable=1,queue_sequence=?,queued_at=?,next_attempt_at=?,started_at=NULL,updated_at=?,finished_at=NULL,
                   cancel_requested_at=NULL,canceled_at=NULL,cancel_scope=NULL,cancel_reason=NULL,
                   cancel_too_late=0,error=NULL WHERE id=?
                 """,
-                (STAGE_LABELS["queued"], next_attempt, int(max_sequence) + 1, now, now, task_id),
+                (
+                    next_stage,
+                    STAGE_LABELS[next_stage],
+                    next_attempt,
+                    int(max_sequence) + 1,
+                    now,
+                    next_attempt_at,
+                    now,
+                    task_id,
+                ),
             )
             self._insert_event(
                 connection,
@@ -1221,7 +1544,7 @@ class TaskRepository:
                 event_type="retried",
                 from_status=current["status"],
                 to_status="queued",
-                message="已重新排入隊列",
+                message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。" if next_attempt_at else "已重新排入隊列",
                 event_key=f"task:{task_id}:retry:attempt:{next_attempt}",
                 created_at=now,
             )
@@ -1229,6 +1552,18 @@ class TaskRepository:
             return _task_dict(connection.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone())
 
     def retry_batch(self, batch_id: str) -> list[dict[str, Any]]:
+        limiter_state = None
+        youtube_state = None
+        try:
+            limiter_state = self.instagram_limiter.get_state()
+        except Exception:
+            limiter_state = None
+        try:
+            batch_preview = self.get_batch_internal(batch_id)
+            if batch_preview and batch_preview.get("platform") == "youtube":
+                youtube_state = self.youtube_limiter.get_usage()
+        except Exception:
+            youtube_state = None
         with self.db.transaction() as connection:
             rows = connection.execute(
                 "SELECT * FROM tasks WHERE batch_id = ? ORDER BY sequence_in_batch ASC, id ASC", (batch_id,)
@@ -1251,14 +1586,29 @@ class TaskRepository:
                 queue_sequence = next_by_lane.get(lane, 1)
                 next_by_lane[lane] = queue_sequence + 1
                 next_attempt = int(task.get("attempt") or 1) + 1
+                next_attempt_at = self._retry_due_at(task, limiter_state, youtube_state)
+                next_stage = (
+                    ("waiting_youtube_quota" if task.get("platform") == "youtube" else "waiting_rate_limit")
+                    if next_attempt_at
+                    else "queued"
+                )
                 connection.execute(
                     """
-                    UPDATE tasks SET status='queued',stage='queued',stage_label=?,progress_percent=0,attempt=?,
-                      retryable=1,queue_sequence=?,queued_at=?,started_at=NULL,updated_at=?,finished_at=NULL,
+                    UPDATE tasks SET status='queued',stage=?,stage_label=?,progress_percent=0,attempt=?,
+                      retryable=1,queue_sequence=?,queued_at=?,next_attempt_at=?,started_at=NULL,updated_at=?,finished_at=NULL,
                       cancel_requested_at=NULL,canceled_at=NULL,cancel_scope=NULL,cancel_reason=NULL,
                       cancel_too_late=0,error=NULL WHERE id=?
                     """,
-                    (STAGE_LABELS["queued"], next_attempt, queue_sequence, now, now, task["id"]),
+                    (
+                        next_stage,
+                        STAGE_LABELS[next_stage],
+                        next_attempt,
+                        queue_sequence,
+                        now,
+                        next_attempt_at,
+                        now,
+                        task["id"],
+                    ),
                 )
                 self._insert_event(
                     connection,
@@ -1267,7 +1617,7 @@ class TaskRepository:
                     event_type="retried",
                     from_status=task["status"],
                     to_status="queued",
-                    message="已重新排入隊列",
+                    message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。" if next_attempt_at else "已重新排入隊列",
                     event_key=f"task:{task['id']}:retry:attempt:{next_attempt}",
                     created_at=now,
                 )

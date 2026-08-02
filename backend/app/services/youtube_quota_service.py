@@ -1,150 +1,74 @@
-"""Persistent request-level estimate of YouTube Data API quota usage."""
+"""Compatibility facade for the SQLite-backed YouTube quota ledger."""
 
-import json
-import logging
-from datetime import datetime, timedelta, timezone
+from __future__ import annotations
+
 from pathlib import Path
-from threading import Lock
-from typing import Any, Dict
-from zoneinfo import ZoneInfo
+from typing import Any
 
-logger = logging.getLogger(__name__)
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_DATA_DIR = _PROJECT_ROOT / "data"
-_QUOTA_FILE = _DATA_DIR / "youtube_quota_usage.json"
-_PACIFIC = ZoneInfo("America/Los_Angeles")
-
-# Official YouTube Data API v3 quota costs for every method currently called by
-# this application. Costs are per HTTP request, not per returned item. That
-# means pagination and videos.list batches of at most 50 IDs each count as
-# separate requests.
-QUOTA_COSTS = {
-    "playlistItems.list": 1,
-    "videos.list": 1,
-    "videos.update": 50,
-    "playlistItems.delete": 50,
-}
-
-QUOTA_SOURCE_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
-QUOTA_COSTS_VERIFIED_AT = "2026-08-01"
-DEFAULT_DAILY_LIMIT = 10_000
+from backend.app.core.database import Database, database
+from backend.app.core.youtube_quota_limiter import (
+    DEFAULT_DAILY_LIMIT,
+    LEGACY_QUOTA_FILE,
+    OFFICIAL_DEFAULT_LIMIT,
+    QUOTA_COSTS,
+    QUOTA_COSTS_VERIFIED_AT,
+    QUOTA_RULES_VERIFIED_AT,
+    QUOTA_SOURCE_URL,
+    YOUTUBE_QUOTA_METHODS,
+    YouTubeQuotaLimiter,
+    current_youtube_quota_context,
+    youtube_quota_limiter,
+)
 
 
 class YouTubeQuotaTracker:
-    """Thread-safe JSON-backed tracker for requests sent by this application."""
+    """Keep the old import surface while delegating every operation to SQLite."""
 
-    def __init__(self, path: Path = _QUOTA_FILE, daily_limit: int = DEFAULT_DAILY_LIMIT):
-        self._path = path
-        self._daily_limit = daily_limit
-        self._lock = Lock()
+    def __init__(
+        self,
+        path: str | Path = LEGACY_QUOTA_FILE,
+        daily_limit: int | None = None,
+        *,
+        db: Database = database,
+        safety_buffer_units: int | None = None,
+    ) -> None:
+        self.limiter = YouTubeQuotaLimiter(
+            db,
+            legacy_path=path,
+            configured_limit=daily_limit,
+            safety_buffer_units=safety_buffer_units,
+        )
 
-    @staticmethod
-    def _quota_date(now: datetime | None = None) -> str:
-        current = now or datetime.now(timezone.utc)
-        return current.astimezone(_PACIFIC).date().isoformat()
+    def record(self, method: str, calls: int = 1) -> dict[str, Any]:
+        return self.limiter.record(method, calls)
 
-    @staticmethod
-    def _next_reset(now: datetime | None = None) -> datetime:
-        current = (now or datetime.now(timezone.utc)).astimezone(_PACIFIC)
-        next_day = current.date() + timedelta(days=1)
-        return datetime.combine(next_day, datetime.min.time(), tzinfo=_PACIFIC)
+    def execute(self, request: Any, method: str, **kwargs: Any) -> Any:
+        return self.limiter.execute(request, method, **kwargs)
 
-    def _empty_data(self, quota_date: str) -> Dict[str, Any]:
-        return {
-            "quota_date": quota_date,
-            "daily_limit": self._daily_limit,
-            "used_units": 0,
-            "methods": {},
-            "updated_at": None,
-        }
+    def get_usage(self, now=None) -> dict[str, Any]:
+        return self.limiter.get_usage(now=now)
 
-    def _load_unlocked(self) -> Dict[str, Any]:
-        quota_date = self._quota_date()
-        if not self._path.is_file():
-            return self._empty_data(quota_date)
-
-        try:
-            with self._path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Failed to load YouTube quota usage: %s", exc)
-            return self._empty_data(quota_date)
-
-        if data.get("quota_date") != quota_date:
-            return self._empty_data(quota_date)
-
-        data.setdefault("daily_limit", self._daily_limit)
-        data.setdefault("used_units", 0)
-        data.setdefault("methods", {})
-        data.setdefault("updated_at", None)
-        return data
-
-    def _save_unlocked(self, data: Dict[str, Any]) -> None:
-        try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self._path.with_suffix(".tmp")
-            with tmp_path.open("w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            tmp_path.replace(self._path)
-        except OSError as exc:
-            logger.error("Failed to persist YouTube quota usage: %s", exc)
-
-    def record(self, method: str, calls: int = 1) -> Dict[str, Any]:
-        """Record requests using Google's documented per-request method cost."""
-        if calls <= 0:
-            return self.get_usage()
-
-        cost_per_call = QUOTA_COSTS.get(method)
-        if cost_per_call is None:
-            # Do not silently invent a cost. New API methods must be added from
-            # the official quota table before they can be tracked accurately.
-            logger.error("Unknown YouTube quota method was not recorded: %s", method)
-            return self.get_usage()
-
-        with self._lock:
-            data = self._load_unlocked()
-            units = cost_per_call * calls
-            method_data = data["methods"].setdefault(
-                method,
-                {"calls": 0, "units": 0, "cost_per_call": cost_per_call},
-            )
-            # Refresh the displayed cost if an official method cost changes in
-            # a future release while retaining today's accumulated totals.
-            method_data["cost_per_call"] = cost_per_call
-            method_data["calls"] += calls
-            method_data["units"] += units
-            data["used_units"] += units
-            data["updated_at"] = datetime.now(timezone.utc).isoformat()
-            self._save_unlocked(data)
-            return self._format_usage(data)
-
-    def get_usage(self) -> Dict[str, Any]:
-        with self._lock:
-            return self._format_usage(self._load_unlocked())
-
-    def _format_usage(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        used = int(data.get("used_units", 0))
-        limit = int(data.get("daily_limit", self._daily_limit))
-        return {
-            "quota_date": data.get("quota_date", self._quota_date()),
-            "daily_limit": limit,
-            "used_units": used,
-            "remaining_units": max(limit - used, 0),
-            "usage_percent": round((used / limit * 100), 2) if limit else 0,
-            "methods": [{"method": method, **values} for method, values in sorted(data.get("methods", {}).items())],
-            "updated_at": data.get("updated_at"),
-            "reset_at": self._next_reset().isoformat(),
-            "reset_timezone": "America/Los_Angeles",
-            "is_estimate": True,
-            "calculation_basis": "official-per-request-method-cost",
-            "quota_source_url": QUOTA_SOURCE_URL,
-            "quota_costs_verified_at": QUOTA_COSTS_VERIFIED_AT,
-            "note": (
-                "依 YouTube 官方各方法的每次 request 配額成本計算；分頁與每 50 部影片一批的 "
-                "videos.list 都分別計次。僅統計此系統送出的請求，不含同一 Google Cloud 專案的其他應用程式。"
-            ),
-        }
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.limiter, name)
 
 
+# The application-wide instance is retained for callers that imported the
+# previous tracker.  Task handlers can override it with a repository-scoped
+# limiter through youtube_quota_context().
 youtube_quota_tracker = YouTubeQuotaTracker()
+
+
+__all__ = [
+    "DEFAULT_DAILY_LIMIT",
+    "OFFICIAL_DEFAULT_LIMIT",
+    "QUOTA_COSTS",
+    "QUOTA_COSTS_VERIFIED_AT",
+    "QUOTA_RULES_VERIFIED_AT",
+    "QUOTA_SOURCE_URL",
+    "YOUTUBE_QUOTA_METHODS",
+    "YouTubeQuotaLimiter",
+    "YouTubeQuotaTracker",
+    "current_youtube_quota_context",
+    "youtube_quota_limiter",
+    "youtube_quota_tracker",
+]

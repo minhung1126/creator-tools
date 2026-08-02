@@ -33,6 +33,8 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
+  const [quotaEstimate, setQuotaEstimate] = useState(null);
+  const [estimateLoading, setEstimateLoading] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState(null);
 
   const handleLoadPlaylist = async () => {
@@ -90,6 +92,19 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
     }
   };
 
+  const requestPublish = async () => {
+    setEstimateLoading(true);
+    try {
+      setQuotaEstimate(await api.estimateYoutubeQuota({ operation: 'youtube.publish_cleanup', itemCount: videos.length }));
+    } catch (error) {
+      setQuotaEstimate(null);
+      toast.warning(`無法取得 quota 預估，仍可建立任務：${error.message}`);
+    } finally {
+      setEstimateLoading(false);
+    }
+    setConfirmOpen(true);
+  };
+
   const metadataBlock = (title, description) => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
       <div>
@@ -110,8 +125,8 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
       <ConfirmDialog
         open={confirmOpen}
         title="確認公開並清理清單"
-        message={`確定要依上傳時間由最早到最晚，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）`}
-        confirmText="確認公開並移出 To-Post"
+        message={`確定要依上傳時間由最早到最晚，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）${quotaEstimate ? `\n最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今天預計可處理 ${quotaEstimate.max_items_today ?? videos.length} 支，其餘 ${Math.max(videos.length - Number(quotaEstimate.max_items_today || 0), 0)} 支會自動跨日續跑。` : ''}`}
+        confirmText={estimateLoading ? '估算中…' : '確認公開並移出 To-Post'}
         cancelText="取消"
         variant="destructive"
         onConfirm={doPublish}
@@ -189,7 +204,7 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
 
           <div className="glass-panel execution-bar">
             <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認上傳時間、標題與描述無誤後，啟動發布流程：</span>
-            <button className="btn btn-primary" onClick={() => setConfirmOpen(true)} disabled={executing} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+            <button className="btn btn-primary" onClick={requestPublish} disabled={executing || estimateLoading} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
               <Send size={18} /> {executing ? '逐支發布並清理中...' : '確認公開並移出 To-Post'}
             </button>
           </div>

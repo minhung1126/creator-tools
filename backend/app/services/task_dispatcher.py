@@ -6,13 +6,16 @@ import logging
 from typing import Any
 
 from backend.app.core.task_repository import TaskRepository, task_repository
+from backend.app.services.instagram_errors import InstagramApiError
 from backend.app.services.task_handlers import (
+    _defer_youtube_quota,
     get_persistent_google_credentials,
     process_instagram_reel_task,
     process_instagram_reel_tasks,
     process_youtube_metadata_task,
     process_youtube_publish_cleanup_task,
 )
+from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,57 @@ class TaskDispatcher:
                     stage="failed",
                     error=f"不支援的任務類型：{operation}",
                     retryable=False,
+                )
+        except YouTubeQuotaUnavailable as exc:
+            logger.warning("YouTube quota unavailable for %s: %s", task_id, exc.user_message)
+            if exc.code in {"youtube_quota_safety_blocked", "youtube_quota_exhausted"}:
+                result = _defer_youtube_quota(task_id, exc, repository=self.repository)
+            else:
+                result = self.repository.update_task(
+                    task_id,
+                    status="failed",
+                    stage="failed",
+                    error=exc.user_message,
+                    retryable=False,
+                    message="YouTube quota method 尚未完成設定",
+                )
+        except InstagramApiError as exc:
+            logger.warning("Instagram API error for %s: %s", task_id, exc.user_message)
+            if exc.rate_limited and exc.safe_to_retry and hasattr(self.repository, "defer_task"):
+                next_attempt_at = exc.estimated_recovery_at
+                if not next_attempt_at:
+                    state = self.repository.instagram_limiter.get_state()
+                    next_attempt_at = state.get("cooldown_until")
+                if not next_attempt_at:
+                    from datetime import datetime, timedelta, timezone
+
+                    next_attempt_at = (
+                        datetime.now(timezone.utc) + timedelta(minutes=1)
+                    ).isoformat()
+                result = self.repository.defer_task(
+                    task_id,
+                    next_attempt_at=str(next_attempt_at),
+                    error=exc.user_message,
+                    checkpoint={"instagram_api_error": exc.to_dict()},
+                )
+            elif exc.uncertain:
+                result = self.repository.update_task(
+                    task_id,
+                    status="paused",
+                    stage="external_state_unknown",
+                    error=exc.user_message,
+                    retryable=False,
+                    message="網路結果不確定，未自動重送 Instagram POST。",
+                    checkpoint={"instagram_api_error": exc.to_dict(), "external_operation_uncertain": True},
+                )
+            else:
+                result = self.repository.update_task(
+                    task_id,
+                    status="failed",
+                    stage="failed",
+                    error=exc.user_message,
+                    retryable=not exc.token_error,
+                    message=exc.user_message,
                 )
         except Exception as exc:  # The lane must not die on one unexpected handler error.
             logger.exception("Task handler crashed for %s", task_id)

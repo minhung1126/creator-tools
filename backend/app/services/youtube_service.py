@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import googleapiclient.discovery
 from google.oauth2.credentials import Credentials
 
+from backend.app.core.youtube_quota_limiter import current_youtube_quota_context
+from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
@@ -14,11 +16,24 @@ def get_youtube_service(credentials: Credentials):
 
 
 def _execute_with_quota(request, method: str):
-    """Execute a YouTube API request and record its documented quota cost."""
-    try:
-        return request.execute()
-    finally:
-        youtube_quota_tracker.record(method)
+    """Reserve the documented cost before executing the request.
+
+    Task handlers install a repository-scoped limiter in the context variable;
+    synchronous API calls use the application-wide facade.  This keeps every
+    YouTube request on the same guard while allowing isolated task repositories
+    in tests and recovery tooling.
+    """
+
+    context = current_youtube_quota_context()
+    if context is not None:
+        return context.limiter.execute(
+            request,
+            method,
+            task_id=context.task_id,
+            batch_id=context.batch_id,
+            operation=context.operation,
+        )
+    return youtube_quota_tracker.execute(request, method)
 
 
 def _deduplicate_videos(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -241,6 +256,8 @@ def publish_and_remove_playlist_item(
     update_result = set_video_public(credentials, video_id, current_video)
     try:
         playlist_cleanup = remove_playlist_item(credentials, playlist_item_id)
+    except YouTubeQuotaUnavailable:
+        raise
     except Exception as exc:
         logger.warning("Failed to delete playlist item %s: %s", playlist_item_id, exc)
         playlist_cleanup = {"error": str(exc)}

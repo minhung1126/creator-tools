@@ -30,4 +30,8 @@ def test_youtube_settings_returns_only_youtube_resource(monkeypatch):
 
     result = settings_api.get_youtube_settings(SimpleNamespace())
 
-    assert result == {"default_playlist_id": "youtube-playlist"}
+    assert result == {
+        "default_playlist_id": "youtube-playlist",
+        "youtube_general_quota_limit": 10000,
+        "youtube_quota_safety_buffer_units": 1000,
+    }

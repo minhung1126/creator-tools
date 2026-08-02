@@ -19,7 +19,7 @@ from typing import Iterator
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "data"
 DATABASE_PATH = DATA_DIR / "creator_tools.db"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -81,6 +81,14 @@ class Database:
                     self._migration_1(connection)
                     connection.execute("PRAGMA user_version = 1")
                     version = 1
+                if version < 2:
+                    self._migration_2(connection)
+                    connection.execute("PRAGMA user_version = 2")
+                    version = 2
+                if version < 3:
+                    self._migration_3(connection)
+                    connection.execute("PRAGMA user_version = 3")
+                    version = 3
                 if version < SCHEMA_VERSION:
                     raise RuntimeError(f"Unsupported creator_tools.db schema version {version}")
 
@@ -171,6 +179,90 @@ class Database:
                 ON notifications(read_at, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_events_task_created
                 ON task_events(task_id, created_at DESC);
+            """
+        )
+
+    @staticmethod
+    def _migration_2(connection: sqlite3.Connection) -> None:
+        columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "next_attempt_at" not in columns:
+            connection.execute("ALTER TABLE tasks ADD COLUMN next_attempt_at TEXT")
+        connection.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tasks_lane_due
+                ON tasks(queue_lane, status, next_attempt_at, queue_sequence, id);
+
+            CREATE TABLE IF NOT EXISTS instagram_limiter (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                cooldown_until TEXT,
+                last_reason TEXT,
+                last_http_status INTEGER,
+                last_meta_code INTEGER,
+                last_error_subcode INTEGER,
+                last_fbtrace_id TEXT,
+                last_endpoint TEXT,
+                last_retry_after TEXT,
+                estimated_recovery_at TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                recent_success_at TEXT,
+                last_failure_at TEXT,
+                last_success_endpoint TEXT,
+                last_app_usage_json TEXT,
+                updated_at TEXT
+            );
+
+            INSERT OR IGNORE INTO instagram_limiter (id) VALUES (1);
+            """
+        )
+
+    @staticmethod
+    def _migration_3(connection: sqlite3.Connection) -> None:
+        """Persist the YouTube quota ledger separately from task history.
+
+        This is intentionally a new migration.  The Instagram migration above
+        is part of the existing dirty worktree and must remain reproducible for
+        installations that are upgrading from schema version 2.
+        """
+
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS youtube_quota_daily (
+                quota_date TEXT NOT NULL,
+                bucket TEXT NOT NULL,
+                configured_limit INTEGER NOT NULL,
+                estimated_used_units INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL DEFAULT 'normal',
+                blocked_reason TEXT,
+                blocked_until TEXT,
+                confirmed_exhausted_at TEXT,
+                last_http_status INTEGER,
+                last_error_reason TEXT,
+                last_error_method TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (quota_date, bucket)
+            );
+
+            CREATE TABLE IF NOT EXISTS youtube_quota_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_key TEXT NOT NULL UNIQUE,
+                quota_date TEXT NOT NULL,
+                bucket TEXT NOT NULL,
+                method TEXT NOT NULL,
+                documented_cost INTEGER NOT NULL,
+                outcome TEXT NOT NULL,
+                http_status INTEGER,
+                error_reason TEXT,
+                task_id TEXT,
+                batch_id TEXT,
+                operation TEXT,
+                created_at TEXT NOT NULL,
+                completed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_youtube_quota_events_date_bucket
+                ON youtube_quota_events(quota_date, bucket, created_at);
+            CREATE INDEX IF NOT EXISTS idx_youtube_quota_events_task
+                ON youtube_quota_events(task_id, created_at);
             """
         )
 
