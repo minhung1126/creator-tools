@@ -8,7 +8,9 @@ import {
   TASK_ACTIVE_STATUSES,
   TASK_NEEDS_ATTENTION,
   TASK_UNFINISHED_QUEUE_STATUSES,
+  taskBadgeClass,
   taskOperationLabel,
+  taskStageLabel,
   taskStatusLabel,
 } from '../utils/taskStatus';
 
@@ -156,8 +158,8 @@ export default function TaskQueuePage({ selectedTaskId, selectedBatchId: focused
       <div className="task-row-video"><strong>{task.video_title || task.video_id || '未命名影片'}</strong><span>{task.video_id || '—'}</span></div>
       <div className="task-row-operation">{taskOperationLabel(task.operation)}</div>
       <div className="task-row-batch"><span>{task.batch_short_code || task.batch_id?.slice(0, 8) || '—'}</span><small>第 {task.sequence_in_batch || '—'} 支</small></div>
-      <div className="task-row-status"><span className={`badge ${task.status === 'failed' ? 'badge-disconnected' : task.status === 'paused' ? 'badge-warning' : 'badge-info'}`}>{taskStatusLabel(task.status)}</span><small>{task.queue_position ? `Lane 第 ${task.queue_position} 位` : '—'}</small></div>
-      <div className="task-row-progress"><span>{task.stage_label || task.stage}</span><div className="task-progress-track"><span style={{ width: `${Math.min(Math.max(task.progress_percent || 0, 0), 100)}%` }} /></div><small>{Math.round(task.progress_percent || 0)}%</small></div>
+      <div className="task-row-status"><span className={`badge ${task.stage === 'waiting_youtube_quota' ? 'badge-warning' : taskBadgeClass(task.status)}`}>{task.stage === 'waiting_youtube_quota' ? '等待 YouTube 配額' : taskStatusLabel(task.status)}</span><small>{task.queue_position ? `Lane 第 ${task.queue_position} 位` : '—'}</small></div>
+      <div className="task-row-progress"><span>{taskStageLabel(task.stage, task.stage_label)}</span><div className="task-progress-track"><span style={{ width: `${Math.min(Math.max(task.progress_percent || 0, 0), 100)}%` }} /></div><small>{Math.round(task.progress_percent || 0)}%</small>{task.next_attempt_at && task.status === 'queued' && <small>自動重試：{new Date(task.next_attempt_at).toLocaleString()}</small>}</div>
       <div className="task-row-time"><span>建立：{task.created_at ? new Date(task.created_at).toLocaleString() : '—'}</span><span>更新：{task.updated_at ? new Date(task.updated_at).toLocaleString() : '—'}</span></div>
       <TaskDetail task={task} compact busy={busyId === task.id} onCancel={() => execute(() => cancelTask(task.id), task.id)} onRetry={() => execute(() => retryTask(task.id), task.id)} />
     </div>

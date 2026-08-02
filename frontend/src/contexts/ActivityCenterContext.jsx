@@ -42,6 +42,9 @@ const notificationToastType = {
   cancel_too_late: 'warning',
   credentials_unavailable: 'error',
   service_restart: 'warning',
+  instagram_rate_limited: 'warning',
+  youtube_quota_safety_blocked: 'warning',
+  youtube_quota_exhausted: 'error',
 };
 
 export function ActivityCenterProvider({ children }) {

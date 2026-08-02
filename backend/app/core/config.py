@@ -26,6 +26,28 @@ class Settings(BaseSettings):
     INSTAGRAM_APP_ID: str = ""
     INSTAGRAM_APP_SECRET: str = ""
 
+    # Instagram request shaping.  These are intentionally server-side knobs
+    # so operators can tune them without changing task or checkpoint code.
+    INSTAGRAM_USAGE_SOFT_THRESHOLD: float = 80.0
+    INSTAGRAM_USAGE_HARD_THRESHOLD: float = 95.0
+    INSTAGRAM_USAGE_RECHECK_SECONDS: float = 300.0
+    INSTAGRAM_COOLDOWN_BASE_SECONDS: float = 60.0
+    INSTAGRAM_COOLDOWN_MAX_SECONDS: float = 3600.0
+    INSTAGRAM_COOLDOWN_JITTER_SECONDS: float = 15.0
+    INSTAGRAM_PUBLISHING_LIMIT_HOURS: float = 24.0
+    INSTAGRAM_METADATA_CACHE_SECONDS: float = 30.0
+    INSTAGRAM_PUBLISHING_LIMIT_CACHE_SECONDS: float = 30.0
+    INSTAGRAM_CONTAINER_INITIAL_POLL_SECONDS: float = 5.0
+    INSTAGRAM_CONTAINER_MAX_POLL_SECONDS: float = 45.0
+    INSTAGRAM_CONTAINER_POLL_JITTER_SECONDS: float = 2.0
+    INSTAGRAM_CONTAINER_MAX_POLLS: int = 40
+
+    # YouTube quota policy values are persisted from the authenticated
+    # settings page; these environment defaults are only the first-run
+    # fallback and never contain secrets.
+    YOUTUBE_GENERAL_QUOTA_LIMIT: int = 10_000
+    YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
+
     # Legacy names are read only to emit a migration warning. They are never
     # used as application credentials.
     META_APP_ID: str = ""

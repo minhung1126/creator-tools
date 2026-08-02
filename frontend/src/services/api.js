@@ -2,17 +2,19 @@ const API_BASE = '/api/v1';
 const DEFAULT_TIMEOUT_MS = 45_000;
 
 export class ApiError extends Error {
-  constructor(message, { status = 0, code = 'request_failed' } = {}) {
+  constructor(message, { status = 0, code = 'request_failed', details = null } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
 function responseMessage(data, status) {
   const detail = data?.detail;
   if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail === 'object' && typeof detail.message === 'string' && detail.message.trim()) return detail.message;
   if (typeof data?.message === 'string' && data.message.trim()) return data.message;
   if (status === 401) return '登入已逾時，請重新登入後再試。';
   if (status === 403) return '目前帳號沒有執行此操作的權限。';
@@ -48,7 +50,8 @@ async function request(endpoint, options = {}) {
     }
     throw new ApiError(responseMessage(data, response.status), {
       status: response.status,
-      code: response.status === 401 ? 'session_expired' : 'request_failed',
+      code: data?.detail?.code || (response.status === 401 ? 'session_expired' : 'request_failed'),
+      details: data?.detail && typeof data.detail === 'object' ? data.detail : null,
     });
   }
   return data;
@@ -72,6 +75,7 @@ export const api = {
   getRandomMemberPreview: (spreadsheetUrlOrId, worksheetName, team, columns) => request('/sheets/random-member-preview', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName, team, columns }) }),
   getCopyableSheetTable: (spreadsheetUrlOrId, worksheetName) => request('/sheets/copy-table', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName }) }),
   getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
+  estimateYoutubeQuota: ({ operation, itemCount }) => request('/youtube/quota-estimate', { method: 'POST', body: JSON.stringify({ operation, item_count: itemCount }) }),
   getPlaylistVideos: (playlistId) => request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
   batchUpdateMetadata: ({ spreadsheetUrlOrId, playlistId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-update', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: playlistId, video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
   publishAndCleanup: (playlistId) => request('/youtube/publish-and-cleanup', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),

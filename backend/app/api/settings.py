@@ -2,9 +2,9 @@ import json
 import logging
 from typing import Dict, List, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.app.core.config import settings
 from backend.app.core.dependencies import require_credentials
@@ -24,6 +24,22 @@ class YouTubeResourceSettingsModel(BaseModel):
     """YouTube-only fallback resources."""
 
     default_playlist_id: str = ""
+    youtube_general_quota_limit: int | None = None
+    youtube_quota_safety_buffer_units: int | None = None
+
+    @model_validator(mode="after")
+    def validate_quota_policy(self):
+        if self.youtube_general_quota_limit is not None and self.youtube_general_quota_limit <= 0:
+            raise ValueError("youtube_general_quota_limit 必須大於 0")
+        if self.youtube_quota_safety_buffer_units is not None and self.youtube_quota_safety_buffer_units < 0:
+            raise ValueError("youtube_quota_safety_buffer_units 必須大於等於 0")
+        if (
+            self.youtube_general_quota_limit is not None
+            and self.youtube_quota_safety_buffer_units is not None
+            and self.youtube_quota_safety_buffer_units >= self.youtube_general_quota_limit
+        ):
+            raise ValueError("youtube_quota_safety_buffer_units 必須小於 youtube_general_quota_limit")
+        return self
 
 
 class YouTubeDraftConfigModel(BaseModel):
@@ -92,13 +108,33 @@ def get_youtube_settings(creds: Credentials = Depends(require_credentials)):
     del creds
     return {
         "default_playlist_id": runtime_config.get("default_playlist_id", ""),
+        "youtube_general_quota_limit": runtime_config.get("youtube_general_quota_limit", 10_000),
+        "youtube_quota_safety_buffer_units": runtime_config.get("youtube_quota_safety_buffer_units", 1_000),
     }
 
 
 @router.put("/youtube")
 def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
-    runtime_config.update({"default_playlist_id": payload.default_playlist_id.strip()})
-    logger.info("YouTube resource settings updated: default_playlist_id")
+    current_limit = int(runtime_config.get("youtube_general_quota_limit", 10_000))
+    current_buffer = int(runtime_config.get("youtube_quota_safety_buffer_units", 1_000))
+    limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit
+    buffer = (
+        payload.youtube_quota_safety_buffer_units
+        if payload.youtube_quota_safety_buffer_units is not None
+        else current_buffer
+    )
+    if limit <= 0:
+        raise HTTPException(status_code=422, detail="youtube_general_quota_limit 必須大於 0")
+    if buffer < 0 or buffer >= limit:
+        raise HTTPException(status_code=422, detail="youtube_quota_safety_buffer_units 必須大於等於 0 且小於 limit")
+    runtime_config.update(
+        {
+            "default_playlist_id": payload.default_playlist_id.strip(),
+            "youtube_general_quota_limit": limit,
+            "youtube_quota_safety_buffer_units": buffer,
+        }
+    )
+    logger.info("YouTube resource settings updated: playlist and quota policy")
     return {"status": "success", "settings": get_youtube_settings(creds)}
 
 

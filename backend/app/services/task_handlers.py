@@ -6,17 +6,22 @@ import logging
 import mimetypes
 import re
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any, Optional
 
 from google.oauth2.credentials import Credentials
 
+from backend.app.core.config import settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.task_repository import TaskRepository, task_repository
+from backend.app.core.youtube_quota_limiter import youtube_quota_context, youtube_quota_limiter
 from backend.app.services.google_auth import build_credentials_from_dict
+from backend.app.services.instagram_errors import InstagramApiError
 from backend.app.services.instagram_service import InstagramBatchError
 from backend.app.services.task_context import TaskCancellationRequested, TaskContext
+from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_service import (
     fetch_video_details,
     remove_playlist_item,
@@ -29,6 +34,57 @@ logger = logging.getLogger(__name__)
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _youtube_task_quota_context(function):
+    """Install the task repository's ledger around every YouTube handler."""
+
+    @wraps(function)
+    def wrapped(task_id: str, *args, **kwargs):
+        repository = kwargs.get("repository") or task_repository
+        task = repository.get_task_internal(task_id) or {}
+        limiter = getattr(repository, "youtube_limiter", None) or youtube_quota_limiter
+        with youtube_quota_context(
+            limiter=limiter,
+            task_id=task_id,
+            batch_id=task.get("batch_id"),
+            operation=task.get("operation"),
+        ):
+            return function(task_id, *args, **kwargs)
+
+    return wrapped
+
+
+def _defer_youtube_quota(
+    task_id: str,
+    exc: YouTubeQuotaUnavailable,
+    *,
+    repository: TaskRepository,
+    checkpoint: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Persist one quota-blocked task and release the rest of the YouTube lane."""
+
+    if exc.code not in {"youtube_quota_safety_blocked", "youtube_quota_exhausted"}:
+        raise exc
+    usage = repository.youtube_limiter.get_usage()
+    state = "confirmed_exhausted" if exc.code == "youtube_quota_exhausted" else "safety_blocked"
+    merged_checkpoint = dict(checkpoint or {})
+    merged_checkpoint["youtube_quota_error"] = exc.to_dict()
+    current = repository.defer_youtube_quota_task(
+        task_id,
+        next_attempt_at=exc.reset_at,
+        error=exc.user_message,
+        checkpoint=merged_checkpoint,
+    )
+    repository.defer_youtube_lane(
+        next_attempt_at=exc.reset_at,
+        quota_date=str(usage.get("quota_date")),
+        bucket=str(usage.get("bucket") or "general"),
+        state=state,
+        exclude_task_id=task_id,
+        message=exc.user_message,
+    )
+    return current or repository.get_task_internal(task_id) or {}
 
 
 def get_persistent_google_credentials() -> Optional[Credentials]:
@@ -50,12 +106,105 @@ def _instagram_dependencies(credentials: Optional[Credentials], client: Any, r2:
 
 
 def _error_text(exc: Exception) -> str:
+    if isinstance(exc, InstagramApiError):
+        return exc.user_message
+    if isinstance(exc, YouTubeQuotaUnavailable):
+        return exc.user_message
     text = str(exc).strip() or type(exc).__name__
     if len(text) > 240 or any(
         marker in text.casefold() for marker in ("token", "secret", "authorization", "response body")
     ):
         return "外部服務處理失敗，請檢查設定後重試。"
     return text
+
+
+def _defer_instagram_rate_limit(
+    context: TaskContext,
+    exc: InstagramApiError,
+    *,
+    repository: TaskRepository,
+) -> dict[str, Any]:
+    """Persist a rate-limited task as queued work with a durable due time."""
+
+    next_attempt_at = exc.estimated_recovery_at
+    if not next_attempt_at:
+        try:
+            state = repository.instagram_limiter.get_state()
+            next_attempt_at = state.get("cooldown_until")
+        except Exception:
+            next_attempt_at = None
+    if not next_attempt_at:
+        next_attempt_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 1))
+        ).isoformat()
+    return (
+        repository.defer_task(
+            context.task_id,
+            next_attempt_at=str(next_attempt_at),
+            error=exc.user_message,
+            checkpoint={"instagram_api_error": exc.to_dict()},
+            message="Meta API 暫時限流，系統將於指定時間自動重試。",
+        )
+        or context.task
+    )
+
+
+def _pause_uncertain_instagram_operation(
+    context: TaskContext,
+    exc: InstagramApiError,
+    *,
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    checkpoint = {
+        "instagram_api_error": exc.to_dict(),
+        "external_operation_uncertain": True,
+        "external_operation_uncertain_at": _now(),
+    }
+    context.checkpoint(checkpoint, stage="external_state_unknown", progress_percent=item.get("progress_percent", 0))
+    return context.finish(
+        "paused",
+        stage="external_state_unknown",
+        progress_percent=item.get("progress_percent", 0),
+        error=exc.user_message,
+        retryable=False,
+        message="網路結果不確定，未自動重送 Instagram POST。",
+    )
+
+
+def _check_instagram_preflight(
+    *,
+    client: Any,
+    item: dict[str, Any],
+    repository: TaskRepository,
+    check_publishing_limit: bool,
+) -> None:
+    if item.get("media_id"):
+        return
+    repository.instagram_limiter.assert_can_start_task(endpoint="Instagram publish preflight")
+    if not check_publishing_limit:
+        return
+    get_limit = getattr(client, "get_content_publishing_limit", None)
+    if not callable(get_limit):
+        return
+    try:
+        capacity = get_limit()
+    except InstagramApiError as exc:
+        if exc.rate_limited or exc.token_error:
+            raise
+        logger.warning("Unable to read Instagram content publishing limit: %s", exc.user_message)
+        return
+    except Exception:
+        # The edge is not available for every account/app combination.  The
+        # publish endpoint remains authoritative when this read is unavailable.
+        logger.warning("Unable to read Instagram content publishing limit", exc_info=True)
+        return
+    if isinstance(capacity, dict):
+        try:
+            remaining = int(capacity.get("remaining"))
+        except (TypeError, ValueError):
+            remaining = None
+        if remaining is not None and remaining <= 0:
+            raise repository.instagram_limiter.record_content_publishing_limit()
 
 
 def _instagram_cleanup(
@@ -152,6 +301,12 @@ def process_instagram_reel_task(
     try:
         credentials, client, r2 = _instagram_dependencies(credentials, client, r2)
         context.raise_if_cancel_requested()
+        _check_instagram_preflight(
+            client=client,
+            item=item,
+            repository=repository,
+            check_publishing_limit=not bool(item.get("creation_id")),
+        )
         ensure_lifecycle(r2, days=3)
 
         if item.get("media_id"):
@@ -234,6 +389,12 @@ def process_instagram_reel_task(
         context.raise_if_cancel_requested()
         context.update(stage="publishing", progress_percent=92)
         context.raise_if_cancel_requested()
+        _check_instagram_preflight(
+            client=client,
+            item=item,
+            repository=repository,
+            check_publishing_limit=True,
+        )
         item["media_id"] = client.publish_container(item["creation_id"])
         item["published_at"] = _now()
         context.checkpoint(
@@ -305,6 +466,41 @@ def process_instagram_reel_task(
         )
     except ReelValidationError as exc:
         return context.finish("skipped", stage="skipped", progress_percent=100, error=str(exc), retryable=False)
+    except InstagramApiError as exc:
+        if exc.rate_limited and exc.safe_to_retry:
+            return _defer_instagram_rate_limit(context, exc, repository=repository)
+        if exc.uncertain:
+            # A GET status check can be retried safely because it has no side
+            # effect.  POST results remain paused until an operator confirms
+            # the external state; the next run must never blindly publish.
+            if str(exc.method or "").upper() == "GET" and item.get("creation_id"):
+                retry_at = (
+                    datetime.now(timezone.utc)
+                    + timedelta(seconds=max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 15))
+                ).isoformat()
+                return (
+                    repository.defer_task(
+                        task_id,
+                        next_attempt_at=retry_at,
+                        error=exc.user_message,
+                        checkpoint={"instagram_api_error": exc.to_dict()},
+                        message="Instagram 狀態查詢逾時，會在短暫延後後安全重試 GET。",
+                    )
+                    or context.task
+                )
+            return _pause_uncertain_instagram_operation(context, exc, item=item)
+        context.checkpoint(
+            {"instagram_api_error": exc.to_dict()},
+            stage="failed",
+            progress_percent=task.get("progress_percent", 0),
+        )
+        return context.finish(
+            "failed",
+            stage="failed",
+            progress_percent=task.get("progress_percent", 0),
+            error=exc.user_message,
+            retryable=not exc.token_error,
+        )
     except Exception as exc:
         return context.finish(
             "failed",
@@ -745,6 +941,7 @@ def process_instagram_reel_tasks(
     return [repository.get_task_internal(state["task"]["id"]) for state in states]
 
 
+@_youtube_task_quota_context
 def process_youtube_metadata_task(
     task_id: str,
     *,
@@ -786,12 +983,15 @@ def process_youtube_metadata_task(
         )
         cancel_too_late = context.is_cancel_requested()
         return context.finish("succeeded", stage="completed", progress_percent=100, cancel_too_late=cancel_too_late)
+    except YouTubeQuotaUnavailable as exc:
+        return _defer_youtube_quota(task_id, exc, repository=repository)
     except TaskCancellationRequested:
         return context.finish("canceled", error=None, message="取消要求在 YouTube metadata 更新前送達。")
     except Exception as exc:
         return context.finish("failed", stage="failed", error=_error_text(exc), retryable=True)
 
 
+@_youtube_task_quota_context
 def process_youtube_publish_cleanup_task(
     task_id: str,
     *,
@@ -839,6 +1039,8 @@ def process_youtube_publish_cleanup_task(
             context.checkpoint(checkpoint, stage="completed", progress_percent=100)
         cancel_too_late = cancel_too_late or context.is_cancel_requested()
         return context.finish("succeeded", stage="completed", progress_percent=100, cancel_too_late=cancel_too_late)
+    except YouTubeQuotaUnavailable as exc:
+        return _defer_youtube_quota(task_id, exc, repository=repository, checkpoint=checkpoint)
     except TaskCancellationRequested:
         return context.finish("canceled", message="取消要求在 YouTube 設為 public 前送達，未進行公開。")
     except Exception as exc:

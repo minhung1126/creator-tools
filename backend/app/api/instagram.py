@@ -28,6 +28,7 @@ from backend.app.services.drive_service import (
     move_drive_file_to_folder,
 )
 from backend.app.services.instagram_api_usage_service import instagram_api_usage_tracker
+from backend.app.services.instagram_errors import InstagramApiError
 from backend.app.services.instagram_oauth_service import (
     REQUIRED_SCOPES,
     build_authorization_url,
@@ -193,6 +194,9 @@ def validate_publish_connections() -> None:
 
     try:
         get_connected_client(refresh_if_needed=True).profile()
+    except InstagramApiError as exc:
+        logger.warning("Instagram publish preflight deferred: %s", exc.user_message)
+        raise HTTPException(status_code=429 if exc.rate_limited else 409, detail=exc.user_message) from exc
     except Exception as exc:
         logger.warning("Instagram publish preflight failed: %s", type(exc).__name__)
         raise HTTPException(
@@ -433,7 +437,9 @@ def get_instagram_api_usage(creds: Credentials = Depends(require_credentials)):
     """Return locally observed Meta usage without making another Instagram request."""
 
     del creds
-    return instagram_api_usage_tracker.get_usage()
+    usage = instagram_api_usage_tracker.get_usage()
+    usage["limiter"] = task_repository.instagram_limiter.get_state()
+    return usage
 
 
 @router.put("/settings")
@@ -464,6 +470,9 @@ def connection_status(creds: Credentials = Depends(require_credentials)):
         profile = get_connected_client(refresh_if_needed=True).profile()
         credential_store.update_instagram_profile(profile.get("username", ""), profile.get("account_type", ""))
         instagram_result.update({"ok": True, "profile": profile})
+    except InstagramApiError as exc:
+        logger.warning("Instagram connection check failed: %s", exc.user_message)
+        instagram_result["error"] = exc.user_message
     except Exception as exc:
         logger.error("Instagram connection check failed: %s", type(exc).__name__, exc_info=True)
         instagram_result["error"] = "Instagram 連線驗證失敗"

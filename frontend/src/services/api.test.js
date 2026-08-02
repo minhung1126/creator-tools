@@ -51,4 +51,18 @@ describe('API request recovery', () => {
     await assertion;
     expect(ApiError).toBeTypeOf('function');
   });
+
+  it('keeps structured error detail codes from the backend', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      json: async () => ({ detail: { code: 'youtube_quota_exhausted', message: '配額已用完', reset_at: 'reset' } }),
+    }));
+    await expect(api.getYoutubeQuotaUsage()).rejects.toMatchObject({
+      status: 429,
+      code: 'youtube_quota_exhausted',
+      details: { reset_at: 'reset' },
+      message: '配額已用完',
+    });
+  });
 });

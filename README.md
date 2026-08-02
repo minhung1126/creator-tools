@@ -42,6 +42,7 @@
    - Instagram 與 YouTube 各自有獨立的 concurrency 1 lane，支援取消、安全 checkpoint、重試、重啟恢復與持久化通知。
    - Instagram worker 每次只 claim 並處理一支影片；使用者建立的多支影片批次仍依原順序排隊。
    - 每個成功的 container／media ID 都會先寫入 SQLite checkpoint，再處理下一階段；部分失敗或服務重啟不會從頭重複發布。
+   - Meta 限流會持久化全域 cooldown 並將任務延後到期自動恢復；HTTP／Meta code／subcode、fbtrace_id、Retry-After 與 x-app-usage 會保留在錯誤與使用量紀錄中。網路 timeout 的 POST 結果不確定時不會盲目重送。
    - 任務中心會分頁載入完整持久化佇列；「未完成」包含排隊、執行、正在取消與暫停等待確認。
 
 ### 任務佇列與 Instagram 批次語意
@@ -125,6 +126,7 @@ npm run dev
 
 - [Google API 申請與 OAuth 2.0 設定教學](docs/GOOGLE_API_SETUP.md)
 - [Instagram Reels API 與 Cloudflare R2 設定教學](docs/INSTAGRAM_R2_SETUP.md)
+- [YouTube Data API quota 與跨日任務說明](docs/YOUTUBE_QUOTA.md)
 - [Docker 部署說明](docs/DEPLOYMENT.md)
 
 ### OAuth Token 維運注意事項

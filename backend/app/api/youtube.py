@@ -1,6 +1,7 @@
 import logging
+import math
 from collections import Counter
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
@@ -16,6 +17,7 @@ from backend.app.services.sheets_service import (
     normalize_text,
 )
 from backend.app.services.task_queue import task_queue
+from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_items,
@@ -49,6 +51,63 @@ class BatchUpdateInput(BaseModel):
 
 class PublishCleanupInput(BaseModel):
     playlist_id: Optional[str] = ""
+
+
+class QuotaEstimateInput(BaseModel):
+    operation: Literal["youtube.metadata_update", "youtube.publish_cleanup"]
+    item_count: int
+
+
+def _quota_http_exception(exc: YouTubeQuotaUnavailable) -> HTTPException:
+    return HTTPException(status_code=429, detail=exc.to_dict())
+
+
+def _quota_estimate(operation: str, item_count: int) -> dict:
+    count = max(int(item_count), 0)
+    pages = math.ceil(count / 50) if count else 0
+    if operation == "youtube.metadata_update":
+        breakdown = [
+            {"method": "videos.list", "calls": pages + count, "units": pages + count},
+            {"method": "videos.update", "calls": count, "units": count * 50},
+        ]
+    elif operation == "youtube.publish_cleanup":
+        breakdown = [
+            {"method": "playlistItems.list", "calls": pages, "units": pages},
+            {"method": "videos.list", "calls": pages + count, "units": pages + count},
+            {"method": "videos.update", "calls": count, "units": count * 50},
+            {"method": "playlistItems.delete", "calls": count, "units": count * 50},
+        ]
+    else:  # defensive for callers outside Pydantic/FastAPI
+        raise ValueError("不支援的 YouTube quota estimate operation")
+
+    projected = sum(int(item["units"]) for item in breakdown)
+    usage = youtube_quota_tracker.get_usage()
+    available = int(usage.get("effective_available_units") or 0)
+
+    def cost_for(number: int) -> int:
+        number_pages = math.ceil(number / 50) if number else 0
+        if operation == "youtube.metadata_update":
+            return number_pages + number_pages * 0 + number + number * 50
+        return number_pages + (number_pages + number) + number * 50 + number * 50
+
+    max_items_today = 0
+    for number in range(1, count + 1):
+        if cost_for(number) <= available:
+            max_items_today = number
+        else:
+            break
+    return {
+        "operation": operation,
+        "item_count": count,
+        "projected_units": projected,
+        "worst_case": True,
+        "breakdown": breakdown,
+        "effective_available_units": available,
+        "can_complete_today": projected <= available,
+        "max_items_today": max_items_today,
+        "reset_at": usage.get("reset_at"),
+        "reset_timezone": usage.get("reset_timezone", "America/Los_Angeles"),
+    }
 
 
 def resolve_assignment_row(matches, title_column: str, description_column: str):
@@ -101,6 +160,14 @@ def get_quota_usage():
     return youtube_quota_tracker.get_usage()
 
 
+@router.post("/quota-estimate")
+def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(require_credentials)):
+    del creds
+    if payload.item_count < 0:
+        raise HTTPException(status_code=400, detail="item_count 不可小於 0")
+    return _quota_estimate(payload.operation, payload.item_count)
+
+
 @router.post("/playlist-items")
 def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depends(require_credentials)):
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
@@ -116,9 +183,11 @@ def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depend
             "fallback_reason": fallback_reason,
             "quota_usage": youtube_quota_tracker.get_usage(),
         }
+    except YouTubeQuotaUnavailable as exc:
+        raise _quota_http_exception(exc) from exc
     except Exception as exc:
         logger.error("Failed to fetch YouTube playlist items: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to fetch YouTube playlist items: {str(exc)}") from exc
+        raise HTTPException(status_code=500, detail="讀取 YouTube 播放清單失敗，請稍後再試。") from exc
 
 
 def _youtube_thumbnail(detail: dict, video_id: str) -> str:
@@ -133,10 +202,37 @@ def _youtube_thumbnail(detail: dict, video_id: str) -> str:
     )
 
 
-def _accepted_batch_response(batch_result: dict) -> dict:
+def _schedule_youtube_specs(specs: list[dict], operation: str, *, estimate_count: Optional[int] = None) -> dict:
+    """Place only today's safe worker capacity at the head of the lane."""
+
+    eligible = [spec for spec in specs if spec.get("status") == "queued"]
+    estimate = _quota_estimate(operation, len(eligible) if estimate_count is None else estimate_count)
+    usage = youtube_quota_tracker.get_usage()
+    available = int(usage.get("effective_available_units") or 0)
+    per_item_units = 51 if operation == "youtube.metadata_update" else 101
+    max_today = min(len(eligible), available // per_item_units)
+    reset_at = str(usage.get("reset_at") or "")
+    for index, spec in enumerate(eligible):
+        if index >= max_today:
+            spec["stage"] = "waiting_youtube_quota"
+            spec["next_attempt_at"] = reset_at
+        else:
+            spec.pop("next_attempt_at", None)
+    return {
+        "queued_today_count": max_today,
+        "deferred_count": max(len(eligible) - max_today, 0),
+        "estimated_units": estimate["projected_units"],
+        "reset_at": reset_at,
+        "reset_timezone": estimate["reset_timezone"],
+        "effective_available_units": available,
+        "max_items_today": max_today,
+    }
+
+
+def _accepted_batch_response(batch_result: dict, quota_summary: Optional[dict] = None) -> dict:
     tasks = batch_result.get("tasks", [])
     public_tasks = [task_repository.public_task(task) for task in tasks]
-    return {
+    response = {
         "accepted": True,
         "batch_id": batch_result["batch"]["id"],
         "task_ids": [task["id"] for task in tasks],
@@ -145,6 +241,9 @@ def _accepted_batch_response(batch_result: dict) -> dict:
         "skipped_count": sum(task.get("status") == "skipped" for task in tasks),
         "tasks": public_tasks,
     }
+    if quota_summary:
+        response.update(quota_summary)
+    return response
 
 
 @router.post("/batch-update", status_code=202)
@@ -258,6 +357,11 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                     },
                 }
             )
+        quota_summary = _schedule_youtube_specs(
+            specs,
+            "youtube.metadata_update",
+            estimate_count=len(active_assignments),
+        )
         batch_result = task_repository.create_batch_and_tasks(
             {
                 "platform": "youtube",
@@ -269,13 +373,16 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                     "description_column": description_column,
                     "team": normalized_team,
                     "video_type": payload.video_type,
+                    "quota_schedule": quota_summary,
                 },
             },
             specs,
         )
         if any(task.get("status") == "queued" for task in batch_result.get("tasks", [])):
             task_queue.submit(batch_result["batch"]["id"])
-        return _accepted_batch_response(batch_result)
+        return _accepted_batch_response(batch_result, quota_summary)
+    except YouTubeQuotaUnavailable as exc:
+        raise _quota_http_exception(exc) from exc
     except HTTPException:
         raise
     except Exception as exc:
@@ -343,20 +450,31 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
                     },
                 }
             )
+        quota_summary = _schedule_youtube_specs(
+            specs,
+            "youtube.publish_cleanup",
+            estimate_count=len(ordered_ids),
+        )
         batch_result = task_repository.create_batch_and_tasks(
             {
                 "platform": "youtube",
                 "operation": "youtube.publish_cleanup",
                 "failure_policy": "pause_remaining_in_batch",
-                "metadata": {"playlist_id": playlist_id, "sort_order": "published_at_ascending"},
+                "metadata": {
+                    "playlist_id": playlist_id,
+                    "sort_order": "published_at_ascending",
+                    "quota_schedule": quota_summary,
+                },
             },
             specs,
         )
         if any(task.get("status") == "queued" for task in batch_result.get("tasks", [])):
             task_queue.submit(batch_result["batch"]["id"])
-        response = _accepted_batch_response(batch_result)
+        response = _accepted_batch_response(batch_result, quota_summary)
         response.update({"playlist_id": playlist_id, "sort_order": "published_at_ascending"})
         return response
+    except YouTubeQuotaUnavailable as exc:
+        raise _quota_http_exception(exc) from exc
     except HTTPException:
         raise
     except Exception as exc:

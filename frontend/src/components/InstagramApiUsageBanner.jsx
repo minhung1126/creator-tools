@@ -75,6 +75,9 @@ export default function InstagramApiUsageBanner({ refreshKey = 0 }) {
   const progress = Math.min(Math.max(percent || 0, 0), 100);
   const status = usageStatus(percent);
   const lastError = usage?.last_error;
+  const limiter = usage?.limiter || {};
+  const cooldownActive = Boolean(limiter.is_cooling && limiter.cooldown_until);
+  const publishingLimit = usage?.publishing_limit;
 
   return (
     <div className="glass-panel" style={{ padding: '18px 20px', border: '1px solid rgba(236, 72, 153, 0.38)' }}>
@@ -115,6 +118,7 @@ export default function InstagramApiUsageBanner({ refreshKey = 0 }) {
           <Database size={14} /> 今日 Graph 操作 {Number(usage?.requests_today || 0).toLocaleString()} 次
           {usage?.http_requests_today !== undefined && `（HTTP ${Number(usage.http_requests_today).toLocaleString()} 次）`}
         </span>
+        {publishingLimit && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Database size={14} /> 發布額度 {publishingLimit.used}/{publishingLimit.total}，剩餘 {publishingLimit.remaining}</span>}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
           <Clock3 size={14} /> Meta 回報更新：{formatDate(meta.observed_at)}
         </span>
@@ -123,7 +127,26 @@ export default function InstagramApiUsageBanner({ refreshKey = 0 }) {
       {lastError?.message && (
         <div className="info-banner" style={{ marginTop: '12px', color: '#fbbf24' }}>
           <AlertTriangle size={15} />
-          <span>最近 Meta 錯誤：{lastError.message}{lastError.code !== null && lastError.code !== undefined ? `（code ${lastError.code}）` : ''}</span>
+          <span>最近 Meta 錯誤：{lastError.message}{lastError.endpoint ? ` · ${lastError.endpoint}` : ''}{lastError.status_code ? ` · HTTP ${lastError.status_code}` : ''}{lastError.code !== null && lastError.code !== undefined ? ` · code ${lastError.code}` : ''}{lastError.error_subcode !== null && lastError.error_subcode !== undefined ? ` / subcode ${lastError.error_subcode}` : ''}</span>
+        </div>
+      )}
+
+      {cooldownActive && (
+        <div className="info-banner" style={{ marginTop: '12px', color: '#fbbf24' }}>
+          <Clock3 size={15} />
+          <span>
+            {limiter.last_reason === 'content_publishing_limit'
+              ? 'Instagram 24 小時發布額度已用盡，系統將於指定時間自動重試。'
+              : 'Meta API 暫時限流，系統將於指定時間自動重試。'}
+            {' '}預計恢復：{formatDate(limiter.cooldown_until)}
+          </span>
+        </div>
+      )}
+
+      {limiter.new_tasks_paused && !cooldownActive && (
+        <div className="info-banner" style={{ marginTop: '12px', color: '#fbbf24' }}>
+          <AlertTriangle size={15} />
+          <span>Meta 使用率已達硬門檻，系統暫停建立新的 Instagram container。</span>
         </div>
       )}
 
@@ -131,7 +154,7 @@ export default function InstagramApiUsageBanner({ refreshKey = 0 }) {
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
           {usage.methods.map((item) => (
             <span key={item.endpoint} className="badge badge-info" style={{ fontSize: '0.72rem' }}>
-              {item.endpoint}: {item.calls} 次
+              {item.endpoint}: {item.calls} 次{item.rate_limit_count ? ` · 限流 ${item.rate_limit_count}` : ''}
             </span>
           ))}
         </div>

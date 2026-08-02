@@ -18,6 +18,11 @@ export const TASK_OPERATION_LABELS = {
   'youtube.publish_cleanup': 'YouTube 公開並移出 To-Post',
 };
 
+export const TASK_STAGE_LABELS = {
+  waiting_youtube_quota: '等待 YouTube 配額重設',
+  waiting_rate_limit: '等待 Meta 限流解除',
+};
+
 export const TASK_ACTIVE_STATUSES = ['queued', 'running', 'cancel_requested'];
 export const TASK_UNFINISHED_QUEUE_STATUSES = ['queued', 'running', 'cancel_requested', 'paused'];
 export const TASK_NEEDS_ATTENTION = ['paused', 'failed', 'succeeded_with_warnings', 'canceled_with_warnings'];
@@ -35,6 +40,10 @@ export function taskBadgeClass(status) {
   if (['succeeded', 'skipped'].includes(status)) return 'badge-connected';
   if (['paused', 'succeeded_with_warnings'].includes(status)) return 'badge-warning';
   return 'badge-info';
+}
+
+export function taskStageLabel(stage, fallback = '') {
+  return TASK_STAGE_LABELS[stage] || fallback || stage || '未知階段';
 }
 
 export function isTaskActive(task) {

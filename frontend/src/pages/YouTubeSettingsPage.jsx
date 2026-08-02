@@ -7,19 +7,27 @@ import SourceLinkInput from '../components/SourceLinkInput';
 export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setActiveTab }) {
   const toast = useToast();
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
+  const [quotaLimit, setQuotaLimit] = useState(sysSettings.youtube_general_quota_limit ?? 10000);
+  const [quotaBuffer, setQuotaBuffer] = useState(sysSettings.youtube_quota_safety_buffer_units ?? 1000);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
     setPlaylistId(sysSettings.default_playlist_id || '');
-  }, [sysSettings.default_playlist_id]);
+    setQuotaLimit(sysSettings.youtube_general_quota_limit ?? 10000);
+    setQuotaBuffer(sysSettings.youtube_quota_safety_buffer_units ?? 1000);
+  }, [sysSettings.default_playlist_id, sysSettings.youtube_general_quota_limit, sysSettings.youtube_quota_safety_buffer_units]);
 
   const handleSave = async (event) => {
     event.preventDefault();
     setSaving(true);
     setMsg(null);
     try {
-      await api.updateYoutubeSettings({ default_playlist_id: playlistId });
+      const limit = Number(quotaLimit);
+      const buffer = Number(quotaBuffer);
+      if (!Number.isInteger(limit) || limit <= 0) throw new Error('project quota 必須是大於 0 的整數');
+      if (!Number.isInteger(buffer) || buffer < 0 || buffer >= limit) throw new Error('安全保留必須大於等於 0 且小於 project quota');
+      await api.updateYoutubeSettings({ default_playlist_id: playlistId, youtube_general_quota_limit: limit, youtube_quota_safety_buffer_units: buffer });
       await refreshSettings();
       setMsg({ type: 'success', text: 'YouTube 預設播放清單已儲存。' });
       toast.success('YouTube 設定已儲存');
@@ -48,6 +56,18 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
         <div className="form-group">
           <label className="form-label"><PlaySquare size={14} /> 預設 To-Post 播放清單 ID</label>
           <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID" />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+          <div className="form-group">
+            <label className="form-label">Google Cloud project 一般 YouTube quota</label>
+            <input className="form-input" type="number" min="1" step="1" value={quotaLimit} onChange={(event) => setQuotaLimit(event.target.value)} />
+            <p className="section-desc">請依 Google Cloud Console 的一般 YouTube Data API bucket 填寫。官方預設值為 10,000。</p>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Creator Tools 安全保留 units</label>
+            <input className="form-input" type="number" min="0" step="1" value={quotaBuffer} onChange={(event) => setQuotaBuffer(event.target.value)} />
+            <p className="section-desc">Creator Tools 自訂安全保留，非 YouTube 官方限制；必須小於 project quota。</p>
+          </div>
         </div>
         <button className="btn btn-success" type="submit" disabled={saving} style={{ width: 'fit-content' }}><Save size={18} />{saving ? '儲存中...' : '儲存 YouTube 設定'}</button>
       </form>
