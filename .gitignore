@@ -13,6 +13,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.ruff_cache/
+
+# Local Git worktrees
+.worktrees/
 
 # Node & Frontend
 node_modules/
