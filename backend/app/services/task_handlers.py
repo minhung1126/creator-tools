@@ -135,16 +135,18 @@ def _defer_instagram_rate_limit(
             next_attempt_at = None
     if not next_attempt_at:
         next_attempt_at = (
-            datetime.now(timezone.utc)
-            + timedelta(seconds=max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 1))
+            datetime.now(timezone.utc) + timedelta(seconds=max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 1))
         ).isoformat()
-    return repository.defer_task(
-        context.task_id,
-        next_attempt_at=str(next_attempt_at),
-        error=exc.user_message,
-        checkpoint={"instagram_api_error": exc.to_dict()},
-        message="Meta API 暫時限流，系統將於指定時間自動重試。",
-    ) or context.task
+    return (
+        repository.defer_task(
+            context.task_id,
+            next_attempt_at=str(next_attempt_at),
+            error=exc.user_message,
+            checkpoint={"instagram_api_error": exc.to_dict()},
+            message="Meta API 暫時限流，系統將於指定時間自動重試。",
+        )
+        or context.task
+    )
 
 
 def _pause_uncertain_instagram_operation(
@@ -476,13 +478,16 @@ def process_instagram_reel_task(
                     datetime.now(timezone.utc)
                     + timedelta(seconds=max(float(settings.INSTAGRAM_COOLDOWN_BASE_SECONDS), 15))
                 ).isoformat()
-                return repository.defer_task(
-                    task_id,
-                    next_attempt_at=retry_at,
-                    error=exc.user_message,
-                    checkpoint={"instagram_api_error": exc.to_dict()},
-                    message="Instagram 狀態查詢逾時，會在短暫延後後安全重試 GET。",
-                ) or context.task
+                return (
+                    repository.defer_task(
+                        task_id,
+                        next_attempt_at=retry_at,
+                        error=exc.user_message,
+                        checkpoint={"instagram_api_error": exc.to_dict()},
+                        message="Instagram 狀態查詢逾時，會在短暫延後後安全重試 GET。",
+                    )
+                    or context.task
+                )
             return _pause_uncertain_instagram_operation(context, exc, item=item)
         context.checkpoint(
             {"instagram_api_error": exc.to_dict()},

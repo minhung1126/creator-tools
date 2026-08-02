@@ -98,7 +98,9 @@ def test_only_403_quota_exceeded_is_confirmed_quota(tmp_path):
 def test_confirmed_exhaustion_sets_effective_available_to_zero(tmp_path):
     ledger = YouTubeQuotaLimiter(Database(tmp_path / "quota.db"), configured_limit=100, safety_buffer_units=1)
     with pytest.raises(YouTubeQuotaUnavailable) as caught:
-        ledger.execute(SimpleNamespace(execute=lambda: (_ for _ in ()).throw(HttpFailure("quotaExceeded"))), "videos.update")
+        ledger.execute(
+            SimpleNamespace(execute=lambda: (_ for _ in ()).throw(HttpFailure("quotaExceeded"))), "videos.update"
+        )
 
     usage = ledger.get_usage()
     assert caught.value.code == "youtube_quota_exhausted"
@@ -132,7 +134,13 @@ def test_new_quota_date_has_a_new_normal_breaker(tmp_path):
 def test_legacy_json_import_is_idempotent(tmp_path):
     legacy = tmp_path / "youtube_quota_usage.json"
     legacy.write_text(
-        json.dumps({"quota_date": "2026-08-02", "used_units": 51, "methods": {"videos.update": {"calls": 1, "units": 50}, "videos.list": {"calls": 1, "units": 1}}}),
+        json.dumps(
+            {
+                "quota_date": "2026-08-02",
+                "used_units": 51,
+                "methods": {"videos.update": {"calls": 1, "units": 50}, "videos.list": {"calls": 1, "units": 1}},
+            }
+        ),
         encoding="utf-8",
     )
     ledger = YouTubeQuotaLimiter(

@@ -109,11 +109,11 @@ def test_publish_quota_failure_after_public_checkpoint_is_deferred(monkeypatch, 
         lambda *_args: [{"id": "video-1", "status": {"privacyStatus": "private"}, "snippet": {}}],
     )
     monkeypatch.setattr(task_handlers, "set_video_public", lambda *_args, **_kwargs: {"id": "video-1"})
-    monkeypatch.setattr(task_handlers, "remove_playlist_item", lambda *_args, **_kwargs: (_ for _ in ()).throw(quota_error))
-
-    result = task_handlers.process_youtube_publish_cleanup_task(
-        task_id, credentials=object(), repository=repo
+    monkeypatch.setattr(
+        task_handlers, "remove_playlist_item", lambda *_args, **_kwargs: (_ for _ in ()).throw(quota_error)
     )
+
+    result = task_handlers.process_youtube_publish_cleanup_task(task_id, credentials=object(), repository=repo)
     assert result["status"] == "queued"
     assert result["stage"] == "waiting_youtube_quota"
     assert result["checkpoint"]["privacy_updated_at"]

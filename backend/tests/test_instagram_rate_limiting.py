@@ -179,7 +179,10 @@ def test_queue_only_claims_due_task(tmp_path):
     assert repo.claim_next("instagram") is None
 
     with repo.db.transaction() as connection:
-        connection.execute("UPDATE tasks SET next_attempt_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), created["tasks"][0]["id"]))
+        connection.execute(
+            "UPDATE tasks SET next_attempt_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), created["tasks"][0]["id"]),
+        )
 
     assert repo.claim_next("instagram")["id"] == created["tasks"][0]["id"]
 

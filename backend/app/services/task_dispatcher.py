@@ -82,9 +82,7 @@ class TaskDispatcher:
                 if not next_attempt_at:
                     from datetime import datetime, timedelta, timezone
 
-                    next_attempt_at = (
-                        datetime.now(timezone.utc) + timedelta(minutes=1)
-                    ).isoformat()
+                    next_attempt_at = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
                 result = self.repository.defer_task(
                     task_id,
                     next_attempt_at=str(next_attempt_at),

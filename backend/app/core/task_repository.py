@@ -553,14 +553,14 @@ class TaskRepository:
                 "started_at",
                 "updated_at",
                 "finished_at",
-                 "cancel_requested_at",
+                "cancel_requested_at",
                 "canceled_at",
                 "cancel_scope",
                 "cancel_reason",
                 "cancel_too_late",
-                 "error",
-                 "next_attempt_at",
-             )
+                "error",
+                "next_attempt_at",
+            )
         }
         checkpoint = task.get("checkpoint") or {}
         safe["youtube_public_pending_cleanup"] = bool(
@@ -1544,7 +1544,9 @@ class TaskRepository:
                 event_type="retried",
                 from_status=current["status"],
                 to_status="queued",
-                message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。" if next_attempt_at else "已重新排入隊列",
+                message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。"
+                if next_attempt_at
+                else "已重新排入隊列",
                 event_key=f"task:{task_id}:retry:attempt:{next_attempt}",
                 created_at=now,
             )
@@ -1617,7 +1619,9 @@ class TaskRepository:
                     event_type="retried",
                     from_status=task["status"],
                     to_status="queued",
-                    message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。" if next_attempt_at else "已重新排入隊列",
+                    message="已重新排入隊列；目前有 Meta 冷卻時會在到期後自動重試。"
+                    if next_attempt_at
+                    else "已重新排入隊列",
                     event_key=f"task:{task['id']}:retry:attempt:{next_attempt}",
                     created_at=now,
                 )

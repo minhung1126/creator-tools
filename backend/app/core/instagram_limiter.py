@@ -158,9 +158,8 @@ class InstagramLimiter:
                 bucket = "hard" if usage_percent >= hard else "soft"
                 severity = "error" if bucket == "hard" else "warning"
                 title = "Instagram Meta 使用率已達硬門檻" if bucket == "hard" else "Instagram Meta 使用率接近門檻"
-                message = (
-                    f"目前觀測使用率約 {usage_percent:.2f}%，"
-                    + ("系統已暫停建立新的 Instagram container。" if bucket == "hard" else "系統將降低輪詢頻率。")
+                message = f"目前觀測使用率約 {usage_percent:.2f}%，" + (
+                    "系統已暫停建立新的 Instagram container。" if bucket == "hard" else "系統將降低輪詢頻率。"
                 )
                 event_key = f"instagram:usage-threshold:{datetime.now(timezone.utc).date().isoformat()}:{bucket}"
                 connection.execute(
@@ -188,7 +187,9 @@ class InstagramLimiter:
                 (next_cooldown, now, endpoint, now),
             )
 
-    def record_rate_limit(self, error: InstagramApiError, *, endpoint: str, usage: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    def record_rate_limit(
+        self, error: InstagramApiError, *, endpoint: str, usage: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
         current_time = _now()
         with self.db.transaction() as connection:
             current = self._row(connection)
@@ -244,7 +245,9 @@ class InstagramLimiter:
     def record_content_publishing_limit(self, *, endpoint: str = "content_publishing_limit") -> InstagramApiError:
         error = InstagramApiError.cooldown(
             endpoint=endpoint,
-            estimated_recovery_at=_iso(_now() + timedelta(hours=max(float(settings.INSTAGRAM_PUBLISHING_LIMIT_HOURS), 1))),
+            estimated_recovery_at=_iso(
+                _now() + timedelta(hours=max(float(settings.INSTAGRAM_PUBLISHING_LIMIT_HOURS), 1))
+            ),
             reason="Instagram 24 小時發布額度已用盡",
             content_publishing_limit=True,
         )
