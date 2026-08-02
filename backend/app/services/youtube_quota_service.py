@@ -17,6 +17,8 @@ from backend.app.core.youtube_quota_limiter import (
     YOUTUBE_QUOTA_METHODS,
     YouTubeQuotaLimiter,
     current_youtube_quota_context,
+    next_reset_at,
+    quota_date_for,
     youtube_quota_limiter,
 )
 
@@ -38,6 +40,14 @@ class YouTubeQuotaTracker:
             configured_limit=daily_limit,
             safety_buffer_units=safety_buffer_units,
         )
+
+    @staticmethod
+    def _quota_date(now=None) -> str:
+        return quota_date_for(now)
+
+    @staticmethod
+    def _next_reset(now=None):
+        return next_reset_at(now)
 
     def record(self, method: str, calls: int = 1) -> dict[str, Any]:
         return self.limiter.record(method, calls)

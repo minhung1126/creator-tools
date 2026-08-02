@@ -526,12 +526,14 @@ class YouTubeQuotaLimiter:
         task_id: Optional[str] = None,
         batch_id: Optional[str] = None,
         operation: Optional[str] = None,
+        now: datetime | None = None,
     ) -> Any:
         reservation = self.reserve(
             method,
             task_id=task_id,
             batch_id=batch_id,
             operation=operation,
+            now=now,
         )
         try:
             response = request.execute()
@@ -662,6 +664,24 @@ class YouTubeQuotaLimiter:
         quota_date = quota_date_for(current_utc)
         with self.db.transaction() as connection:
             row = self._ensure_daily_row(connection, quota_date, current_utc)
+            limit, buffer = self.configured_values()
+            if (
+                str(row["state"]) in {"normal", "warning"}
+                and int(row["estimated_used_units"] or 0) >= max(limit - buffer, 0)
+            ):
+                reset = iso_with_offset(next_reset_at(current_utc))
+                connection.execute(
+                    """
+                    UPDATE youtube_quota_daily
+                    SET state='safety_blocked', blocked_reason='safety_cap_reached', blocked_until=?, updated_at=?
+                    WHERE quota_date=? AND bucket=? AND state IN ('normal','warning')
+                    """,
+                    (reset, iso_with_offset(current_utc), quota_date, GENERAL_BUCKET),
+                )
+                row = connection.execute(
+                    "SELECT * FROM youtube_quota_daily WHERE quota_date=? AND bucket=?",
+                    (quota_date, GENERAL_BUCKET),
+                ).fetchone()
             return self._format_usage(connection, row, now=current_utc)
 
     def assert_can_spend(self, units: int, *, now: datetime | None = None) -> dict[str, Any]:
