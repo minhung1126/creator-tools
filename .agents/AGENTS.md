@@ -1,39 +1,38 @@
-# 🤖 Project Guidelines & Agent Instructions
+# Creator Tools 開發規範
 
-## 📋 專案概述 (Project Overview)
-Creator Tools 是一個整合 Google Sheets、YouTube、Instagram 與 Drive 的自動化控制台系統。
-本專案採用 Python FastAPI 後端 + React Vite 前端 + Docker 容器化部署。
+Creator Tools 使用 FastAPI、React/Vite 與 Docker，整合 Google Sheets、Drive、YouTube 和 Instagram。
 
----
+## 架構與安全
 
-## 🏷️ Tagging & Release 規範 (Git Tagging & Release Logic)
+- OAuth bind 位址使用 `BIND_HOST`／`PORT`；callback URL 使用 `PUBLIC_BASE_URL`／`FRONTEND_URL`。
+- 正式環境必須設定 `ALLOWED_GOOGLE_EMAILS`。
+- Google Client ID、Client Secret 與所有 token／secret 只能由後端管理，不得傳至前端或寫入版本庫。
+- 非 secret 執行期設定保存於 `data/runtime_config.json`，優先於 `.env` 預設值；`data/` 必須持久化。
+- FastAPI 認證統一使用 `require_credentials`。正式程式使用 `logging`，不得使用 `print()`。
 
-1. **版本號格式**：採用語義化版本 `vX.Y.Z`（例如 `v1.0.0`, `v1.1.0`）。
-2. **GHCR & Docker Image 建置**：
-   - 每次 Push 至 `main` / `master` 分支或推送 Tag 時，GitHub Actions 會自動建置 Docker Image 並推送到 GHCR (`ghcr.io/minhung1126/creator-tools:latest`)。
-3. **Automatic Release 條件**：
-   - 僅當推送符合 `v*` 格式的 Git Tag 時（例如 `git tag v1.0.0 && git push origin v1.0.0`），GitHub Actions 才會自動觸發建立 GitHub Release。
-   - 一般的分支 Commit / Merge **不會** 觸發 GitHub Release 建立（`if: startsWith(github.ref, 'refs/tags/v')`）。
+## Instagram API 硬性規則
 
----
+- 本專案使用 **Instagram API with Instagram Login**：host 是 `graph.instagram.com`，憑證是 Instagram User access token。不得與 `graph.facebook.com` 或 Facebook User／Page token 混用。
+- **禁止 Instagram Graph batch requests**：不得送出 `batch` payload、`depends_on` child request，也不得 POST 至 `https://graph.instagram.com/{version}` 根路徑進行批次操作。
+- Reels 必須逐支處理，每個 worker 一次只 claim 一支影片，並依序呼叫：
+  1. `POST /{ig_user_id}/media`
+  2. `GET /{creation_id}`，直到處理完成
+  3. `POST /{ig_user_id}/media_publish`
+- 每支影片取得 `creation_id` 或 `media_id` 後必須立即保存 checkpoint；重試不得重建或重發已確認成功的外部操作。
+- 多支影片仍可屬於同一使用者批次，但只能依 queue 順序逐支執行。若單支失敗，依既有 failure policy 暫停後續項目。
+- 除非專案正式切換登入產品，且 Meta 官方文件明確證實該 host/token 組合支援 batch，否則不得重新加入 batch 實作。
 
-## ⚠️ 開發與架構注意事項 (Developer Notice & Conventions)
+## 前端
 
-### 1. 伺服器與 OAuth 設定 (`.env` & Config)
-- **bind 與 public URL 分離**：`.env` 使用 `BIND_HOST`/`PORT` bind，使用 `PUBLIC_BASE_URL`/`FRONTEND_URL` 產生 OAuth callback；cookie `secure` 依 public URL scheme 判斷。
-- **單一管理者**：正式環境必須設定 `ALLOWED_GOOGLE_EMAILS`，不在 allowlist 的 Google 帳號拒絕登入。
-- **Credentials 管理**：Google Client ID 與 Client Secret **嚴禁** 由前端傳遞或於 UI 編輯，一律由後端 `.env` 檔案管理。
+- 禁止原生 `alert()`／`confirm()`；使用 `useToast()` 與 `ConfirmDialog`。
+- 沿用暗色 Glassmorphism 與 `index.css` 的共用 class，避免重複 inline style。
 
-### 2. 設定持久化機制 (`data/runtime_config.json`)
-- 使用者於頁面修改的非 secret 設定會由 `RuntimeConfig` 自動寫入 `data/runtime_config.json`；Instagram Token、R2 secret 與 Google token 分別加密保存。
-- 啟動優先順序：`data/runtime_config.json` > `.env` 預設值。
-- 在 Docker / Compose 環境中已將 `./data` 資料夾設定為 Volume (`./data:/app/data`) 進行持久化。
+## 驗證
 
-### 3. API 認證與安全規範
-- 統一使用 `backend.app.core.dependencies.require_credentials` 作為 FastAPI Dependency。
-- Session Cookie 只保存 opaque session ID；Google token 加密保存於 server-side session store。OAuth state 使用分離 salt 的 timed signature。
-- Log 輸出統一使用標準 `logging` 模組，禁止於正式程式碼中使用 `print()`。
+- 後端：`python -m ruff check backend`、`python -m pytest backend/tests -q`
+- 前端：`npm run lint`、`npm test -- --run`、`npm run build`
+- Instagram 相關修改必須測試：不含 `batch` payload、一次只 dispatch 一支任務、checkpoint 可安全重試。
 
-### 4. 前端 UI 規範
-- 禁用原生 `alert()` 與 `confirm()`，一律使用 `useToast()` 通知與 `ConfirmDialog` 互動對話框。
-- 保持暗色 Glassmorphism 設計語言，樣式與佈局優先使用 `index.css` 抽取的通用 class（如 `.glass-panel`, `.section-gap`, `.form-group`, `.btn`）。
+## Release
+
+- 版本使用 `vX.Y.Z`。Push `main` 或 tag 會建置 GHCR image；只有 `v*` tag 會建立 GitHub Release。
