@@ -665,9 +665,8 @@ class YouTubeQuotaLimiter:
         with self.db.transaction() as connection:
             row = self._ensure_daily_row(connection, quota_date, current_utc)
             limit, buffer = self.configured_values()
-            if (
-                str(row["state"]) in {"normal", "warning"}
-                and int(row["estimated_used_units"] or 0) >= max(limit - buffer, 0)
+            if str(row["state"]) in {"normal", "warning"} and int(row["estimated_used_units"] or 0) >= max(
+                limit - buffer, 0
             ):
                 reset = iso_with_offset(next_reset_at(current_utc))
                 connection.execute(

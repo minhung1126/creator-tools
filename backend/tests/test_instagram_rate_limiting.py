@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from backend.app.core.database import Database
 from backend.app.core.config import settings
+from backend.app.core.database import Database
 from backend.app.core.instagram_limiter import CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS, InstagramLimiter
 from backend.app.core.task_repository import TaskRepository
 from backend.app.services.instagram_errors import InstagramApiError
@@ -193,7 +193,10 @@ def test_queue_only_claims_due_task(tmp_path):
     assert repo.claim_next("instagram") is None
 
     with repo.db.transaction() as connection:
-        connection.execute("UPDATE tasks SET next_attempt_at = ? WHERE id = ?", (datetime.now(timezone.utc).isoformat(), created["tasks"][0]["id"]))
+        connection.execute(
+            "UPDATE tasks SET next_attempt_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), created["tasks"][0]["id"]),
+        )
 
     assert repo.claim_next("instagram")["id"] == created["tasks"][0]["id"]
 

@@ -195,8 +195,10 @@ class InstagramApiUsageTracker:
             str(error_payload.get(key) or "")
             for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
         ).casefold()
-        rate_limited = status_code == 429 or meta_code in RATE_LIMIT_CODES or any(
-            marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS
+        rate_limited = (
+            status_code == 429
+            or meta_code in RATE_LIMIT_CODES
+            or any(marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS)
         )
         endpoint = self._endpoint_label(method, path)
         now = self._now()
@@ -287,15 +289,25 @@ class InstagramApiUsageTracker:
                         break
             error_payload = outer_error if isinstance(outer_error, Mapping) else child_error
             try:
-                meta_code = int(error_payload.get("code")) if isinstance(error_payload, Mapping) and error_payload.get("code") is not None else None
+                meta_code = (
+                    int(error_payload.get("code"))
+                    if isinstance(error_payload, Mapping) and error_payload.get("code") is not None
+                    else None
+                )
             except (TypeError, ValueError):
                 meta_code = None
-            error_text = " ".join(
-                str(error_payload.get(key) or "")
-                for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
-            ).casefold() if isinstance(error_payload, Mapping) else ""
-            rate_limited = status_code == 429 or meta_code in RATE_LIMIT_CODES or any(
-                marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS
+            error_text = (
+                " ".join(
+                    str(error_payload.get(key) or "")
+                    for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
+                ).casefold()
+                if isinstance(error_payload, Mapping)
+                else ""
+            )
+            rate_limited = (
+                status_code == 429
+                or meta_code in RATE_LIMIT_CODES
+                or any(marker in error_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS)
             )
             if rate_limited:
                 data["rate_limit_events_today"] = int(data.get("rate_limit_events_today", 0)) + 1

@@ -124,8 +124,7 @@ class InstagramApiError(RuntimeError):
         if not message:
             message = f"Instagram API HTTP {status}" if status is not None else "Instagram API request failed"
         raw_text = " ".join(
-            str(error.get(key) or "")
-            for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
+            str(error.get(key) or "") for key in ("type", "message", "error_user_title", "error_user_msg", "error_data")
         ).casefold()
         content_limit = any(marker in raw_text for marker in CONTENT_PUBLISHING_LIMIT_MARKERS)
         rate_limited = status == 429 or code in RATE_LIMIT_CODES or content_limit
@@ -160,7 +159,9 @@ class InstagramApiError(RuntimeError):
         )
 
     @classmethod
-    def transport(cls, *, method: str, endpoint: str, message: str = "Instagram API 網路連線失敗") -> "InstagramApiError":
+    def transport(
+        cls, *, method: str, endpoint: str, message: str = "Instagram API 網路連線失敗"
+    ) -> "InstagramApiError":
         return cls(
             message,
             endpoint=endpoint,
