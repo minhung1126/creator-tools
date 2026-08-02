@@ -16,7 +16,7 @@ describe('API request recovery', () => {
       json: async () => ({ detail: '請重新登入' }),
     }));
 
-    await expect(api.getActivitySummary()).rejects.toMatchObject({
+    await expect(api.getSystemInfo()).rejects.toMatchObject({
       name: 'ApiError',
       status: 401,
       code: 'session_expired',
@@ -63,6 +63,42 @@ describe('API request recovery', () => {
       code: 'youtube_quota_exhausted',
       details: { reset_at: 'reset' },
       message: '配額已用完',
+    });
+  });
+
+  it('sends queue-free YouTube metadata input and returns direct per-video results', async () => {
+    const directResult = {
+      completed: true,
+      total_count: 1,
+      succeeded_count: 1,
+      results: [{ video_id: 'video-1', status: 'succeeded' }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => directResult,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.batchUpdateMetadata({
+      spreadsheetUrlOrId: 'sheet-id',
+      videoType: 'Video',
+      worksheetName: 'Youtube Video',
+      titleColumn: 'Youtube Title',
+      descriptionColumn: 'Youtube Description',
+      team: 'Team',
+      assignments: [{ video_id: 'video-1', person: 'Alice' }],
+    })).resolves.toEqual(directResult);
+
+    const [, options] = fetchMock.mock.calls[0];
+    expect(JSON.parse(options.body)).toEqual({
+      spreadsheet_url_or_id: 'sheet-id',
+      video_type: 'Video',
+      worksheet_name: 'Youtube Video',
+      title_column: 'Youtube Title',
+      description_column: 'Youtube Description',
+      team: 'Team',
+      assignments: [{ video_id: 'video-1', person: 'Alice' }],
     });
   });
 });

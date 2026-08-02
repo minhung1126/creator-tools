@@ -1,5 +1,6 @@
 const API_BASE = '/api/v1';
 const DEFAULT_TIMEOUT_MS = 45_000;
+const YOUTUBE_WORKFLOW_TIMEOUT_MS = 10 * 60_000;
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = 'request_failed', details = null } = {}) {
@@ -77,45 +78,6 @@ export const api = {
   getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
   estimateYoutubeQuota: ({ operation, itemCount }) => request('/youtube/quota-estimate', { method: 'POST', body: JSON.stringify({ operation, item_count: itemCount }) }),
   getPlaylistVideos: (playlistId) => request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
-  batchUpdateMetadata: ({ spreadsheetUrlOrId, playlistId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-update', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: playlistId, video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
-  publishAndCleanup: (playlistId) => request('/youtube/publish-and-cleanup', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
-  getInstagramAuthUrl: () => request('/instagram/auth/url'),
-  getInstagramAuthStatus: () => request('/instagram/auth/status'),
-  refreshInstagramAuth: () => request('/instagram/auth/refresh', { method: 'POST' }),
-  disconnectInstagram: () => request('/instagram/auth/connection', { method: 'DELETE' }),
-  getInstagramSettings: () => request('/instagram/settings'),
-  updateInstagramSettings: (payload) => request('/instagram/settings', { method: 'PUT', body: JSON.stringify(payload) }),
-  getInstagramApiUsage: () => request('/instagram/api-usage'),
-  getInstagramConnectionStatus: () => request('/instagram/connection-status'),
-  testInstagramR2: () => request('/instagram/r2/test', { method: 'POST' }),
-  getInstagramDriveVideos: (folderUrlOrId) => request('/instagram/drive-videos', { method: 'POST', body: JSON.stringify({ folder_url_or_id: folderUrlOrId }) }),
-  getInstagramPublishHistory: () => request('/instagram/publish-history'),
-  deleteInstagramPublishHistory: (jobId, fileId) => request(`/instagram/publish-history/${encodeURIComponent(jobId)}/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
-  createInstagramPublishJob: (payload) => request('/instagram/publish-jobs', { method: 'POST', body: JSON.stringify(payload) }),
-  stopInstagramBlockingJobs: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}/stop-blocking-jobs`, { method: 'POST' }),
-  getActivitySummary: () => request('/activity-summary'),
-  getTasks: (params = {}) => {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') query.set(key, value);
-    });
-    return request(`/tasks${query.toString() ? `?${query.toString()}` : ''}`);
-  },
-  getTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}`),
-  retryTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' }),
-  cancelTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }),
-  cancelAllTasks: () => request('/tasks/cancel-all', { method: 'POST' }),
-  getTaskBatches: (params = {}) => {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') query.set(key, value);
-    });
-    return request(`/task-batches${query.toString() ? `?${query.toString()}` : ''}`);
-  },
-  getTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}`),
-  retryTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/retry`, { method: 'POST' }),
-  cancelTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/cancel`, { method: 'POST' }),
-  getNotifications: ({ unreadOnly = false, offset = 0, limit = 50 } = {}) => request(`/notifications?unread_only=${unreadOnly ? 'true' : 'false'}&offset=${offset}&limit=${limit}`),
-  markNotificationRead: (notificationId) => request(`/notifications/${encodeURIComponent(notificationId)}`, { method: 'PATCH', body: JSON.stringify({ read: true }) }),
-  markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),
+  batchUpdateMetadata: ({ spreadsheetUrlOrId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
+  publishAndCleanup: (playlistId) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: playlistId }) }),
 };

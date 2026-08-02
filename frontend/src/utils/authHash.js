@@ -1,6 +1,4 @@
 const AUTH_HASH_KEYS = [
-  ['instagram_auth_success', 'instagram_success'],
-  ['instagram_auth_error', 'instagram_error'],
   ['auth_success', 'google_success'],
   ['auth_error', 'google_error'],
 ];

@@ -1,11 +1,11 @@
-"""Encrypted persistent storage for Instagram and R2 credentials."""
+"""Encrypted persistent storage for Google OAuth credentials."""
 
 import base64
 import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Optional
@@ -35,7 +35,7 @@ class CredentialStore:
         key_material = settings.CREDENTIAL_ENCRYPTION_KEY or settings.SECRET_KEY
         digest = hashlib.sha256(key_material.encode("utf-8")).digest()
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
-        self._data: Dict[str, Any] = {"version": 2, "google": None, "instagram": None, "secrets": {}}
+        self._data: Dict[str, Any] = {"version": 3, "google": None}
         self._load()
 
     def _load(self):
@@ -46,11 +46,10 @@ class CredentialStore:
                 with self._path.open("r", encoding="utf-8") as handle:
                     loaded = json.load(handle)
                 if isinstance(loaded, dict):
-                    self._data.update(loaded)
-                    self._data["version"] = 2
-                    self._data.setdefault("google", None)
-                    self._data.setdefault("instagram", None)
-                    self._data.setdefault("secrets", {})
+                    # Version 3 retires the former Instagram and R2 records.
+                    # Preserve only the Google credential when reading an older
+                    # store; the next legitimate write removes retired fields.
+                    self._data = {"version": 3, "google": loaded.get("google")}
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", exc)
 
@@ -106,15 +105,6 @@ class CredentialStore:
             except ValueError:
                 return None
         return None
-
-    @staticmethod
-    def _expires_at_from_seconds(expires_in: Optional[int], now: datetime) -> Optional[datetime]:
-        if expires_in is None:
-            return None
-        try:
-            return now + timedelta(seconds=int(expires_in))
-        except (TypeError, ValueError, OverflowError):
-            return None
 
     def save_google_connection(self, token_dict: Dict[str, Any]) -> Dict[str, Any]:
         """Persist Google OAuth credentials separately from short-lived login sessions."""
@@ -190,107 +180,6 @@ class CredentialStore:
         with self._lock:
             self._data["google"] = None
             self._save()
-
-    def save_instagram_connection(
-        self,
-        *,
-        access_token: str,
-        user_id: str,
-        username: str,
-        account_type: str,
-        granted_scopes: list[str],
-        expires_in: Optional[int],
-        permissions_verified: bool,
-    ) -> Dict[str, Any]:
-        now = utc_now()
-        expires_at = self._expires_at_from_seconds(expires_in, now)
-        record = {
-            "access_token_encrypted": self._encrypt(access_token),
-            "instagram_user_id": str(user_id),
-            "username": username or "",
-            "account_type": account_type or "",
-            "granted_scopes": sorted(set(granted_scopes)),
-            "permissions_verified": bool(permissions_verified),
-            "token_expires_at": to_iso(expires_at) if expires_at else None,
-            "connected_at": to_iso(now),
-            "last_verified_at": to_iso(now),
-            "last_refreshed_at": None,
-            "last_refresh_error": None,
-            "status": "active",
-        }
-        with self._lock:
-            self._data["instagram"] = record
-            self._save()
-        return self.get_instagram_public() or {}
-
-    def get_instagram_public(self) -> Optional[Dict[str, Any]]:
-        with self._lock:
-            record = self._data.get("instagram")
-            if not isinstance(record, dict):
-                return None
-            return {key: value for key, value in record.items() if key != "access_token_encrypted"}
-
-    def get_instagram_token(self) -> Optional[str]:
-        with self._lock:
-            record = self._data.get("instagram")
-            encrypted = record.get("access_token_encrypted") if isinstance(record, dict) else None
-        return self._decrypt(encrypted) if encrypted else None
-
-    def update_instagram_token(self, access_token: str, expires_in: Optional[int]) -> Dict[str, Any]:
-        now = utc_now()
-        expires_at = self._expires_at_from_seconds(expires_in, now)
-        with self._lock:
-            record = self._data.get("instagram")
-            if not isinstance(record, dict):
-                raise RuntimeError("Instagram 尚未連線")
-            record["access_token_encrypted"] = self._encrypt(access_token)
-            record["token_expires_at"] = to_iso(expires_at) if expires_at else record.get("token_expires_at")
-            record["last_verified_at"] = to_iso(now)
-            record["last_refreshed_at"] = to_iso(now)
-            record["last_refresh_error"] = None
-            record["status"] = "active"
-            self._save()
-        return self.get_instagram_public() or {}
-
-    def mark_instagram_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
-        with self._lock:
-            record = self._data.get("instagram")
-            if not isinstance(record, dict):
-                return
-            record["status"] = "reauthorization_required" if requires_reauthorization else "refresh_failed"
-            record["last_refresh_error"] = str(message)[:240]
-            record["last_refresh_failed_at"] = to_iso(utc_now())
-            self._save()
-
-    def update_instagram_profile(self, username: str, account_type: str):
-        with self._lock:
-            record = self._data.get("instagram")
-            if not isinstance(record, dict):
-                return
-            record["username"] = username or record.get("username", "")
-            record["account_type"] = account_type or record.get("account_type", "")
-            record["last_verified_at"] = to_iso(utc_now())
-            self._save()
-
-    def clear_instagram(self):
-        with self._lock:
-            self._data["instagram"] = None
-            self._save()
-
-    def set_secret(self, name: str, value: str):
-        with self._lock:
-            secrets = self._data.setdefault("secrets", {})
-            secrets[name] = self._encrypt(value)
-            self._save()
-
-    def get_secret(self, name: str) -> str:
-        with self._lock:
-            encrypted = self._data.get("secrets", {}).get(name)
-        return self._decrypt(encrypted) if encrypted else ""
-
-    def has_secret(self, name: str) -> bool:
-        with self._lock:
-            return bool(self._data.get("secrets", {}).get(name))
 
 
 credential_store = CredentialStore()

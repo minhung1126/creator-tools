@@ -10,7 +10,6 @@ from backend.app.core import dependencies
 from backend.app.core.credential_store import CredentialStore
 from backend.app.core.security import (
     GOOGLE_OAUTH_STATE_SALT,
-    INSTAGRAM_OAUTH_STATE_SALT,
     sign_timed_data,
     verify_timed_data,
 )
@@ -22,7 +21,7 @@ def test_oauth_state_is_tamper_expiry_and_salt_bound():
     token = sign_timed_data({"state": "abc"}, GOOGLE_OAUTH_STATE_SALT)
     assert verify_timed_data(token, GOOGLE_OAUTH_STATE_SALT, 60)["state"] == "abc"
     assert verify_timed_data(token + "x", GOOGLE_OAUTH_STATE_SALT, 60) is None
-    assert verify_timed_data(token, INSTAGRAM_OAUTH_STATE_SALT, 60) is None
+    assert verify_timed_data(token, "different-oauth-flow", 60) is None
     expired = sign_timed_data({"state": "old"}, GOOGLE_OAUTH_STATE_SALT)
     assert verify_timed_data(expired, GOOGLE_OAUTH_STATE_SALT, -1) is None
 
@@ -75,19 +74,17 @@ def test_google_refresh_updates_only_the_current_server_session(monkeypatch, tmp
 def test_credential_store_encrypts_and_rejects_wrong_key(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("backend.app.core.credential_store.settings.CREDENTIAL_ENCRYPTION_KEY", "test-key")
     store = CredentialStore(tmp_path / "credentials.json")
-    store.save_instagram_connection(
-        access_token="instagram-token",
-        user_id="1",
-        username="creator",
-        account_type="CREATOR",
-        granted_scopes=[],
-        expires_in=None,
-        permissions_verified=False,
+    store.save_google_connection(
+        {
+            "token": "google-token",
+            "refresh_token": "google-refresh-token",
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "user": {"email": "admin@example.test"},
+        }
     )
     raw = (tmp_path / "credentials.json").read_text(encoding="utf-8")
-    assert "instagram-token" not in raw
-    assert store.get_instagram_public()["granted_scopes"] == []
-    assert store.get_instagram_public()["permissions_verified"] is False
+    assert "google-token" not in raw
+    assert "google-refresh-token" not in raw
     store._fernet = Fernet(Fernet.generate_key())
     with pytest.raises(RuntimeError):
-        store.get_instagram_token()
+        store.get_google_credentials()

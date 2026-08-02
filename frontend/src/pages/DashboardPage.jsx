@@ -52,7 +52,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="icon-box icon-box-secondary"><Send size={28} /></div>
-          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>發布並清理清單</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>公開影片後自 To-Post 播放清單移除。</p></div>
+          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>發布並清理清單</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>依序公開影片並自 To-Post 播放清單移除，完成後直接顯示結果。</p></div>
           <button className="btn btn-primary" onClick={() => setActiveTab('publish_clean')} style={{ marginTop: 'auto' }}>進入發布模組 <ArrowRight size={16} /></button>
         </div>
 

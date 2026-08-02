@@ -8,13 +8,7 @@ import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
 import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
 import ApiHealthPage from './pages/ApiHealthPage';
-import InstagramReelsPage from './pages/InstagramReelsPage';
-import InstagramHistoryPage from './pages/InstagramHistoryPage';
-import InstagramSettingsPage from './pages/InstagramSettingsPage';
 import LoginPage from './pages/LoginPage';
-import TaskQueuePage from './pages/TaskQueuePage';
-import NotificationCenter from './components/NotificationCenter';
-import { ActivityCenterProvider } from './contexts/ActivityCenterContext';
 import { api } from './services/api';
 import { clearAuthHash, parseAuthHash } from './utils/authHash';
 
@@ -24,10 +18,6 @@ function AppContent() {
   const [sysSettings, setSysSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
-  const [instagramStatusVersion, setInstagramStatusVersion] = useState(0);
-  const [notificationOpen, setNotificationOpen] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const [selectedBatchId, setSelectedBatchId] = useState(null);
   const toast = useToast();
 
   const fetchUser = async () => {
@@ -71,20 +61,6 @@ function AppContent() {
       } else if (authResult?.type === 'google_error') {
         const message = authResult.value || 'Google 帳號連線失敗，請重新嘗試。';
         setAuthError(message); toast.error(message); clearAuthHash();
-      } else if (authResult?.type === 'instagram_success') {
-        setActiveTab('instagram_settings');
-        toast.success('Instagram 帳號連線成功。');
-        clearAuthHash();
-        setInstagramStatusVersion((version) => version + 1);
-        if (user) {
-          await api.getInstagramAuthStatus().catch(() => null);
-          await fetchSettings();
-        }
-      } else if (authResult?.type === 'instagram_error') {
-        setActiveTab('instagram_settings');
-        toast.error(authResult.value || 'Instagram 帳號連線失敗，請重新嘗試。');
-        clearAuthHash();
-        setInstagramStatusVersion((version) => version + 1);
       } else if (user) await fetchSettings();
       setLoading(false);
     };
@@ -93,7 +69,7 @@ function AppContent() {
 
   useEffect(() => {
     const handleSessionExpired = () => {
-      const message = '登入已逾時，請重新登入；完成後可回到任務隊列繼續查看工作。';
+      const message = '登入已逾時，請重新登入後再繼續操作。';
       setAuthUser(null);
       setAuthError(message);
       toast.warning(message, 8000);
@@ -110,28 +86,16 @@ function AppContent() {
   if (loading) return <div className="loading-center">系統初始化中...</div>;
   if (!authUser) return <LoginPage initialError={authError} />;
 
-  const openNotificationTarget = (taskId, batchId) => {
-    if (taskId) setSelectedTaskId(taskId);
-    if (batchId) setSelectedBatchId(batchId);
-    setActiveTab('task_queue');
-    setNotificationOpen(false);
-    if (!taskId && batchId) setSelectedTaskId(null);
-  };
-
-  return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} onOpenNotifications={() => setNotificationOpen(true)} /><main className="main-content">
+  return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} /><main className="main-content">
     {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'api_health' && <ApiHealthPage />}
-    {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" setActiveTab={setActiveTab} />}
-    {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" setActiveTab={setActiveTab} />}
-    {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} setActiveTab={setActiveTab} />}
+    {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
+    {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
+    {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
     {activeTab === 'youtube_settings' && <YouTubeSettingsPage sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
-    {activeTab === 'instagram_reels' && <InstagramReelsPage setActiveTab={setActiveTab} />}
-    {activeTab === 'instagram_history' && <InstagramHistoryPage />}
-    {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
-    {activeTab === 'task_queue' && <TaskQueuePage selectedTaskId={selectedTaskId} selectedBatchId={selectedBatchId} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
-  </main><NotificationCenter open={notificationOpen} onClose={() => setNotificationOpen(false)} onOpenTarget={openNotificationTarget} /></div>;
+  </main></div>;
 }
 
 class ErrorBoundary extends React.Component {
@@ -144,4 +108,4 @@ class ErrorBoundary extends React.Component {
   }
 }
 
-export default function App() { return <ErrorBoundary><ToastProvider><ActivityCenterProvider><AppContent /></ActivityCenterProvider></ToastProvider></ErrorBoundary>; }
+export default function App() { return <ErrorBoundary><ToastProvider><AppContent /></ToastProvider></ErrorBoundary>; }

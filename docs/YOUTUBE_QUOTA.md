@@ -16,9 +16,9 @@ per-request costs:
 | `playlistItems.delete` | 50 |
 
 Pagination is charged per request. Before a request is sent, its documented
-cost is reserved in SQLite. A safety buffer configured by the user is deducted
+cost is reserved in the JSON-backed quota store. A safety buffer configured by the user is deducted
 from the configured project limit. If the reservation would cross that policy
-cap, the request is not sent and the task waits for the next reset.
+cap, the request is not sent and the API returns a quota error immediately.
 
 The settings page separates:
 
@@ -33,16 +33,20 @@ IANA timezone database. The API returns the reset timestamp with its current
 local time.
 
 When Google returns HTTP 403 with reason `quotaExceeded`, the ledger changes to
-`confirmed_exhausted`, sets effective availability to zero, and moves the
-YouTube lane to `waiting_youtube_quota`. Those tasks remain queued with a
-durable `next_attempt_at`; the queue resumes them automatically after the
-Pacific midnight reset. Manual retry cannot bypass the breaker.
+`confirmed_exhausted` and sets effective availability to zero. New requests
+remain blocked until the Pacific midnight reset; there is no background task
+queue or automatic cross-day retry.
 
-Quota audit data lives in `youtube_quota_daily` and `youtube_quota_events` in
-`data/creator_tools.db`. The previous
-`data/youtube_quota_usage.json`, if present, is imported once for the current
-quota date and is not written by the new code. Keep the data directory in the
-deployment volume.
+Quota usage lives in `data/youtube_quota_usage.json`. Writes use an in-process
+lock and atomic file replacement. Keep the data directory in the deployment
+volume.
+
+Older releases used `data/creator_tools.db` for tasks, history, notifications,
+and quota events. When the JSON ledger does not exist, the new release opens
+that database read-only once, imports the current Pacific day's quota aggregate
+and method counts, then writes a migration marker to the JSON file. Subsequent
+starts use only JSON. The application never deletes the old database; archive
+it together with its `-wal` and `-shm` files until the migration is verified.
 
 References:
 

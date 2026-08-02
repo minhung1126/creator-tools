@@ -6,9 +6,9 @@ Creator Tools 的 production image 已由 GitHub Actions 建置並發布至 GHCR
 
 1. 安裝 Docker Engine/Docker Compose v2。
 2. 建立 `.env`，參考根目錄 `.env.example`。
-3. 正式環境至少設定 `BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS`、Google OAuth 憑證，以及 Instagram OAuth 憑證 `INSTAGRAM_APP_ID`／`INSTAGRAM_APP_SECRET`（若要使用 Instagram Reels）。
+3. 正式環境至少設定 `BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS` 與 Google OAuth 憑證。
 
-`PUBLIC_BASE_URL` 是 Google/Instagram callback 的唯一來源；`BIND_HOST` 只控制容器內 bind address。若 reverse proxy 位於 homelab 的另一台設備，Creator Tools 主機必須讓該設備可以連到 `8000`，建議設定成：
+`PUBLIC_BASE_URL` 是 Google callback 的唯一來源；`BIND_HOST` 只控制容器內 bind address。若 reverse proxy 位於 homelab 的另一台設備，Creator Tools 主機必須讓該設備可以連到 `8000`，建議設定成：
 
 ```env
 BIND_HOST=0.0.0.0
@@ -20,8 +20,6 @@ CREDENTIAL_ENCRYPTION_KEY=請固定保存的加密金鑰
 ALLOWED_GOOGLE_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=你的 Google OAuth Client ID
 GOOGLE_CLIENT_SECRET=你的 Google OAuth Client Secret
-INSTAGRAM_APP_ID=Instagram API with Instagram Login 頁面的 Instagram 應用程式編號
-INSTAGRAM_APP_SECRET=Instagram API with Instagram Login 頁面的 Instagram 應用程式密鑰
 ```
 
 此 production image 已包含編譯後的前端，前端與 API 可以共用同一個公開網址：`/` 由前端提供，`/api/*` 由 API 處理。Homelab reverse proxy 應將公開網址轉發到 Creator Tools 主機的 `8000` port。
@@ -39,27 +37,23 @@ docker compose logs -f creator-tools
 
 ## 3. 持久化與驗證
 
-- `./data:/app/data` 保存加密 credential store、server-side sessions、runtime config，以及 SQLite 任務／通知中心。
-- `data/creator_tools.db` 是統一任務中心的主要資料庫，使用 SQLite WAL。升級 container 或搬移主機前，請停止服務或先確認沒有正在寫入，備份下列檔案：
+- `./data:/app/data` 保存加密 credential store、server-side sessions、runtime config，以及 JSON-backed YouTube quota 用量。
+- 目前需持久保存的主要檔案包括：
 
   ```text
-  data/creator_tools.db
-  data/creator_tools.db-wal
-  data/creator_tools.db-shm
-  data/instagram_publish_jobs.json
+  data/credential_store.json
+  data/sessions.json
+  data/runtime_config.json
+  data/youtube_quota_usage.json
   ```
 
-  實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。不要刪除或覆蓋舊的 `instagram_publish_jobs.json`；服務啟動時會以 deterministic legacy key 將歷史 job/item 匯入 SQLite，重跑 migration 不會重複建立任務或歷史通知。
-- 任務 worker 與 API 共用 SQLite；Instagram 與 YouTube 各自使用 concurrency 1 的 lane。取消是協作式 checkpoint 停止，服務重啟會把中斷中的 `running`/`cancel_requested` 任務改為 `paused`，不會自動重新發布或回滾已完成的外部操作。
+  實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。YouTube metadata 與發布清理會在 API request 內直接執行，不再建立背景任務、通知或歷史資料。
+- 從舊版升級時，先停止舊服務並備份 `creator_tools.db`、`creator_tools.db-wal`、`creator_tools.db-shm`、`instagram_publish_jobs.json` 與 `instagram_api_usage.json`。若 `youtube_quota_usage.json` 尚不存在，新版首次啟動會以唯讀方式從舊 DB 匯入當日 YouTube quota aggregate，寫入 JSON 後便不再開啟 DB。確認 JSON 已產生且不需回復舊版後，再由操作者手動清理舊檔；程式不會自動刪除它們。
 - 不要把 `.env`、`data/credential_store.json` 或 `data/sessions.json` 提交到 Git。
 - Health check：`https://creator-tools.ymin.io/api/v1/health`。除了 HTTP 200，也要確認 JSON 的 `ready: true`；`configuration` 與 `warnings` 只揭露設定是否齊全，不會回傳任何金鑰。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
-- Meta Instagram Login Redirect URI：`https://creator-tools.ymin.io/api/v1/instagram/auth/callback`。
-
-Instagram URI 必須設定在 Meta App 的 **Instagram API → 含有 Instagram 登入的 API 設定 → 第 2 步「產生存取權」→ Set up Instagram business login**。不要只設定在 **商家專用 Facebook 登入 → 設定**，也不要填在 **Webhooks → 回呼網址**；這三個欄位屬於不同流程。完整的 Meta 後台逐步位置、權限、測試帳號與部署檢查表請看 [Instagram Reels API 與 Cloudflare R2 設定教學](INSTAGRAM_R2_SETUP.md)。
-
-部署完成後，Google 登入並開啟 Instagram 設定頁，確認頁面顯示的 `redirect_uri` 與上方網址逐字一致；若 `.env` 有修改，必須重新啟動 container。
+部署完成後，Google 登入並確認設定頁顯示的 `redirect_uri` 與上方網址逐字一致；若 `.env` 有修改，必須重新啟動 container。
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時，Google login 會被拒絕；目前產品模式是單一管理者。
 
-登入後的 Google Sheet、YouTube playlist、Drive folder 與 R2 設定都由網頁設定頁保存到 `data/`，不需要放進 `.env`。修改網頁設定後不必重啟服務；修改 `.env` 則需要重新啟動。
+登入後的 Google Sheet 與 YouTube playlist 設定由網頁設定頁保存到 `data/`，不需要放進 `.env`。修改網頁設定後不必重啟服務；修改 `.env` 則需要重新啟動。

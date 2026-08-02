@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
-import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
-import TaskDetail from '../components/TaskDetail';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -18,9 +16,8 @@ import {
   Trash2,
 } from 'lucide-react';
 
-export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab }) {
+export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
-  const { refresh, tasks, cancelTask, retryTask } = useActivityCenter();
   const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
@@ -33,7 +30,6 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
-  const [taskBusyId, setTaskBusyId] = useState(null);
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
@@ -61,12 +57,13 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
     setErrorMsg(null);
     setResult(null);
     try {
-      const metadataByVideoId = Object.fromEntries(videos.map((video) => [video.video_id, video]));
       const res = await api.publishAndCleanup(playlistId);
-      setResult({ ...res, metadataByVideoId });
-      await refresh({ background: true });
+      setResult(res);
       setVideos([]);
-      toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 支影片的公開與清理任務。`);
+      const summary = `成功 ${res.succeeded_count || 0} 支、警告 ${res.warning_count || 0} 支、略過 ${res.skipped_count || 0} 支、失敗 ${res.failed_count || 0} 支`;
+      if (res.quota_blocked || res.not_attempted_count) toast.warning(`公開與清理部分完成：${summary}`);
+      else if (res.failed_count || res.warning_count) toast.warning(`公開與清理完成但有需注意項目：${summary}`);
+      else toast.success(`公開與清理完成：${summary}`);
     } catch (err) {
       setErrorMsg(`發布與清理執行失敗：${err.message}`);
       toast.error('發布與清理執行失敗');
@@ -76,25 +73,13 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   };
 
   const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
-  const resultTasks = result?.batch_id ? tasks.filter((task) => task.batch_id === result.batch_id) : [];
-  const runTaskAction = async (action, taskId) => {
-    setTaskBusyId(taskId);
-    try {
-      await action(taskId);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setTaskBusyId(null);
-    }
-  };
-
   const requestPublish = async () => {
     setEstimateLoading(true);
     try {
       setQuotaEstimate(await api.estimateYoutubeQuota({ operation: 'youtube.publish_cleanup', itemCount: videos.length }));
     } catch (error) {
       setQuotaEstimate(null);
-      toast.warning(`無法取得 quota 預估，仍可建立任務：${error.message}`);
+      toast.warning(`無法取得 quota 預估，仍可直接執行：${error.message}`);
     } finally {
       setEstimateLoading(false);
     }
@@ -121,7 +106,7 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
       <ConfirmDialog
         open={confirmOpen}
         title="確認公開並清理清單"
-        message={`確定要依上傳時間由最早到最晚，將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）${quotaEstimate ? `\n最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今天預計可處理 ${quotaEstimate.max_items_today ?? videos.length} 支，其餘 ${Math.max(videos.length - Number(quotaEstimate.max_items_today || 0), 0)} 支會自動跨日續跑。` : ''}`}
+        message={`確定要依上傳時間由最早到最晚，直接將這 ${videos.length} 支影片設為「公開」並自 To-Post 播放清單移除嗎？\n（影片仍會保留在 YouTube 頻道中）${quotaEstimate ? `\n最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；目前配額預計可處理 ${quotaEstimate.max_items_today ?? videos.length} 支。若途中達上限，未執行項目需在官方重設後重新送出。` : ''}`}
         confirmText={estimateLoading ? '估算中…' : '確認公開並移出 To-Post'}
         cancelText="取消"
         variant="destructive"
@@ -207,10 +192,9 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
 
       {result && (
         <div className="glass-panel" style={{ padding: '24px', border: '1px solid rgba(236, 72, 153, 0.4)', background: 'rgba(15, 23, 42, 0.95)' }}>
-          <h3 style={{ fontSize: '1.3rem', color: '#f472b6', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> 已建立公開與清理任務</h3>
-          <p style={{ color: 'var(--text-muted)' }}>批次 ID：{result.batch_id} · 已建立 {result.total_count || result.task_ids?.length || 0} 支影片任務，其中 {result.skipped_count || 0} 支略過。</p>
-          <button className="btn btn-secondary" type="button" style={{ marginTop: 12 }} onClick={() => setActiveTab?.('task_queue')}>到任務隊列查看</button>
-          {resultTasks.map((task) => <TaskDetail key={task.id} task={task} compact busy={taskBusyId === task.id} onCancel={() => runTaskAction(cancelTask, task.id)} onRetry={() => runTaskAction(retryTask, task.id)} />)}
+          <h3 style={{ fontSize: '1.3rem', color: result.completed ? '#f472b6' : '#fbbf24', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> {result.completed ? '公開與清理已執行完成' : '公開與清理部分完成'}</h3>
+          <p style={{ color: 'var(--text-muted)' }}>共 {result.total_count || 0} 支：成功 {result.succeeded_count || 0}、警告 {result.warning_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。</p>
+          {result.quota_blocked && <div className="info-banner" style={{ marginTop: 12 }}><AlertTriangle size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新讀取播放清單並送出。</span></div>}
           {result.results && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 16 }}>
             {result.results.map((item, index) => (
               <div key={`${item.video_id}-${index}`} className="result-item" style={{ alignItems: 'flex-start', background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
@@ -218,9 +202,9 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
                   <strong style={{ color: '#fff' }}>#{index + 1}</strong>
                   <div style={{ marginTop: '6px' }}>{metadataBlock(item.title, item.description)}</div>
                   <div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: '8px' }}>ID: {item.video_id}</div>
-                  {item.reason && <div style={{ color: '#f87171', fontSize: '0.8rem', marginTop: '4px' }}>原因：{item.reason}</div>}
+                  {item.reason && <div style={{ color: item.status === 'failed' ? '#f87171' : '#fbbf24', fontSize: '0.8rem', marginTop: '4px' }}>說明：{item.reason}</div>}
                 </div>
-                <span className={`badge ${item.status === 'failed' ? 'badge-disconnected' : 'badge-connected'}`}>{item.status === 'failed' ? '失敗' : '公開並移出清單完成'}</span>
+                <span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>{item.status === 'succeeded' ? '完成' : item.status === 'succeeded_with_warnings' ? '完成但有警告' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}</span>
               </div>
             ))}
           </div>}

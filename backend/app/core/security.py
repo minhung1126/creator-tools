@@ -6,7 +6,6 @@ from backend.app.core.config import settings
 
 serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
 GOOGLE_OAUTH_STATE_SALT = "google-oauth-state"
-INSTAGRAM_OAUTH_STATE_SALT = "instagram-oauth-state"
 
 
 def sign_timed_data(data: dict[str, Any], salt: str) -> str:
