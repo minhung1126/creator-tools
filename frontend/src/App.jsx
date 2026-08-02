@@ -7,6 +7,7 @@ import PublishCleanerPage from './pages/PublishCleanerPage';
 import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
 import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
+import ApiHealthPage from './pages/ApiHealthPage';
 import InstagramReelsPage from './pages/InstagramReelsPage';
 import InstagramHistoryPage from './pages/InstagramHistoryPage';
 import InstagramSettingsPage from './pages/InstagramSettingsPage';
@@ -119,6 +120,7 @@ function AppContent() {
 
   return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} onOpenNotifications={() => setNotificationOpen(true)} /><main className="main-content">
     {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
+    {activeTab === 'api_health' && <ApiHealthPage />}
     {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" setActiveTab={setActiveTab} />}
     {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" setActiveTab={setActiveTab} />}
     {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} setActiveTab={setActiveTab} />}

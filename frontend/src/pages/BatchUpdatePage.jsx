@@ -4,7 +4,6 @@ import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
 import TaskDetail from '../components/TaskDetail';
-import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
@@ -96,7 +95,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [taskBusyId, setTaskBusyId] = useState(null);
-  const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -313,7 +311,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       setBulkPerson('');
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
-      setQuotaRefreshKey((key) => key + 1);
     } catch (err) {
       setErrorMsg(`載入草稿影片失敗：${err.message}`);
     } finally {
@@ -362,7 +359,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       });
       setResult(res);
       await refresh({ background: true });
-      setQuotaRefreshKey((key) => key + 1);
       toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 筆影片任務，其中 ${res.skipped_count || 0} 筆略過。`);
     } catch (err) {
       setErrorMsg(`批次更新執行失敗：${err.message}`);
@@ -408,8 +404,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   return (
     <div className="section-gap">
       <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」處理 ${videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length} 支影片。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} units。${quotaEstimate.can_complete_today ? '預計今天可完成。' : '預計部分任務會等待下一次官方重設。'}` : '未指定人物的影片會略過。'} `} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
-      <YouTubeQuotaBanner refreshKey={quotaRefreshKey} />
-
       <div>
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1 style={{ fontSize: '1.8rem' }}>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先選工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>

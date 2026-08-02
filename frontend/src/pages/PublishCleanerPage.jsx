@@ -4,7 +4,6 @@ import { useToast } from '../components/Toast';
 import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
 import TaskDetail from '../components/TaskDetail';
-import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -32,7 +31,6 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
   const [errorMsg, setErrorMsg] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
-  const [quotaRefreshKey, setQuotaRefreshKey] = useState(0);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [taskBusyId, setTaskBusyId] = useState(null);
@@ -50,7 +48,6 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
       setVideos(sortVideosByUploadTime(res.videos || []));
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
-      setQuotaRefreshKey((key) => key + 1);
     } catch (err) {
       setErrorMsg(`讀取 To-Post 播放清單失敗：${err.message}`);
     } finally {
@@ -69,7 +66,6 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
       setResult({ ...res, metadataByVideoId });
       await refresh({ background: true });
       setVideos([]);
-      setQuotaRefreshKey((key) => key + 1);
       toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 支影片的公開與清理任務。`);
     } catch (err) {
       setErrorMsg(`發布與清理執行失敗：${err.message}`);
@@ -132,8 +128,6 @@ export default function PublishCleanerPage({ sysSettings, authUser, setActiveTab
         onConfirm={doPublish}
         onCancel={() => setConfirmOpen(false)}
       />
-
-      <YouTubeQuotaBanner refreshKey={quotaRefreshKey} />
 
       <div>
         <div className="section-header">
