@@ -24,7 +24,9 @@ def metadata_payload(*people):
         title_column="Youtube Title",
         description_column="Youtube Description",
         team="Team",
-        assignments=[VideoAssignment(video_id=f"video-{index}", person=person) for index, person in enumerate(people, 1)],
+        assignments=[
+            VideoAssignment(video_id=f"video-{index}", person=person) for index, person in enumerate(people, 1)
+        ],
     )
 
 
@@ -116,9 +118,21 @@ def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(
         for video_id in ("video-3", "video-1", "video-2")
     ]
     details = {
-        "video-1": {"id": "video-1", "snippet": {"title": "One", "publishedAt": "2026-01-01T00:00:00Z"}, "status": {"privacyStatus": "private"}},
-        "video-2": {"id": "video-2", "snippet": {"title": "Two", "publishedAt": "2026-01-02T00:00:00Z"}, "status": {"privacyStatus": "private"}},
-        "video-3": {"id": "video-3", "snippet": {"title": "Three", "publishedAt": "2026-01-03T00:00:00Z"}, "status": {"privacyStatus": "private"}},
+        "video-1": {
+            "id": "video-1",
+            "snippet": {"title": "One", "publishedAt": "2026-01-01T00:00:00Z"},
+            "status": {"privacyStatus": "private"},
+        },
+        "video-2": {
+            "id": "video-2",
+            "snippet": {"title": "Two", "publishedAt": "2026-01-02T00:00:00Z"},
+            "status": {"privacyStatus": "private"},
+        },
+        "video-3": {
+            "id": "video-3",
+            "snippet": {"title": "Three", "publishedAt": "2026-01-03T00:00:00Z"},
+            "status": {"privacyStatus": "private"},
+        },
     }
     monkeypatch.setattr(youtube_api, "fetch_playlist_items", lambda *_args: raw_items)
     monkeypatch.setattr(youtube_api, "fetch_video_details", lambda _creds, ids: [details[video_id] for video_id in ids])
@@ -158,13 +172,19 @@ def test_publish_quota_after_public_keeps_completed_item_and_partial_results(mon
         for video_id in ("video-1", "video-2")
     ]
     details = [
-        {"id": video_id, "snippet": {"title": video_id, "publishedAt": f"2026-01-0{index}T00:00:00Z"}, "status": {"privacyStatus": "private"}}
+        {
+            "id": video_id,
+            "snippet": {"title": video_id, "publishedAt": f"2026-01-0{index}T00:00:00Z"},
+            "status": {"privacyStatus": "private"},
+        }
         for index, video_id in enumerate(("video-1", "video-2"), 1)
     ]
     monkeypatch.setattr(youtube_api, "fetch_playlist_items", lambda *_args: raw_items)
     monkeypatch.setattr(youtube_api, "fetch_video_details", lambda *_args: details)
     public_calls = []
-    monkeypatch.setattr(youtube_api, "set_video_public", lambda _creds, video_id, **_kwargs: public_calls.append(video_id) or {})
+    monkeypatch.setattr(
+        youtube_api, "set_video_public", lambda _creds, video_id, **_kwargs: public_calls.append(video_id) or {}
+    )
     monkeypatch.setattr(youtube_api, "remove_playlist_item", lambda *_args: (_ for _ in ()).throw(quota_error()))
 
     response = youtube_api.run_publish_and_cleanup(PublishCleanupInput(playlist_id="playlist"), creds=object())

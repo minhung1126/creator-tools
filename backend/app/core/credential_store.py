@@ -181,4 +181,5 @@ class CredentialStore:
             self._data["google"] = None
             self._save()
 
+
 credential_store = CredentialStore()
