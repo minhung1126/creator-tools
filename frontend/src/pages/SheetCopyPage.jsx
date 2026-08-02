@@ -121,6 +121,8 @@ export default function SheetCopyPage({ sysSettings }) {
 
   useEffect(() => {
     if (spreadsheetId) refresh();
+    // Initial hydration only; later source edits are applied by the explicit refresh button.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const changeTeam = async (team) => {
