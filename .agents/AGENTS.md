@@ -21,5 +21,4 @@ Creator Tools 使用 FastAPI、React/Vite 與 Docker，整合 Google Sheets 與 
 - 前端：`npm run lint`、`npm test -- --run`、`npm run build`
 
 ## Release
-
 - 版本使用 `vX.Y.Z`。Push `main` 或 tag 會建置 GHCR image；只有 `v*` tag 會建立 GitHub Release。
