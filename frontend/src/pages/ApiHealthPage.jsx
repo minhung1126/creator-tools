@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, RefreshCw } from 'lucide-react';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
-import InstagramApiUsageBanner from '../components/InstagramApiUsageBanner';
 
 export default function ApiHealthPage() {
   const [refreshKey, setRefreshKey] = useState(0);
@@ -16,21 +15,18 @@ export default function ApiHealthPage() {
       <div className="section-header" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div>
           <h1 style={{ fontSize: '1.8rem' }}>API健康度</h1>
-          <p className="section-desc">集中查看 YouTube API 配額與 Instagram API 使用率、限流及最近錯誤。</p>
+          <p className="section-desc">查看 YouTube API 配額估算與目前的安全上限狀態。</p>
         </div>
         <button className="btn btn-secondary" type="button" onClick={() => setRefreshKey((key) => key + 1)}>
           <RefreshCw size={16} />全部更新
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 460px), 1fr))', gap: 20 }}>
-        <YouTubeQuotaBanner refreshKey={refreshKey} />
-        <InstagramApiUsageBanner refreshKey={refreshKey} />
-      </div>
+      <YouTubeQuotaBanner refreshKey={refreshKey} />
 
       <div className="info-banner">
         <Activity size={16} color="var(--primary)" />
-        <span>YouTube 數字是 Creator Tools 的 quota 估算；Instagram 數字來自 Meta 回應的 x-app-usage 滾動使用率。</span>
+        <span>YouTube 數字是 Creator Tools 依官方 method cost 記錄的本地估算，不代表 Google Cloud project 的即時總用量。</span>
       </div>
     </div>
   );

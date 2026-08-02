@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, CheckCircle2, Clock3, Database, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Activity, AlertTriangle, Clock3, Database, RefreshCw, ShieldAlert } from 'lucide-react';
 import { api } from '../services/api';
 
 const STATE_STYLE = {
@@ -101,7 +101,6 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
 
       {!compact && usage?.methods?.length > 0 && <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>{usage.methods.map((item) => <span key={`${item.method}-${item.cost_per_call}`} className="badge badge-info" style={{ fontSize: '0.72rem' }}>{item.method}: {item.calls} 次 × {item.cost_per_call} = {units(item.units)} units</span>)}</div>}
       {!compact && <p style={{ marginTop: '10px', color: 'var(--text-dim)', fontSize: '0.72rem', lineHeight: 1.5 }}>{usage?.note || '本數字只統計 Creator Tools，屬於估算，不是 Google 官方即時 project usage。'}{usage?.quota_rules_verified_at ? ` 官方規則核對日期：${usage.quota_rules_verified_at}。` : ''}</p>}
-      {usage?.waiting_task_count > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '8px', color: style.color, fontSize: '0.78rem' }}><CheckCircle2 size={14} />{usage.waiting_task_count} 支任務將於重設後自動重試</span>}
     </div>
   );
 }

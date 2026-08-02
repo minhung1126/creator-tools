@@ -28,9 +28,6 @@ def test_compatibility_routes_are_not_registered():
     removed = {
         ("/api/v1/settings", "GET"),
         ("/api/v1/settings", "POST"),
-        ("/api/v1/instagram/publish-reels", "POST"),
-        ("/api/v1/instagram/publish-jobs/{job_id}", "GET"),
-        ("/api/v1/instagram/publish-jobs/{job_id}/retry", "POST"),
         ("/api/v1/youtube/batch-update-legacy", "POST"),
         ("/api/v1/youtube/publish-and-cleanup-legacy", "POST"),
     }
@@ -38,10 +35,8 @@ def test_compatibility_routes_are_not_registered():
     assert registered.isdisjoint(removed)
 
 
-def test_current_task_and_scoped_settings_routes_remain_registered():
+def test_current_scoped_settings_routes_remain_registered():
     registered = _registered_routes()
 
-    assert ("/api/v1/task-batches/{batch_id}", "GET") in registered
-    assert ("/api/v1/task-batches/{batch_id}/retry", "POST") in registered
     assert ("/api/v1/settings/system", "GET") in registered
     assert ("/api/v1/settings/shared", "GET") in registered

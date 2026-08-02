@@ -1,9 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
-import { useActivityCenter } from '../hooks/useActivityCenter';
 import ConfirmDialog from '../components/ConfirmDialog';
-import TaskDetail from '../components/TaskDetail';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SourceLinkInput from '../components/SourceLinkInput';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
@@ -60,9 +58,8 @@ function PreviewField({ label, value }) {
   );
 }
 
-export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video', setActiveTab }) {
+export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
-  const { refresh, tasks, cancelTask, retryTask } = useActivityCenter();
   const defaults = DEFAULT_COLUMNS[videoType];
   const initial = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
 
@@ -94,7 +91,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [configSaveError, setConfigSaveError] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
-  const [taskBusyId, setTaskBusyId] = useState(null);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -349,7 +345,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     try {
       const res = await api.batchUpdateMetadata({
         spreadsheetUrlOrId: spreadsheetId,
-        playlistId,
         videoType,
         worksheetName,
         titleColumn,
@@ -358,8 +353,10 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         assignments: videos.map((video) => ({ video_id: video.video_id, person: assignments[video.video_id] || '不編輯' })),
       });
       setResult(res);
-      await refresh({ background: true });
-      toast.success(`已建立 ${res.total_count || res.task_ids?.length || 0} 筆影片任務，其中 ${res.skipped_count || 0} 筆略過。`);
+      const summary = `成功 ${res.succeeded_count || 0} 筆、略過 ${res.skipped_count || 0} 筆、失敗 ${res.failed_count || 0} 筆`;
+      if (res.quota_blocked || res.not_attempted_count) toast.warning(`YouTube 更新部分完成：${summary}`);
+      else if (res.failed_count) toast.warning(`YouTube 更新完成但有失敗項目：${summary}`);
+      else toast.success(`YouTube 更新完成：${summary}`);
     } catch (err) {
       setErrorMsg(`批次更新執行失敗：${err.message}`);
       toast.error('批次更新執行失敗');
@@ -381,7 +378,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       setQuotaEstimate(await api.estimateYoutubeQuota({ operation: 'youtube.metadata_update', itemCount: activeCount }));
     } catch (error) {
       setQuotaEstimate(null);
-      toast.warning(`無法取得 quota 預估，仍可建立任務：${error.message}`);
+      toast.warning(`無法取得 quota 預估，仍可直接執行：${error.message}`);
     } finally {
       setEstimateLoading(false);
     }
@@ -389,21 +386,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
-  const resultTasks = result?.batch_id ? tasks.filter((task) => task.batch_id === result.batch_id) : [];
-  const runTaskAction = async (action, taskId) => {
-    setTaskBusyId(taskId);
-    try {
-      await action(taskId);
-    } catch (error) {
-      toast.error(error.message);
-    } finally {
-      setTaskBusyId(null);
-    }
-  };
-
   return (
     <div className="section-gap">
-      <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」處理 ${videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length} 支影片。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} units。${quotaEstimate.can_complete_today ? '預計今天可完成。' : '預計部分任務會等待下一次官方重設。'}` : '未指定人物的影片會略過。'} `} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
+      <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」直接處理 ${videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length} 支影片。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} units。${quotaEstimate.can_complete_today ? '預計可完成。' : '若執行途中達配額上限，未執行項目需在官方重設後重新送出。'}` : '未指定人物的影片會略過。'} `} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
       <div>
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1 style={{ fontSize: '1.8rem' }}>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先選工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
@@ -427,7 +412,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       <div className="glass-panel card-padding" style={{ display: 'grid', gap: 16 }}>
         <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12 }}>
           <strong style={{ color: '#fff' }}><Users size={17} style={{ verticalAlign: 'middle', marginRight: 7 }} />團體與人物篩選</strong>
-          <p className="section-desc" style={{ marginTop: 7 }}>先選團體，再勾選要出現在每支影片人物下拉選單中的人物；這個邏輯與 Instagram Reels 一致。</p>
+          <p className="section-desc" style={{ marginTop: 7 }}>先選團體，再勾選要出現在每支影片人物下拉選單中的人物。</p>
         </div>
         <div className="form-group" style={{ maxWidth: 360 }}><label className="form-label">所屬團體</label><select className="form-select" value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} disabled={!teams.length}><option value="">{teams.length ? '請選擇團體' : '請先選擇工作表'}</option>{teams.map((team) => <option key={team} value={team}>{team}</option>)}</select></div>
         {teamPeople.length > 0 && <div>
@@ -491,7 +476,31 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         </div>
       )}
 
-      {result && <div className="glass-panel" style={{ padding: 24, display: 'grid', gap: 12 }}><h3 style={{ color: '#34d399', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle2 size={22} /> 已建立影片任務</h3><p style={{ color: 'var(--text-muted)' }}>批次 ID：{result.batch_id} · 已建立 {result.total_count || result.task_ids?.length || 0} 筆，略過 {result.skipped_count || 0} 筆。</p><div><button className="btn btn-secondary" type="button" onClick={() => setActiveTab?.('task_queue')}>到任務隊列查看</button></div>{resultTasks.map((task) => <TaskDetail key={task.id} task={task} compact busy={taskBusyId === task.id} onCancel={() => runTaskAction(cancelTask, task.id)} onRetry={() => runTaskAction(retryTask, task.id)} />)}</div>}
+      {result && (
+        <div className="glass-panel" style={{ padding: 24, display: 'grid', gap: 12 }}>
+          <h3 style={{ color: result.completed ? '#34d399' : '#fbbf24', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <CheckCircle2 size={22} /> {result.completed ? 'YouTube 更新已執行完成' : 'YouTube 更新部分完成'}
+          </h3>
+          <p style={{ color: 'var(--text-muted)' }}>
+            共 {result.total_count || 0} 筆：成功 {result.succeeded_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。
+          </p>
+          {result.quota_blocked && (
+            <div className="info-banner"><Info size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新送出。</span></div>
+          )}
+          {(result.results || []).map((item) => (
+            <div key={item.video_id} className="result-item" style={{ alignItems: 'flex-start' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <strong style={{ color: '#fff' }}>{item.title || item.video_id}</strong>
+                <div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: 4 }}>ID: {item.video_id}{item.person ? ` · ${item.person}` : ''}</div>
+                {item.reason && <div style={{ color: item.status === 'failed' ? '#f87171' : '#fbbf24', fontSize: '0.8rem', marginTop: 4 }}>{item.reason}</div>}
+              </div>
+              <span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>
+                {item.status === 'succeeded' ? '成功' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );

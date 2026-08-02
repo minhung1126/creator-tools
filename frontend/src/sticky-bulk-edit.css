@@ -6,28 +6,6 @@
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
 }
 
-/* Reels thumbnails keep their source aspect ratio and never crop the image. */
-.reels-video-thumbnail-wrapper {
-  position: relative;
-  width: 100%;
-  min-height: 120px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  border-radius: var(--radius-md);
-  background: #000;
-}
-
-.reels-video-thumbnail {
-  display: block;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  object-fit: contain;
-  cursor: zoom-in;
-}
-
 @media (max-width: 720px) {
   .bulk-edit-panel {
     top: 8px;

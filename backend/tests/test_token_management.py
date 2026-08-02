@@ -1,12 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import httpx
-
 from backend.app.core.credential_store import CredentialStore
 from backend.app.core.session_store import SessionStore
 from backend.app.services import google_auth
-from backend.app.services.instagram_service import InstagramClient
 
 
 def google_token_payload(expiry: datetime, token: str = "access-token"):
@@ -52,32 +49,3 @@ def test_google_reconnect_without_refresh_token_preserves_previous_refresh_token
     store.save_google_connection(replacement)
 
     assert store.get_google_credentials()["refresh_token"] == "refresh-token"
-
-
-def test_instagram_client_refreshes_once_after_token_error(monkeypatch):
-    calls = []
-
-    class FakeClient:
-        def __init__(self, *args, **kwargs):
-            del args, kwargs
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-        def request(self, method, url, **kwargs):
-            del method, kwargs
-            calls.append(url)
-            request = httpx.Request("GET", url)
-            if len(calls) == 1:
-                return httpx.Response(401, json={"error": {"code": 190, "message": "expired"}}, request=request)
-            return httpx.Response(200, json={"id": "1", "username": "creator"}, request=request)
-
-    monkeypatch.setattr("backend.app.services.instagram_service.httpx.Client", FakeClient)
-    client = InstagramClient("1", "old-token", on_token_refresh=lambda: "new-token")
-
-    assert client.profile()["username"] == "creator"
-    assert client.access_token == "new-token"
-    assert len(calls) == 2

@@ -1,14 +1,12 @@
 # Google API 申請與 OAuth 2.0 設定教學
 
-Creator Tools 需要 Google Sheets、YouTube Data API v3 與 Google Drive API 的 OAuth 2.0 授權。
+Creator Tools 需要 Google Sheets 與 YouTube Data API v3 的 OAuth 2.0 授權。
 
 ## 1. Google Cloud 設定
 
 1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立 `Creator-Tools` 專案。
-2. 啟用 Google Sheets API、YouTube Data API v3 與 Google Drive API。
-3. 在 OAuth consent screen 加入必要 scopes：userinfo email/profile、Sheets readonly、YouTube，以及 Google Drive 編輯（modify）權限 `https://www.googleapis.com/auth/drive`。
-   - Google Drive modify 權限是必要的，因為 Instagram Reels 發布成功後，系統會建立 `Published` 子資料夾並將來源影片移入；只有 `drive.readonly` 會在這個步驟失敗。
-   - 若 Google 帳號先前只授權過 `drive.readonly`，請重新連結 Google 帳號，讓新的 access token／refresh token 取得 `drive` scope。
+2. 啟用 Google Sheets API 與 YouTube Data API v3。
+3. 在 OAuth consent screen 加入 userinfo email/profile、Sheets readonly 與 YouTube scopes；本專案不需要 Google Drive scope。
 4. Development Mode 請把測試管理者加入 Test users。
 5. 建立 Web application OAuth client，設定 callback：
 

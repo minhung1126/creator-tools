@@ -27,12 +27,6 @@ _PERSISTABLE_FIELDS = {
     "youtube_quota_safety_buffer_units",
     "youtube_draft_video_config",
     "youtube_draft_shorts_config",
-    "instagram_drive_folder_id",
-    "instagram_spreadsheet_id",
-    "r2_account_id",
-    "r2_access_key_id",
-    "r2_bucket_name",
-    "r2_public_base_url",
 }
 
 # These values are intentionally configured only from the authenticated UI.
@@ -41,11 +35,6 @@ _PERSISTABLE_FIELDS = {
 _WEB_ONLY_FIELDS = {
     "default_spreadsheet_id",
     "default_playlist_id",
-    "instagram_spreadsheet_id",
-    "r2_account_id",
-    "r2_access_key_id",
-    "r2_bucket_name",
-    "r2_public_base_url",
 }
 
 # Removed legacy secrets are discarded during load instead of being copied forward.

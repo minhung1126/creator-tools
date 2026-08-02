@@ -1,6 +1,5 @@
 import logging
 import os
-from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,40 +8,16 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.router import api_router
 from backend.app.core.config import settings
-from backend.app.core.credential_store import credential_store
-from backend.app.core.task_repository import migrate_legacy_instagram_jobs, task_repository
-from backend.app.services.task_queue import task_queue
 
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """Recover durable tasks before starting the two worker lanes."""
-
-    task_repository.db.initialize()
-    migrate_legacy_instagram_jobs(repository=task_repository)
-    task_repository.recover_after_restart()
-    try:
-        google_credentials = credential_store.get_google_credentials()
-    except Exception:
-        google_credentials = None
-    if not google_credentials or not google_credentials.get("token"):
-        task_repository.pause_queued_without_credentials()
-    task_queue.start()
-    try:
-        yield
-    finally:
-        task_queue.stop()
-
-
 app = FastAPI(
     title="Creator Tools Dashboard API",
-    description="FastAPI backend for Google OAuth, YouTube workflows, and Instagram Reels publish jobs.",
+    description="FastAPI backend for Google OAuth, Google Sheets, and direct YouTube workflows.",
     version="1.1.0",
-    lifespan=lifespan,
 )
 
 origins = [
@@ -84,7 +59,6 @@ def health_check():
         "configuration": {
             "google_oauth_ready": google_oauth_ready,
             "access_allowlist_ready": access_allowlist_ready,
-            "instagram_oauth_ready": bool(settings.instagram_app_id and settings.instagram_app_secret),
         },
         "warnings": warnings,
         "commit_sha": os.getenv("APP_COMMIT_SHA", "development"),

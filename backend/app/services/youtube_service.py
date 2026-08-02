@@ -4,7 +4,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import googleapiclient.discovery
 from google.oauth2.credentials import Credentials
 
-from backend.app.core.youtube_quota_limiter import current_youtube_quota_context
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 
@@ -16,23 +15,8 @@ def get_youtube_service(credentials: Credentials):
 
 
 def _execute_with_quota(request, method: str):
-    """Reserve the documented cost before executing the request.
+    """Reserve the documented cost before executing the request."""
 
-    Task handlers install a repository-scoped limiter in the context variable;
-    synchronous API calls use the application-wide facade.  This keeps every
-    YouTube request on the same guard while allowing isolated task repositories
-    in tests and recovery tooling.
-    """
-
-    context = current_youtube_quota_context()
-    if context is not None:
-        return context.limiter.execute(
-            request,
-            method,
-            task_id=context.task_id,
-            batch_id=context.batch_id,
-            operation=context.operation,
-        )
     return youtube_quota_tracker.execute(request, method)
 
 

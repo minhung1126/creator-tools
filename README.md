@@ -1,6 +1,6 @@
 # 🎬 Creator Tools Web Dashboard
 
-一個整合 YouTube 草稿管理與 Instagram Reels 自動發布的創作者自動化 Web 控制台。後端使用 Python FastAPI，前端使用 React，並透過 Google OAuth 2.0 存取 Google Sheets、Google Drive 與 YouTube。
+一個整合 YouTube 草稿管理、metadata 更新與發布清理的創作者自動化 Web 控制台。後端使用 Python FastAPI，前端使用 React，並透過 Google OAuth 2.0 存取 Google Sheets 與 YouTube。
 
 ![System Overview](https://img.shields.io/badge/Python-3.11-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green) ![React](https://img.shields.io/badge/React-18.2-cyan) ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
@@ -9,8 +9,8 @@
 ## 🌟 核心功能亮點
 
 1. **🔑 Google OAuth 2.0 與平台分頁設定**
-   - 整合 Google Sheets、YouTube Data API v3 與 Google Drive 編輯（modify）權限（scope：`https://www.googleapis.com/auth/drive`）。
-   - Google、YouTube、Instagram / R2 各自使用獨立設定頁。
+   - 整合 Google Sheets readonly 與 YouTube Data API v3 權限。
+   - Google 與 YouTube 使用各自的設定頁。
    - 工作流程設定會持久化儲存；敏感 token / secret 不會由設定 API 回傳前端。
 
 2. **📝 YouTube Video / Shorts 草稿管理**
@@ -22,37 +22,17 @@
 3. **🚀 YouTube 草稿發布與播放清單清理**
    - 讀取待發布 To-Post 播放清單，依上傳時間由早到晚處理。
    - 將影片切換為 `public` 後，自動自播放清單移除，不刪除頻道影片。
+   - YouTube 操作在 API request 內依序執行，完成後直接回傳每支影片結果，不依賴背景任務隊列。
    - 顯示本應用程式估算的 YouTube Data API quota 使用量。
 
-4. **📱 Instagram Reels 自動發布**
-   - 從 Google Drive 資料夾依建立時間由早到晚讀取影片。
-   - 使用與 YouTube 相同的 Sheet 團體／人物選擇邏輯，套用指定欄位的 Instagram 內文。
-   - 下載 Drive 影片後上傳至 Cloudflare R2，驗證公開 HTTPS URL，再建立並發布 Reels。
-   - 使用 **Instagram API with Instagram Login** 與 `graph.instagram.com`，不需連結 Facebook 粉絲專頁。
-   - Instagram 發布成功後，會在來源 Drive 資料夾下建立／使用 `Published` 子資料夾並移入原始影片；同時以 Drive `file_id` 與持久化工作結果防止重複發布。
-   - 支援逐片選人、批量套用、分享到動態消息、持久化工作結果與 retry；搬移 Drive 或清理 R2 失敗時只重試後續清理，不重複發布 Instagram。
-
-5. **♻️ OAuth Token 自動管理**
+4. **♻️ OAuth Token 自動管理**
    - Google Access Token 到期前 5 分鐘自動刷新，最新 token 與 refresh token 加密保存於 `data/credential_store.json`。
-   - Instagram Long-Lived Token 到期前 7 天自動刷新；若 API 回傳 token 失效，會刷新後重試一次。
    - Refresh 失敗會記錄狀態並提示重新授權；瀏覽器 Cookie 只保存隨機 session id，不保存 OAuth token。
 
-6. **📋 統一任務隊列與通知中心**
-   - Instagram Reels、YouTube metadata、YouTube 公開清理都以單支影片 task 持久化於 `data/creator_tools.db`。
-   - Instagram 與 YouTube 各自有獨立的 concurrency 1 lane，支援取消、安全 checkpoint、重試、重啟恢復與持久化通知。
-   - Instagram worker 每次只 claim 並處理一支影片；使用者建立的多支影片批次仍依原順序排隊。
-   - 每個成功的 container／media ID 都會先寫入 SQLite checkpoint，再處理下一階段；部分失敗或服務重啟不會從頭重複發布。
-   - Meta 限流會持久化全域 cooldown 並將任務延後到期自動恢復；HTTP／Meta code／subcode、fbtrace_id、Retry-After 與 x-app-usage 會保留在錯誤與使用量紀錄中。網路 timeout 的 POST 結果不確定時不會盲目重送。
-   - 任務中心會分頁載入完整持久化佇列；「未完成」包含排隊、執行、正在取消與暫停等待確認。
-
-### 任務佇列與 Instagram 批次語意
-
-- 一個平台 lane 同一時間只執行一個 worker unit；Instagram 與 YouTube 可彼此獨立進行。
-- Instagram 的 Drive 下載、R2 上傳、Meta container 建立、狀態查詢與發布都逐支執行，所有 Meta 呼叫皆使用一般單筆 request。
-- Instagram 會保留每支影片的發布 checkpoint；若帳號的 24 小時滾動額度不足，則以 `media_publish` 的回應為最終判斷，失敗項目可在額度恢復後重試。
-- 批次中某支失敗時，後續未執行項目會暫停；已送出取消的項目會維持取消，不會被失敗處理改回可重試狀態。
-- 每支影片在 container 建立與發布後立即保存 checkpoint；單支失敗不會重送先前已完成的影片。
-- API 使用量頁同時顯示 Graph 子操作數與實際 HTTP 請求數，批次不再被誤算成單一操作。
+5. **📊 JSON-backed YouTube quota 保護**
+   - 每次 request 依官方 method cost 先保留估算額度，並以安全 buffer 避免超額。
+   - 用量與 quota breaker 狀態保存於 `data/youtube_quota_usage.json`，不需要 SQLite 任務資料庫。
+   - Google 回報 `quotaExceeded` 後會停止新 request，直到 Pacific Time 午夜重設。
 
 ---
 
@@ -62,9 +42,9 @@
 creator-tools/
 ├── backend/
 │   ├── app/
-│   │   ├── api/              # auth, settings, sheets, youtube, instagram
-│   │   ├── core/             # 環境變數、安全 Session、設定、SQLite task store
-│   │   ├── services/         # Google、YouTube、Drive、R2、Instagram、task workers
+│   │   ├── api/              # auth, settings, sheets, youtube
+│   │   ├── core/             # 環境變數、安全 Session、設定
+│   │   ├── services/         # Google、Sheets、YouTube
 │   │   └── main.py
 │   ├── requirements.txt
 │   └── tests/              # mock-only pytest tests
@@ -79,7 +59,7 @@ creator-tools/
 ├── docs/
 │   ├── DEPLOYMENT.md
 │   ├── GOOGLE_API_SETUP.md
-│   └── INSTAGRAM_R2_SETUP.md
+│   └── YOUTUBE_QUOTA.md
 ├── .env.example
 ├── pyproject.toml
 ├── Dockerfile
@@ -125,12 +105,11 @@ npm run dev
 ## 📖 設定與部署文件
 
 - [Google API 申請與 OAuth 2.0 設定教學](docs/GOOGLE_API_SETUP.md)
-- [Instagram Reels API 與 Cloudflare R2 設定教學](docs/INSTAGRAM_R2_SETUP.md)
-- [YouTube Data API quota 與跨日任務說明](docs/YOUTUBE_QUOTA.md)
+- [YouTube Data API quota 說明](docs/YOUTUBE_QUOTA.md)
 - [Docker 部署說明](docs/DEPLOYMENT.md)
 
 ### OAuth Token 維運注意事項
 
 - 正式環境必須固定 `CREDENTIAL_ENCRYPTION_KEY`；金鑰變更後既有加密 token 無法解密，需要重新授權。
-- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session 與工作流程設定。
+- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session、工作流程設定與 YouTube quota 估算。
 - Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。
