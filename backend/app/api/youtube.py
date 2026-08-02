@@ -327,15 +327,12 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                     {
                         **base_result,
                         "status": "skipped",
-                        "reason": item.get("reason")
-                        or "YouTube 找不到此影片或目前帳號無權存取。",
+                        "reason": item.get("reason") or "YouTube 找不到此影片或目前帳號無權存取。",
                     }
                 )
                 continue
             if quota_error is not None:
-                results.append(
-                    {**base_result, "status": "not_attempted", "reason": quota_error.user_message}
-                )
+                results.append({**base_result, "status": "not_attempted", "reason": quota_error.user_message})
                 continue
             try:
                 update_single_video_metadata(

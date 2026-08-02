@@ -286,8 +286,7 @@ class YouTubeQuotaLimiter:
 
     def _sqlite_tables(self, connection: sqlite3.Connection) -> set[str]:
         return {
-            str(row[0])
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
     def _import_sqlite_unlocked(self, quota_date: str, now: datetime) -> dict[str, Any] | None:
@@ -683,9 +682,9 @@ class YouTubeQuotaLimiter:
             try:
                 data = self._load_current_unlocked(current_utc)
                 limit, buffer = self.configured_values()
-                if str(data["state"]) in {"normal", "warning"} and int(
-                    data.get("estimated_used_units") or 0
-                ) >= max(limit - buffer, 0):
+                if str(data["state"]) in {"normal", "warning"} and int(data.get("estimated_used_units") or 0) >= max(
+                    limit - buffer, 0
+                ):
                     data.update(
                         {
                             "state": "safety_blocked",
