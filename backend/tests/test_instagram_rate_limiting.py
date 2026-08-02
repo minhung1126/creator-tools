@@ -3,8 +3,9 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
+from backend.app.core.config import settings
 from backend.app.core.database import Database
-from backend.app.core.instagram_limiter import InstagramLimiter
+from backend.app.core.instagram_limiter import CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS, InstagramLimiter
 from backend.app.core.task_repository import TaskRepository
 from backend.app.services.instagram_errors import InstagramApiError
 from backend.app.services.instagram_service import InstagramClient
@@ -40,6 +41,19 @@ def response(payload, status=200, *, headers=None):
 
 def make_limiter(tmp_path):
     return InstagramLimiter(Database(tmp_path / "creator_tools.db"))
+
+
+def test_content_publishing_limit_fallback_is_not_an_environment_setting(tmp_path):
+    limiter = make_limiter(tmp_path)
+    started = datetime.now(timezone.utc)
+
+    error = limiter.record_content_publishing_limit()
+
+    finished = datetime.now(timezone.utc)
+    recovery = datetime.fromisoformat(error.estimated_recovery_at)
+    fallback = timedelta(hours=CONTENT_PUBLISHING_LIMIT_FALLBACK_HOURS)
+    assert started + fallback <= recovery <= finished + fallback
+    assert not hasattr(settings, "INSTAGRAM_PUBLISHING_LIMIT_HOURS")
 
 
 def test_rate_limit_error_preserves_meta_fields_and_blocks_follow_up_requests(monkeypatch, tmp_path):

@@ -21,10 +21,6 @@ vi.mock('../hooks/useActivityCenter', () => ({
   }),
 }));
 
-vi.mock('../components/InstagramApiUsageBanner', () => ({
-  default: () => <div>API usage</div>,
-}));
-
 describe('InstagramReelsPage setup readiness', () => {
   beforeEach(() => {
     vi.clearAllMocks();

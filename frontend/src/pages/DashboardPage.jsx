@@ -10,12 +10,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { SourceLinkButton } from '../components/SourceLinkInput';
-import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 
 export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
   return (
     <div className="section-gap">
-      <YouTubeQuotaBanner compact />
       <div className="glass-panel" style={{ padding: '32px', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(236, 72, 153, 0.1) 100%)' }}>
         <div className="badge badge-info" style={{ marginBottom: '12px' }}><Sparkles size={14} /> 創作者自動化工作流系統</div>
         <h1 style={{ fontSize: '2.2rem', marginBottom: '8px' }}>Creator Tools 控制台</h1>
