@@ -90,9 +90,9 @@ export const api = {
   testInstagramR2: () => request('/instagram/r2/test', { method: 'POST' }),
   getInstagramDriveVideos: (folderUrlOrId) => request('/instagram/drive-videos', { method: 'POST', body: JSON.stringify({ folder_url_or_id: folderUrlOrId }) }),
   getInstagramPublishHistory: () => request('/instagram/publish-history'),
+  clearInstagramPublishHistory: () => request('/instagram/publish-history', { method: 'DELETE' }),
   deleteInstagramPublishHistory: (jobId, fileId) => request(`/instagram/publish-history/${encodeURIComponent(jobId)}/${encodeURIComponent(fileId)}`, { method: 'DELETE' }),
   createInstagramPublishJob: (payload) => request('/instagram/publish-jobs', { method: 'POST', body: JSON.stringify(payload) }),
-  stopInstagramBlockingJobs: (jobId) => request(`/instagram/publish-jobs/${encodeURIComponent(jobId)}/stop-blocking-jobs`, { method: 'POST' }),
   getActivitySummary: () => request('/activity-summary'),
   getTasks: (params = {}) => {
     const query = new URLSearchParams();
@@ -101,20 +101,12 @@ export const api = {
     });
     return request(`/tasks${query.toString() ? `?${query.toString()}` : ''}`);
   },
+  clearTaskQueue: () => request('/tasks/clear', { method: 'POST' }),
   getTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}`),
   retryTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' }),
   cancelTask: (taskId) => request(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' }),
-  cancelAllTasks: () => request('/tasks/cancel-all', { method: 'POST' }),
-  getTaskBatches: (params = {}) => {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') query.set(key, value);
-    });
-    return request(`/task-batches${query.toString() ? `?${query.toString()}` : ''}`);
-  },
   getTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}`),
   retryTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/retry`, { method: 'POST' }),
-  cancelTaskBatch: (batchId) => request(`/task-batches/${encodeURIComponent(batchId)}/cancel`, { method: 'POST' }),
   getNotifications: ({ unreadOnly = false, offset = 0, limit = 50 } = {}) => request(`/notifications?unread_only=${unreadOnly ? 'true' : 'false'}&offset=${offset}&limit=${limit}`),
   markNotificationRead: (notificationId) => request(`/notifications/${encodeURIComponent(notificationId)}`, { method: 'PATCH', body: JSON.stringify({ read: true }) }),
   markAllNotificationsRead: () => request('/notifications/read-all', { method: 'POST' }),

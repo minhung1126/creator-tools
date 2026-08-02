@@ -51,12 +51,23 @@ def list_activity_tasks(
     return {"items": items, "tasks": items, "total": total, "offset": offset, "limit": limit}
 
 
-@router.post("/tasks/cancel-all")
-def cancel_all_activity_tasks(creds: Credentials = Depends(require_credentials)):
+def _clear_activity_queue(creds: Credentials = Depends(require_credentials)):
     del creds
-    result = task_repository.cancel_all()
+    result = task_repository.clear_queue()
     task_queue.wake()
     return result
+
+
+@router.post("/tasks/clear")
+def clear_activity_queue(creds: Credentials = Depends(require_credentials)):
+    return _clear_activity_queue(creds)
+
+
+@router.post("/tasks/cancel-all")
+def cancel_all_activity_tasks(creds: Credentials = Depends(require_credentials)):
+    """Compatibility alias for older clients; new clients use /tasks/clear."""
+
+    return _clear_activity_queue(creds)
 
 
 @router.get("/tasks/{task_id}")

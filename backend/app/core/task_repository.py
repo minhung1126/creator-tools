@@ -1151,6 +1151,19 @@ class TaskRepository:
                 "unaffected_count": max(total - affected, 0),
             }
 
+    def clear_queue(self, *, reason: str = "使用者要求清空任務隊列") -> dict[str, Any]:
+        """Cancel every unfinished task while retaining its audit history.
+
+        Clearing the queue is intentionally a state transition rather than a
+        hard delete.  Running external operations still need to reach a safe
+        checkpoint, and finished task records remain available until the user
+        explicitly clears history.
+        """
+
+        result = self.cancel_all(reason=reason)
+        result["cleared_count"] = result["requested_count"]
+        return result
+
     def _cancel_where(self, where: str, values: tuple[Any, ...], *, scope: str, reason: str) -> dict[str, Any]:
         with self.db.transaction() as connection:
             rows = connection.execute(
@@ -2002,6 +2015,7 @@ class TaskRepository:
                 history.append(
                     {
                         "record_id": f"{task['batch_id']}:{task.get('video_id') or task['id']}",
+                        "task_id": task["id"],
                         "job_id": task["batch_id"],
                         "batch_id": task["batch_id"],
                         "legacy_job_id": task.get("legacy_job_id"),

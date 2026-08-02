@@ -27,7 +27,6 @@ function AppContent() {
   const [instagramStatusVersion, setInstagramStatusVersion] = useState(0);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const [selectedBatchId, setSelectedBatchId] = useState(null);
   const toast = useToast();
 
   const fetchUser = async () => {
@@ -110,12 +109,10 @@ function AppContent() {
   if (loading) return <div className="loading-center">系統初始化中...</div>;
   if (!authUser) return <LoginPage initialError={authError} />;
 
-  const openNotificationTarget = (taskId, batchId) => {
+  const openNotificationTarget = (taskId) => {
     if (taskId) setSelectedTaskId(taskId);
-    if (batchId) setSelectedBatchId(batchId);
     setActiveTab('task_queue');
     setNotificationOpen(false);
-    if (!taskId && batchId) setSelectedTaskId(null);
   };
 
   return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} onOpenNotifications={() => setNotificationOpen(true)} /><main className="main-content">
@@ -129,7 +126,7 @@ function AppContent() {
     {activeTab === 'instagram_reels' && <InstagramReelsPage setActiveTab={setActiveTab} />}
     {activeTab === 'instagram_history' && <InstagramHistoryPage />}
     {activeTab === 'instagram_settings' && <InstagramSettingsPage refreshKey={instagramStatusVersion} />}
-    {activeTab === 'task_queue' && <TaskQueuePage selectedTaskId={selectedTaskId} selectedBatchId={selectedBatchId} />}
+    {activeTab === 'task_queue' && <TaskQueuePage selectedTaskId={selectedTaskId} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main><NotificationCenter open={notificationOpen} onClose={() => setNotificationOpen(false)} onOpenTarget={openNotificationTarget} /></div>;
 }

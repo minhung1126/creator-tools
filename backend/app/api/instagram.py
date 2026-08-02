@@ -532,6 +532,64 @@ def get_publish_history(creds: Credentials = Depends(require_credentials)):
     return {"records": records, "total": len(records)}
 
 
+@router.delete("/publish-history")
+def clear_publish_history(creds: Credentials = Depends(require_credentials)):
+    """Clear all visible Instagram history records.
+
+    Published Drive files are restored to their source folder first, matching
+    the single-record delete behavior.  A failed restore leaves that record
+    visible so the user can retry it without losing the reservation audit.
+    """
+
+    records = task_repository.list_instagram_history()
+    deleted_count = 0
+    drive_restored_count = 0
+    failures = []
+    for record in records:
+        file_id = record.get("file_id")
+        drive_was_restored = False
+        try:
+            if record.get("drive_moved"):
+                published_folder_id = record.get("published_folder_id")
+                source_folder_id = record.get("source_folder_id")
+                if not published_folder_id or not source_folder_id:
+                    raise RuntimeError("找不到 Drive 資料夾資訊，請先手動將影片移回來源資料夾")
+                move_drive_file_to_folder(
+                    creds,
+                    file_id,
+                    extract_drive_folder_id(published_folder_id),
+                    extract_drive_folder_id(source_folder_id),
+                )
+                drive_was_restored = True
+            if not task_repository.release_instagram_history(record["job_id"], file_id):
+                raise RuntimeError("歷史紀錄已不存在或已被其他操作處理")
+            deleted_count += 1
+            if drive_was_restored:
+                drive_restored_count += 1
+        except Exception as exc:
+            logger.error("Failed to clear Instagram history %s: %s", file_id, type(exc).__name__)
+            failures.append(
+                {
+                    "file_id": file_id,
+                    "file_name": record.get("file_name"),
+                    "message": (
+                        "影片無法移回 Drive 來源資料夾，歷史紀錄尚未刪除。"
+                        if record.get("drive_moved")
+                        else "歷史紀錄無法清除，請稍後重試。"
+                    ),
+                }
+            )
+
+    return {
+        "total_count": len(records),
+        "deleted_count": deleted_count,
+        "drive_restored_count": drive_restored_count,
+        "failed_count": len(failures),
+        "failures": failures,
+        "message": "Instagram 歷史紀錄已清除。" if not failures else "部分 Instagram 歷史紀錄未能清除，請稍後重試。",
+    }
+
+
 @router.delete("/publish-history/{job_id}/{file_id}")
 def delete_publish_history(job_id: str, file_id: str, creds: Credentials = Depends(require_credentials)):
     record = next(

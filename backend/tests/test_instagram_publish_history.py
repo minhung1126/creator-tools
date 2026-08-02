@@ -83,3 +83,19 @@ def test_publish_history_uses_only_sqlite_and_release_removes_reservation(monkey
     assert deleted["drive_restored"] is True
     assert repository.list_instagram_history() == []
     assert repository.find_instagram_record("source-folder", "file-1") is None
+
+
+def test_clear_publish_history_restores_drive_and_releases_all_records(monkeypatch, tmp_path):
+    repository, _ = _repository_with_published_reel(tmp_path)
+    moves = []
+    monkeypatch.setattr(instagram_api, "task_repository", repository)
+    monkeypatch.setattr(instagram_api, "move_drive_file_to_folder", lambda *args: moves.append(args))
+
+    result = instagram_api.clear_publish_history(object())
+
+    assert result["total_count"] == 1
+    assert result["deleted_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["drive_restored_count"] == 1
+    assert moves[0][1:] == ("file-1", "published-folder", "source-folder")
+    assert repository.list_instagram_history() == []

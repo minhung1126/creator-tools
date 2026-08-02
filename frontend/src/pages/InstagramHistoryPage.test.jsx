@@ -8,6 +8,7 @@ import InstagramHistoryPage from './InstagramHistoryPage';
 vi.mock('../services/api', () => ({
   api: {
     getInstagramPublishHistory: vi.fn(),
+    clearInstagramPublishHistory: vi.fn(),
     deleteInstagramPublishHistory: vi.fn(),
   },
 }));
@@ -30,6 +31,7 @@ describe('InstagramHistoryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     api.getInstagramPublishHistory.mockResolvedValue({ records: [record] });
+    api.clearInstagramPublishHistory.mockResolvedValue({ deleted_count: 1, failed_count: 0 });
     api.deleteInstagramPublishHistory.mockResolvedValue({ drive_restored: true });
   });
 
@@ -44,5 +46,21 @@ describe('InstagramHistoryPage', () => {
 
     await waitFor(() => expect(api.deleteInstagramPublishHistory).toHaveBeenCalledWith('job-1', 'file-1'));
     expect(screen.queryByText('reel.mp4')).not.toBeInTheDocument();
+  });
+
+  it('clears all history after confirmation', async () => {
+    api.getInstagramPublishHistory
+      .mockResolvedValueOnce({ records: [record] })
+      .mockResolvedValueOnce({ records: [] });
+    render(<ToastProvider><InstagramHistoryPage /></ToastProvider>);
+
+    await waitFor(() => expect(screen.getByText('reel.mp4')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '清除歷史' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('清除全部 Instagram 歷史紀錄');
+
+    fireEvent.click(screen.getByRole('dialog').querySelector('.btn-danger'));
+
+    await waitFor(() => expect(api.clearInstagramPublishHistory).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText('reel.mp4')).not.toBeInTheDocument());
   });
 });

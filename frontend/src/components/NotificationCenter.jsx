@@ -31,7 +31,7 @@ export default function NotificationCenter({ open, onClose, onOpenTarget }) {
 
   const openNotification = async (notification) => {
     if (!notification.read_at) await markNotificationRead(notification.id);
-    if (notification.task_id || notification.batch_id) onOpenTarget?.(notification.task_id, notification.batch_id);
+    if (notification.task_id || notification.batch_id) onOpenTarget?.(notification.task_id, undefined);
   };
 
   return (
@@ -41,9 +41,10 @@ export default function NotificationCenter({ open, onClose, onOpenTarget }) {
         <div className="notification-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab === 'all'} className={tab === 'all' ? 'active' : ''} onClick={() => setTab('all')}>全部</button><button type="button" role="tab" aria-selected={tab === 'unread'} className={tab === 'unread' ? 'active' : ''} onClick={() => setTab('unread')}>未讀 <span className="notification-tab-count">{unreadCount > 99 ? '99+' : unreadCount}</span></button><button type="button" className="notification-read-all" disabled={!unreadCount} onClick={() => markAllNotificationsRead()}>全部標記已讀</button></div>
         {error && <div className="notification-error"><span>{error}</span><button type="button" className="btn btn-secondary" onClick={() => refresh()}>重試</button></div>}
         <div className="notification-list" aria-live="polite">
-          {loading && !notifications.length ? <div className="notification-empty">載入通知中…</div> : !filtered.length ? <div className="notification-empty"><Bell size={25} /><strong>{tab === 'unread' ? '沒有未讀通知' : '目前沒有通知'}</strong><span>任務失敗、警告與批次摘要會保存在這裡。</span></div> : filtered.map((notification) => {
+          {loading && !notifications.length ? <div className="notification-empty">載入通知中…</div> : !filtered.length ? <div className="notification-empty"><Bell size={25} /><strong>{tab === 'unread' ? '沒有未讀通知' : '目前沒有通知'}</strong><span>任務失敗、警告與摘要會保存在這裡。</span></div> : filtered.map((notification) => {
             const Icon = icons[notification.severity] || Info;
-            return <button type="button" className={`notification-item ${notification.read_at ? 'read' : 'unread'}`} key={notification.id} onClick={() => openNotification(notification)}><span className={`notification-icon severity-${notification.severity}`}><Icon size={17} /></span><span className="notification-copy"><strong>{notification.title}</strong><span>{notification.message}</span><small>{relativeTime(notification.created_at)}{notification.task_id ? ' · 開啟影片任務' : notification.batch_id ? ' · 開啟批次' : ''}</small></span>{!notification.read_at && <span className="notification-unread-mark" aria-label="未讀" />}</button>;
+            const targetLabel = notification.task_id ? ' · 開啟影片任務' : notification.batch_id ? ' · 開啟任務隊列' : '';
+            return <button type="button" className={`notification-item ${notification.read_at ? 'read' : 'unread'}`} key={notification.id} onClick={() => openNotification(notification)}><span className={`notification-icon severity-${notification.severity}`}><Icon size={17} /></span><span className="notification-copy"><strong>{notification.title}</strong><span>{notification.message}</span><small>{relativeTime(notification.created_at)}{targetLabel}</small></span>{!notification.read_at && <span className="notification-unread-mark" aria-label="未讀" />}</button>;
           })}
         </div>
       </aside>

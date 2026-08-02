@@ -16,9 +16,8 @@ const activity = vi.hoisted(() => ({
   refresh: vi.fn(),
   cancelTask: vi.fn().mockResolvedValue({}),
   retryTask: vi.fn().mockResolvedValue({}),
+  clearQueue: vi.fn().mockResolvedValue({}),
   cancelAll: vi.fn().mockResolvedValue({}),
-  cancelBatch: vi.fn().mockResolvedValue({}),
-  retryBatch: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('../hooks/useActivityCenter', () => ({ useActivityCenter: () => activity }));
@@ -44,12 +43,12 @@ describe('TaskQueuePage', () => {
     expect(screen.queryByText('YouTube paused video')).not.toBeInTheDocument();
   });
 
-  it('confirms cancel-all with both platform and queued/running counts', async () => {
+  it('confirms clearing the queue with both platform and queued/running counts', async () => {
     render(<TaskQueuePage />);
-    fireEvent.click(screen.getByRole('button', { name: '取消所有未完成任務' }));
+    fireEvent.click(screen.getByRole('button', { name: '清空任務隊列' }));
     expect(screen.getByRole('dialog')).toHaveTextContent('Instagram 未完成 1 支、YouTube 未完成 2 支');
-    expect(screen.getByRole('dialog')).toHaveTextContent('執行中的外部 API 可能已無法阻止');
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '取消所有未完成任務' }));
-    await waitFor(() => expect(activity.cancelAll).toHaveBeenCalled());
+    expect(screen.getByRole('dialog')).toHaveTextContent('不會刪除歷史紀錄');
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: '清空任務隊列' }));
+    await waitFor(() => expect(activity.clearQueue).toHaveBeenCalled());
   });
 });

@@ -42,7 +42,7 @@ export default function TaskDetail({ task, onCancel, onRetry, busy = false, comp
           <div className="task-detail-copy">
             <strong>{task.video_title || task.video_id || '未命名影片'}</strong>
             <span>{task.platform === 'instagram' ? 'Instagram' : 'YouTube'} · {taskOperationLabel(task.operation)}</span>
-            <span className="task-detail-id">Video／Drive ID：{task.video_id || '—'} · Batch：{task.batch_short_code || task.batch_id?.slice(0, 8)}</span>
+            <span className="task-detail-id">Video／Drive ID：{task.video_id || '—'}</span>
           </div>
         </div>
         <div className="task-detail-status">

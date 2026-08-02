@@ -30,12 +30,12 @@ function recordKey(record) {
   return record.record_id || `${record.job_id}:${record.file_id}`;
 }
 
-const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
+const ACTIVE_TASK_STATUSES = new Set(['queued', 'running', 'cancel_requested']);
 
-async function waitForJobToFinish(jobId) {
+async function waitForTaskToFinish(taskId) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const current = await api.getTaskBatch(jobId);
-    if (!ACTIVE_JOB_STATUSES.has(current.status)) return current;
+    const current = await api.getTask(taskId);
+    if (!ACTIVE_TASK_STATUSES.has(current.status)) return current;
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
   }
   return null;
@@ -48,6 +48,8 @@ export default function InstagramHistoryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [confirmRecord, setConfirmRecord] = useState(null);
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
   const [deletingRecordId, setDeletingRecordId] = useState('');
   const [retryingRecordId, setRetryingRecordId] = useState('');
 
@@ -92,15 +94,38 @@ export default function InstagramHistoryPage() {
     }
   };
 
+  const clearHistory = async () => {
+    setConfirmClearOpen(false);
+    setClearing(true);
+    try {
+      const result = await api.clearInstagramPublishHistory();
+      await loadHistory({ showSpinner: false });
+      if (result.failed_count > 0) {
+        toast.warning(`已清除 ${result.deleted_count} 筆歷史紀錄，另有 ${result.failed_count} 筆未完成，請稍後重試。`);
+      } else {
+        toast.success(`已清除 ${result.deleted_count} 筆 Instagram 歷史紀錄。`);
+      }
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   const retryRecord = async (record) => {
     const targetKey = recordKey(record);
+    if (!record.task_id) {
+      toast.error('找不到這筆歷史紀錄的影片任務，請重新整理後再試。');
+      return;
+    }
     setRetryingRecordId(targetKey);
     try {
-      const queued = await api.retryTaskBatch(record.job_id);
+      const queued = await api.retryTask(record.task_id);
       toast.info('已加入重試隊列；這次只會處理 Drive／R2 後續清理，不會重新發布 Instagram。');
-      const finished = ACTIVE_JOB_STATUSES.has(queued.batch?.status)
-        ? await waitForJobToFinish(record.job_id)
-        : queued.batch;
+      const queuedTask = queued.task || queued;
+      const finished = ACTIVE_TASK_STATUSES.has(queuedTask.status)
+        ? await waitForTaskToFinish(record.task_id)
+        : queuedTask;
       await loadHistory({ showSpinner: false });
       if (!finished) {
         toast.warning('重試仍在處理中，請稍後刷新歷史紀錄。');
@@ -124,12 +149,12 @@ export default function InstagramHistoryPage() {
         <h1 style={{ display: 'flex', alignItems: 'center', gap: 10 }}><History size={28} />Instagram 發布歷史紀錄</h1>
         <p className="section-desc">查看已發布的 Reels。刪除紀錄只會解除本機防重複鎖定，不會刪除 Instagram 上的貼文；若影片已移入 Published，刪除時會自動移回來源 Drive 資料夾。</p>
       </div>
-      <button className="btn btn-secondary" onClick={() => loadHistory({ showSpinner: false })} disabled={refreshing}><RefreshCw size={16} className={refreshing ? 'spin' : ''} />{refreshing ? '刷新中…' : '刷新紀錄'}</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-secondary" onClick={() => loadHistory({ showSpinner: false })} disabled={refreshing || clearing}><RefreshCw size={16} className={refreshing ? 'spin' : ''} />{refreshing ? '刷新中…' : '刷新紀錄'}</button><button className="btn btn-danger" onClick={() => setConfirmClearOpen(true)} disabled={!records.length || refreshing || clearing}><Trash2 size={16} />{clearing ? '清除中…' : '清除歷史'}</button></div>
     </div>
 
     {errorMessage && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMessage}</span></div>}
 
-    <div className="info-banner"><CheckCircle2 size={16} /><span>目前共 {records.length} 筆已發布紀錄。刪除後請回到「Reels 自動發布」重新讀取 Drive 影片。</span></div>
+    <div className="info-banner"><CheckCircle2 size={16} /><span>目前共 {records.length} 筆已發布紀錄。清除紀錄不會刪除 Instagram 貼文；若影片已移入 Published，系統會先移回來源 Drive 資料夾。</span></div>
 
     {!records.length ? <section className="glass-panel card-padding" style={{ display: 'grid', gap: 10, justifyItems: 'center', textAlign: 'center' }}>
       <History size={36} color="var(--text-muted)" />
@@ -169,6 +194,16 @@ export default function InstagramHistoryPage() {
       })}
     </div>}
 
+    <ConfirmDialog
+      open={confirmClearOpen}
+      title="清除全部 Instagram 歷史紀錄？"
+      message="將清除目前所有已發布紀錄；已移入 Published 的影片會先移回來源 Drive 資料夾。Instagram 上的貼文不會被刪除，若 Drive 搬移失敗，該筆紀錄會保留。"
+      confirmText="清除歷史"
+      cancelText="返回"
+      variant="destructive"
+      onConfirm={clearHistory}
+      onCancel={() => setConfirmClearOpen(false)}
+    />
     <ConfirmDialog
       open={Boolean(confirmRecord)}
       title="刪除 Instagram 歷史紀錄"

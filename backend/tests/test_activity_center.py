@@ -237,6 +237,22 @@ def test_cancel_all_does_not_repeat_a_running_cancel_request(tmp_path):
     assert NotificationRepository(repo.db).unread_count() == 1
 
 
+def test_clear_queue_cancels_unfinished_tasks_but_keeps_history(tmp_path):
+    repo = make_repo(tmp_path)
+    repo.create_batch_and_tasks(
+        {"platform": "youtube", "operation": "youtube.metadata_update", "failure_policy": "continue"},
+        make_specs(1),
+    )
+
+    result = repo.clear_queue()
+
+    assert result["cleared_count"] == 1
+    assert repo.activity_summary()["tasks"]["canceled"] == 1
+    items, total = repo.list_tasks()
+    assert total == 1
+    assert items[0]["status"] == "canceled"
+
+
 def test_retry_preserves_checkpoint_but_get_task_is_a_safe_public_dto(tmp_path):
     repo = make_repo(tmp_path)
     created = repo.create_batch_and_tasks(
