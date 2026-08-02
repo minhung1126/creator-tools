@@ -1,39 +1,38 @@
-.sheet-copy-controls {
+.sheet-copy-title {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.sheet-copy-display-panel {
+  display: grid;
   gap: 18px;
 }
 
-.sheet-copy-source-row {
+.sheet-copy-display-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.sheet-copy-columns {
+  min-width: 0;
+}
+
+.sheet-copy-columns-head {
   display: flex;
-  align-items: flex-end;
-  gap: 12px;
-}
-
-.sheet-copy-source-input {
-  flex: 1;
-}
-
-.sheet-copy-column-picker {
-  padding-top: 16px;
-  border-top: 1px solid var(--border-color);
-}
-
-.sheet-copy-column-heading {
-  display: flex;
-  align-items: center;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
   color: #fff;
 }
 
-.sheet-copy-column-heading div {
+.sheet-copy-columns-head span {
   display: flex;
   gap: 8px;
 }
 
-.sheet-copy-column-heading button {
+.sheet-copy-columns-head button {
   border: 0;
   background: none;
   color: var(--primary-light, #a5b4fc);
@@ -42,13 +41,18 @@
   font-size: 0.8rem;
 }
 
-.sheet-copy-column-options {
+.sheet-copy-columns-head button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.sheet-copy-column-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px;
 }
 
-.sheet-copy-column-options label {
+.sheet-copy-column-grid label {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -59,76 +63,70 @@
   background: rgba(255, 255, 255, 0.025);
   color: var(--text-muted);
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
-.sheet-copy-column-options label.is-selected {
+.sheet-copy-column-grid label.selected {
   border-color: rgba(99, 102, 241, 0.55);
   background: rgba(99, 102, 241, 0.1);
   color: #fff;
 }
 
-.sheet-copy-column-options span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sheet-copy-table-panel {
+.sheet-copy-panel {
   overflow: hidden;
 }
 
-.sheet-copy-table-header {
+.sheet-copy-panel > header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   gap: 16px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.sheet-copy-table-header > div:first-child {
+.sheet-copy-panel > header > div {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.sheet-copy-table-header strong {
+.sheet-copy-panel > header strong {
   color: #fff;
 }
 
-.sheet-copy-table-header span {
+.sheet-copy-panel > header small {
   color: var(--text-muted);
-  font-size: 0.8rem;
 }
 
-.sheet-copy-status {
+.sheet-copy-panel > header > span {
   min-height: 20px;
   color: #34d399;
   font-size: 0.8rem;
   text-align: right;
 }
 
-.sheet-copy-table-scroll {
+.sheet-copy-scroll {
   width: 100%;
   overflow: auto;
   max-height: calc(100vh - 260px);
 }
 
-.sheet-copy-table {
+.sheet-copy-scroll table {
   width: max-content;
   min-width: 100%;
   border-collapse: separate;
   border-spacing: 0;
 }
 
-.sheet-copy-table th,
-.sheet-copy-table td {
+.sheet-copy-scroll th,
+.sheet-copy-scroll td {
   border-right: 1px solid var(--border-color);
   border-bottom: 1px solid var(--border-color);
   vertical-align: top;
 }
 
-.sheet-copy-table thead th {
+.sheet-copy-scroll thead th {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -138,10 +136,9 @@
   background: rgba(18, 24, 36, 0.98);
   color: #fff;
   text-align: left;
-  font-size: 0.82rem;
 }
 
-.sheet-copy-table .sheet-copy-row-number {
+.sheet-copy-scroll .row-number {
   position: sticky;
   left: 0;
   z-index: 2;
@@ -151,15 +148,13 @@
   background: rgba(18, 24, 36, 0.98);
   color: var(--text-dim);
   text-align: center;
-  font-size: 0.76rem;
 }
 
-.sheet-copy-table thead .sheet-copy-row-number {
+.sheet-copy-scroll thead .row-number {
   z-index: 4;
 }
 
 .sheet-copy-cell {
-  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -174,7 +169,6 @@
   color: var(--text-main);
   text-align: left;
   cursor: copy;
-  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .sheet-copy-cell:hover,
@@ -184,36 +178,34 @@
   box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.45);
 }
 
-.sheet-copy-cell.is-copied {
+.sheet-copy-cell.copied {
   background: rgba(16, 185, 129, 0.09);
   box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.5);
 }
 
-.sheet-copy-cell-content {
+.sheet-copy-cell > span {
   flex: 1;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
-  font: inherit;
-  font-size: 0.86rem;
 }
 
-.sheet-copy-cell-action {
+.sheet-copy-cell small {
   display: inline-flex;
   align-items: center;
   align-self: flex-end;
   gap: 5px;
   color: var(--text-dim);
-  font-size: 0.7rem;
 }
 
-.sheet-copy-cell.is-copied .sheet-copy-cell-action {
+.sheet-copy-cell.copied small {
   color: #34d399;
 }
 
-.sheet-copy-blank,
+.sheet-copy-cell em,
 .sheet-copy-empty {
   color: var(--text-dim);
+  font-style: normal;
 }
 
 .sheet-copy-empty {
@@ -222,17 +214,18 @@
 }
 
 @media (max-width: 760px) {
-  .sheet-copy-source-row,
-  .sheet-copy-table-header {
+  .sheet-copy-display-grid,
+  .sheet-copy-panel > header {
+    grid-template-columns: 1fr;
     align-items: stretch;
     flex-direction: column;
   }
 
-  .sheet-copy-status {
+  .sheet-copy-panel > header > span {
     text-align: left;
   }
 
-  .sheet-copy-table-scroll {
+  .sheet-copy-scroll {
     max-height: none;
   }
 }

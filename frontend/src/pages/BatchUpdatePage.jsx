@@ -1,20 +1,21 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
+import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
 import SourceLinkInput from '../components/SourceLinkInput';
+import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
+import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertCircle,
   CheckCircle2,
-  FileSpreadsheet,
   Info,
   PlaySquare,
   RefreshCw,
   Send,
   Shuffle,
-  Users,
   Video as VideoIcon,
 } from 'lucide-react';
 
@@ -62,18 +63,16 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const toast = useToast();
   const defaults = DEFAULT_COLUMNS[videoType];
   const initial = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
-
   const [spreadsheetId, setSpreadsheetId] = useState(initial.spreadsheetId);
+  const [appliedSpreadsheetId, setAppliedSpreadsheetId] = useState(initial.spreadsheetId);
+  const [sourceReady, setSourceReady] = useState(false);
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [playlistId, setPlaylistId] = useState(initial.playlistId);
   const [worksheets, setWorksheets] = useState([]);
   const [worksheetName, setWorksheetName] = useState(initial.worksheetName);
   const [columns, setColumns] = useState([]);
   const [titleColumn, setTitleColumn] = useState(initial.titleColumn);
   const [descriptionColumn, setDescriptionColumn] = useState(initial.descriptionColumn);
-  const [selectedTeam, setSelectedTeam] = useState(initial.selectedTeam);
-  const [teams, setTeams] = useState([]);
-  const [teamPeople, setTeamPeople] = useState([]);
-  const [enabledPeople, setEnabledPeople] = useState(initial.enabledPeople);
   const [randomPreview, setRandomPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -89,21 +88,49 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
   const [configSaveError, setConfigSaveError] = useState('');
+  const [sourceError, setSourceError] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const initialLoadRequestedRef = useRef(false);
+
+  const sourceStale = spreadsheetId.trim() !== appliedSpreadsheetId.trim();
+  const teamPersonFilter = useTeamPersonFilter({
+    source: appliedSpreadsheetId,
+    worksheetName,
+    enabled: Boolean(authUser && hydrated && sourceReady),
+    initialTeam: initial.selectedTeam,
+    initialSelectedPeople: initial.enabledPeople,
+    defaultTeam: 'first',
+    refreshKey: sourceRevision,
+  });
+  const {
+    teams,
+    selectedTeam,
+    setSelectedTeam,
+    people: teamPeople,
+    selectedPeople: enabledPeople,
+    setSelectedPeople: setEnabledPeople,
+    loadingTeams,
+    loadingPeople,
+    ready: teamPersonReady,
+    error: teamPeopleError,
+    resetSelection,
+  } = teamPersonFilter;
+  const visibleSelectedTeam = sourceStale ? '' : selectedTeam;
 
   const applyConfig = useCallback((config) => {
     setSpreadsheetId(config.spreadsheetId);
+    setAppliedSpreadsheetId(config.spreadsheetId);
+    setSourceReady(false);
     setPlaylistId(config.playlistId);
     setWorksheetName(config.worksheetName);
     setTitleColumn(config.titleColumn);
     setDescriptionColumn(config.descriptionColumn);
-    setSelectedTeam(config.selectedTeam);
-    setEnabledPeople(config.enabledPeople);
-  }, []);
+    resetSelection({ team: config.selectedTeam, selectedPeople: config.enabledPeople });
+  }, [resetSelection]);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,14 +138,15 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setHydrated(false);
     setWorksheets([]);
     setColumns([]);
-    setTeams([]);
-    setTeamPeople([]);
+    setSourceReady(false);
+    setSourceError('');
     setRandomPreview(null);
     setPreviewError('');
     setVideos([]);
     setAssignments({});
     setSelectedVideoIds([]);
     setBulkPerson('');
+    initialLoadRequestedRef.current = false;
     applyConfig(cached);
 
     if (!authUser) {
@@ -141,15 +169,18 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   }, [videoType, authUser, defaults, sysSettings, applyConfig]);
 
   useEffect(() => {
-    if (!hydrated) return undefined;
+    if (!hydrated || !sourceReady || (worksheetName && !teamPersonReady)) return undefined;
     const cache = { spreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople };
     localStorage.setItem(storageKey(videoType), JSON.stringify(cache));
-    if (!authUser) return undefined;
+    return undefined;
+  }, [hydrated, sourceReady, teamPersonReady, videoType, spreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
 
+  useEffect(() => {
+    if (!hydrated || !authUser || !sourceReady || (worksheetName && !teamPersonReady)) return undefined;
     const timer = window.setTimeout(() => {
       setConfigSaveError('');
       api.updateYoutubeDraftSettings(videoType, {
-        spreadsheet_id: spreadsheetId,
+        spreadsheet_id: appliedSpreadsheetId,
         playlist_id: playlistId,
         worksheet_name: worksheetName,
         title_column: titleColumn,
@@ -158,9 +189,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         enabled_people: enabledPeople,
       }).catch((err) => setConfigSaveError(`設定未能同步至伺服器：${err.message}`));
     }, 500);
-
     return () => window.clearTimeout(timer);
-  }, [hydrated, authUser, videoType, spreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
+  }, [hydrated, authUser, sourceReady, teamPersonReady, videoType, appliedSpreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
 
   useEffect(() => {
     const selectedWorksheet = worksheets.find((sheet) => sheet.title === worksheetName);
@@ -174,36 +204,22 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     }
   }, [worksheets, worksheetName, titleColumn, descriptionColumn, defaults.title, defaults.description]);
 
-  useEffect(() => {
-    if (!selectedTeam || !worksheetName || !spreadsheetId || !authUser) {
-      setTeamPeople([]);
-      return undefined;
-    }
-    let cancelled = false;
-    api.getTeamPeople(spreadsheetId, worksheetName, selectedTeam)
-      .then((res) => {
-        if (cancelled) return;
-        const people = res.people || [];
-        setTeamPeople(people);
-        setEnabledPeople((current) => current.filter((person) => people.includes(person)));
-      })
-      .catch((err) => {
-        if (!cancelled) setErrorMsg(`讀取人物失敗：${err.message}`);
-      });
-    return () => { cancelled = true; };
-  }, [selectedTeam, worksheetName, spreadsheetId, authUser]);
-
-  const availablePeople = useMemo(
-    () => teamPeople.filter((person) => enabledPeople.includes(person)),
-    [teamPeople, enabledPeople],
-  );
+  const availablePeople = useMemo(() => sourceStale ? [] : teamPeople.filter((person) => enabledPeople.includes(person)), [sourceStale, teamPeople, enabledPeople]);
 
   useEffect(() => {
-    if (bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
-  }, [availablePeople, bulkPerson]);
+    if (!sourceStale && bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
+  }, [availablePeople, bulkPerson, sourceStale]);
+
+  useEffect(() => {
+    if (sourceStale) return;
+    setAssignments((current) => Object.fromEntries(Object.entries(current).map(([videoId, person]) => [
+      videoId,
+      person === '不編輯' || availablePeople.includes(person) ? person : '不編輯',
+    ])));
+  }, [availablePeople, sourceStale]);
 
   const loadRandomPreview = useCallback(async () => {
-    if (!spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
+    if (!appliedSpreadsheetId || !sourceReady || sourceStale || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
       setRandomPreview(null);
       setPreviewError('請先選擇工作表、團體、標題欄位與描述欄位');
       return;
@@ -211,12 +227,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setLoadingPreview(true);
     setPreviewError('');
     try {
-      const preview = await api.getRandomMemberPreview(
-        spreadsheetId,
-        worksheetName,
-        selectedTeam,
-        [titleColumn, descriptionColumn],
-      );
+      const preview = await api.getRandomMemberPreview(appliedSpreadsheetId, worksheetName, selectedTeam, [titleColumn, descriptionColumn]);
       setRandomPreview(preview);
     } catch (err) {
       setRandomPreview(null);
@@ -224,26 +235,29 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     } finally {
       setLoadingPreview(false);
     }
-  }, [spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn]);
+  }, [appliedSpreadsheetId, sourceReady, sourceStale, worksheetName, selectedTeam, titleColumn, descriptionColumn]);
 
   useEffect(() => {
-    if (!hydrated || !authUser || !spreadsheetId || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
+    if (!hydrated || !authUser || !appliedSpreadsheetId || !sourceReady || sourceStale || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
       setRandomPreview(null);
       setPreviewError('');
       return;
     }
     loadRandomPreview();
-  }, [hydrated, authUser, spreadsheetId, worksheetName, selectedTeam, titleColumn, descriptionColumn, loadRandomPreview]);
+  }, [hydrated, authUser, appliedSpreadsheetId, sourceReady, sourceStale, worksheetName, selectedTeam, titleColumn, descriptionColumn, loadRandomPreview]);
 
   const loadSheetResources = useCallback(async ({ showToast = false } = {}) => {
-    if (!spreadsheetId) {
+    const nextSource = spreadsheetId.trim();
+    if (!nextSource) {
       if (showToast) toast.warning('請先填寫主要試算表 ID / URL');
       return;
     }
+    const sourceChanged = nextSource !== appliedSpreadsheetId.trim();
     setLoadingSheet(true);
     setErrorMsg(null);
+    setSourceError('');
     try {
-      const metadata = await api.getSpreadsheetMetadata(spreadsheetId);
+      const metadata = await api.getSpreadsheetMetadata(nextSource);
       const sheetList = metadata.worksheets || [];
       setWorksheets(sheetList);
       const nextWorksheet = sheetList.some((sheet) => sheet.title === worksheetName)
@@ -251,47 +265,48 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         : sheetList.some((sheet) => sheet.title === defaults.worksheet)
           ? defaults.worksheet
           : sheetList[0]?.title || '';
-      setWorksheetName(nextWorksheet);
-      if (nextWorksheet) {
-        const options = await api.parseSheetOptions(spreadsheetId, nextWorksheet);
-        const nextTeams = options.teams || [];
-        setTeams(nextTeams);
-        setSelectedTeam((current) => nextTeams.includes(current) ? current : (nextTeams[0] || ''));
-      } else {
-        setTeams([]);
-        setSelectedTeam('');
+      const worksheetChanged = nextWorksheet !== worksheetName;
+      if (sourceChanged || worksheetChanged) {
+        setRandomPreview(null);
+        setPreviewError('');
+        setSelectedVideoIds([]);
+        setBulkPerson('');
+        setAssignments(Object.fromEntries(videos.map((video) => [video.video_id, '不編輯'])));
       }
+      setAppliedSpreadsheetId(nextSource);
+      setWorksheetName(nextWorksheet);
+      setSourceReady(true);
+      setSourceRevision((current) => current + 1);
       if (showToast) toast.success('工作表與欄位已刷新');
     } catch (err) {
-      setErrorMsg(`刷新試算表失敗：${err.message}`);
+      setSourceError(`刷新試算表失敗：${err.message}`);
     } finally {
       setLoadingSheet(false);
     }
-  }, [spreadsheetId, worksheetName, defaults.worksheet, toast]);
+  }, [appliedSpreadsheetId, defaults.worksheet, spreadsheetId, toast, videos, worksheetName]);
 
   useEffect(() => {
-    if (hydrated && authUser && spreadsheetId) loadSheetResources();
-  }, [hydrated, authUser, spreadsheetId, videoType, loadSheetResources]);
+    if (hydrated && authUser && appliedSpreadsheetId && !initialLoadRequestedRef.current) {
+      initialLoadRequestedRef.current = true;
+      loadSheetResources();
+    }
+  }, [hydrated, authUser, appliedSpreadsheetId, loadSheetResources]);
 
-  const handleWorksheetChange = async (nextWorksheet) => {
+  const handleSpreadsheetChange = (event) => {
+    const nextValue = event.target.value;
+    setSpreadsheetId(nextValue);
+    setSourceError('');
+  };
+
+  const handleWorksheetChange = (nextWorksheet) => {
     setWorksheetName(nextWorksheet);
-    setTeams([]);
     setSelectedTeam('');
-    setTeamPeople([]);
     setEnabledPeople([]);
     setRandomPreview(null);
     setPreviewError('');
     setSelectedVideoIds([]);
     setBulkPerson('');
-    if (!nextWorksheet) return;
-    try {
-      const options = await api.parseSheetOptions(spreadsheetId, nextWorksheet);
-      const nextTeams = options.teams || [];
-      setTeams(nextTeams);
-      setSelectedTeam(nextTeams[0] || '');
-    } catch (err) {
-      setErrorMsg(`讀取工作表選項失敗：${err.message}`);
-    }
+    setAssignments(Object.fromEntries(videos.map((video) => [video.video_id, '不編輯'])));
   };
 
   const handleLoadVideos = async () => {
@@ -314,10 +329,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     }
   };
 
-  const togglePerson = (person) => setEnabledPeople((current) => current.includes(person)
-    ? current.filter((item) => item !== person)
-    : [...current, person]);
-  const setAllPeople = (checked) => setEnabledPeople(checked ? [...teamPeople] : []);
   const toggleVideoSelection = (videoId) => setSelectedVideoIds((current) => current.includes(videoId)
     ? current.filter((item) => item !== videoId)
     : [...current, videoId]);
@@ -344,7 +355,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setResult(null);
     try {
       const res = await api.batchUpdateMetadata({
-        spreadsheetUrlOrId: spreadsheetId,
+        spreadsheetUrlOrId: appliedSpreadsheetId,
         videoType,
         worksheetName,
         titleColumn,
@@ -366,6 +377,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const requestExecute = async () => {
+    if (!sourceReady || sourceStale) return toast.warning('請先刷新資料來源，讓目前來源設定套用完成');
     if (!worksheetName) return toast.warning('請先選擇工作表');
     if (!titleColumn || !descriptionColumn) return toast.warning('請先選擇標題與描述欄位');
     if (titleColumn === descriptionColumn) return toast.warning('標題與描述不能使用同一欄位');
@@ -391,116 +403,72 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`將依「${worksheetName}」的「${titleColumn}」與「${descriptionColumn}」直接處理 ${videos.filter((video) => assignments[video.video_id] && assignments[video.video_id] !== '不編輯').length} 支影片。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} units；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} units。${quotaEstimate.can_complete_today ? '預計可完成。' : '若執行途中達配額上限，未執行項目需在官方重設後重新送出。'}` : '未指定人物的影片會略過。'} `} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
       <div>
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1 style={{ fontSize: '1.8rem' }}>YouTube {videoType} 草稿</h1></div>
-        <p className="section-desc">此頁只處理 {videoType}。先選工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
+        <p className="section-desc">此頁只處理 {videoType}。先確認資料來源、工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
       </div>
 
-      <div className="top-filter-bar">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', borderBottom: '1px solid var(--border-color)', paddingBottom: 12 }}>
-          <strong style={{ color: '#fff' }}><FileSpreadsheet size={17} style={{ verticalAlign: 'middle', marginRight: 7 }} />資料來源設定</strong>
-          <button className="btn btn-primary" onClick={() => loadSheetResources({ showToast: true })} disabled={loadingSheet}><RefreshCw size={16} className={loadingSheet ? 'spin' : ''} /> {loadingSheet ? '刷新中...' : '刷新工作表與欄位'}</button>
-        </div>
-        <div className="top-filter-grid">
-          <div className="form-group"><label className="form-label">主要試算表 ID / URL</label><SourceLinkInput value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} sourceType="spreadsheet" /></div>
-          <div className="form-group"><label className="form-label">使用的工作表</label><select className="form-select" value={worksheetName} onChange={(e) => handleWorksheetChange(e.target.value)}>{worksheets.length ? worksheets.map((sheet) => <option key={sheet.title} value={sheet.title}>{sheet.title}</option>) : <option value={worksheetName}>{worksheetName || '請先刷新'}</option>}</select></div>
-          <div className="form-group"><label className="form-label">標題套用欄位</label><select className="form-select" value={titleColumn} onChange={(e) => setTitleColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
-          <div className="form-group"><label className="form-label">描述套用欄位</label><select className="form-select" value={descriptionColumn} onChange={(e) => setDescriptionColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
-          <div className="form-group"><label className="form-label"><PlaySquare size={14} /> 目標播放清單 ID</label><SourceLinkInput value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" /></div>
-        </div>
-          <div className="info-banner"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作流設定；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取。</span></div>
-      </div>
+      <SheetDataSourcePanel
+        spreadsheetId={spreadsheetId}
+        onSpreadsheetIdChange={handleSpreadsheetChange}
+        worksheets={worksheets}
+        worksheetName={worksheetName}
+        onWorksheetChange={handleWorksheetChange}
+        onRefresh={() => loadSheetResources({ showToast: true })}
+        loading={loadingSheet}
+        sourceReady={sourceReady}
+        stale={sourceStale}
+        error={sourceError}
+      >
+        <div className="form-group"><label className="form-label" htmlFor="batch-title-column">標題套用欄位</label><select id="batch-title-column" className="form-select" value={titleColumn} onChange={(e) => setTitleColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
+        <div className="form-group"><label className="form-label" htmlFor="batch-description-column">描述套用欄位</label><select id="batch-description-column" className="form-select" value={descriptionColumn} onChange={(e) => setDescriptionColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
+        <div className="form-group"><label className="form-label" htmlFor="batch-playlist-id"><PlaySquare size={14} /> 目標播放清單 ID</label><SourceLinkInput id="batch-playlist-id" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" /></div>
+        <div className="info-banner filter-panel-full-width"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作流設定；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取。</span></div>
+      </SheetDataSourcePanel>
 
-      <div className="glass-panel card-padding" style={{ display: 'grid', gap: 16 }}>
-        <div style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 12 }}>
-          <strong style={{ color: '#fff' }}><Users size={17} style={{ verticalAlign: 'middle', marginRight: 7 }} />團體與人物篩選</strong>
-          <p className="section-desc" style={{ marginTop: 7 }}>先選團體，再勾選要出現在每支影片人物下拉選單中的人物。</p>
-        </div>
-        <div className="form-group" style={{ maxWidth: 360 }}><label className="form-label">所屬團體</label><select className="form-select" value={selectedTeam} onChange={(e) => setSelectedTeam(e.target.value)} disabled={!teams.length}><option value="">{teams.length ? '請選擇團體' : '請先選擇工作表'}</option>{teams.map((team) => <option key={team} value={team}>{team}</option>)}</select></div>
-        {teamPeople.length > 0 && <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-            <div><h2 style={{ fontSize: '1.1rem' }}>人物選項篩選（已啟用 {enabledPeople.length} / {teamPeople.length}）</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 5 }}>只有勾選的人物會出現在下方每支影片的選項中。</p></div>
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={enabledPeople.length === teamPeople.length} onChange={(e) => setAllPeople(e.target.checked)} /> 全選 / 全不選</label>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>{teamPeople.map((person) => <label key={person} className="glass-panel" style={{ padding: 12, display: 'flex', gap: 9, alignItems: 'center', cursor: 'pointer', borderColor: enabledPeople.includes(person) ? 'var(--primary)' : undefined }}><input type="checkbox" checked={enabledPeople.includes(person)} onChange={() => togglePerson(person)} /><span style={{ color: '#fff' }}>{person}</span></label>)}</div>
-        </div>}
-        {selectedTeam && !teamPeople.length && !errorMsg && <p className="section-desc">正在讀取團體人物…</p>}
-      </div>
+      <TeamPersonFilterPanel
+        teams={sourceStale ? [] : teams}
+        selectedTeam={sourceStale ? '' : selectedTeam}
+        onTeamChange={setSelectedTeam}
+        people={sourceStale ? [] : teamPeople}
+        selectedPeople={sourceStale ? [] : enabledPeople}
+        onSelectedPeopleChange={setEnabledPeople}
+        loadingTeams={loadingTeams}
+        loadingPeople={loadingPeople}
+        error={teamPeopleError}
+        disabled={!authUser || !hydrated || !sourceReady || sourceStale}
+        teamEmptyLabel="請選擇團體"
+        peopleDisabledMessage="請先選擇團體；選定後才能載入人物。"
+        description="先選擇團體，再勾選要出現在每支影片人物選單中的人物。"
+      />
 
       <div className="glass-panel card-padding" style={{ display: 'grid', gap: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}><Shuffle size={19} /> 試算表隨機抽查</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 5 }}>從「{selectedTeam || '尚未選擇隊伍'}」隨機抽一位真實成員，顯示目前選用欄位的內容；全隊列不會被抽中。</p>
-          </div>
-          <button className="btn btn-primary" onClick={loadRandomPreview} disabled={loadingPreview || !selectedTeam}><RefreshCw size={16} className={loadingPreview ? 'spin' : ''} /> {loadingPreview ? '抽查中...' : randomPreview ? '換一位成員' : '隨機抽查'}</button>
+          <div><h2 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 8 }}><Shuffle size={19} /> 試算表隨機抽查</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', marginTop: 5 }}>從「{visibleSelectedTeam || '尚未選擇團體'}」隨機抽一位真實成員，顯示目前選用欄位的內容；全團體列不會被抽中。</p></div>
+          <button className="btn btn-primary" onClick={loadRandomPreview} disabled={loadingPreview || !visibleSelectedTeam}><RefreshCw size={16} className={loadingPreview ? 'spin' : ''} /> {loadingPreview ? '抽查中...' : randomPreview ? '換一位成員' : '隨機抽查'}</button>
         </div>
         {previewError && <div className="error-alert" style={{ marginTop: 14 }}><AlertCircle size={18} /><span>{previewError}</span></div>}
-        {randomPreview && (
-          <div style={{ marginTop: 16 }}>
-            <div style={{ color: '#fff', marginBottom: 12 }}><strong>抽中成員：{randomPreview.person}</strong></div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-              <PreviewField label={`標題欄位：${titleColumn}`} value={randomPreview.values?.[titleColumn]} />
-              <PreviewField label={`描述欄位：${descriptionColumn}`} value={randomPreview.values?.[descriptionColumn]} />
-            </div>
-          </div>
-        )}
+        {randomPreview && <div style={{ marginTop: 16 }}><div style={{ color: '#fff', marginBottom: 12 }}><strong>抽中成員：{randomPreview.person}</strong></div><div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}><PreviewField label={`標題欄位：${titleColumn}`} value={randomPreview.values?.[titleColumn]} /><PreviewField label={`描述欄位：${descriptionColumn}`} value={randomPreview.values?.[descriptionColumn]} /></div></div>}
       </div>
 
       {errorMsg && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMsg}</span></div>}
       {configSaveError && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{configSaveError}；此瀏覽器快取仍已保留。</span></div>}
-
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-primary" onClick={handleLoadVideos} disabled={loadingVideos}><RefreshCw size={16} className={loadingVideos ? 'spin' : ''} /> {loadingVideos ? '載入中...' : `讀取 ${videoType} 草稿影片`}</button></div>
 
-      {videos.length > 0 && (
-        <div className="section-gap" style={{ gap: 18 }}>
-          <div><h2 style={{ fontSize: '1.3rem' }}>為每支影片指定人物（{videos.length} 支）</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
-          <div className="glass-panel bulk-edit-panel" style={{ padding: 18 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
-              <div><h3 style={{ color: '#fff', fontSize: '1.05rem' }}>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 4 }}>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p></div>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label>
-            </div>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
-              <div className="form-group" style={{ flex: '1 1 240px' }}><label className="form-label">批量套用人物</label><select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">請選擇人物</option><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
-              <button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button>
-            </div>
-          </div>
-
-          <div className="video-card-grid">{videos.map((video) => (
-            <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}`} style={{ borderColor: selectedVideoIds.includes(video.video_id) ? 'var(--primary)' : undefined }}>
-              <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批量編輯</label>
-              <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} /> : <div>無縮圖</div>}</div>
-              <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{video.title || '無標題影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>Video ID: {video.video_id}</p></div>
-              <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.video_id] || '不編輯'} onChange={(e) => setAssignments((current) => ({ ...current, [video.video_id]: e.target.value }))}><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
-            </div>
-          ))}</div>
-          <div className="glass-panel execution-bar"><div><strong style={{ color: '#fff' }}>將處理目前清單中的 {videos.length} 支影片</strong><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>人物為「不編輯」的影片會安全略過。</p></div><button className="btn btn-success" onClick={requestExecute} disabled={executing}><Send size={18} /> {executing ? '批次更新中...' : '確認並開始覆寫'}</button></div>
+      {videos.length > 0 && <div className="section-gap" style={{ gap: 18 }}>
+        <div><h2 style={{ fontSize: '1.3rem' }}>為每支影片指定人物（{videos.length} 支）</h2><p style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}>來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
+        <div className="glass-panel bulk-edit-panel" style={{ padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}><div><h3 style={{ color: '#fff', fontSize: '1.05rem' }}>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 4 }}>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p></div><label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label></div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}><div className="form-group" style={{ flex: '1 1 240px' }}><label className="form-label">批量套用人物</label><select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">請選擇人物</option><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div><button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button></div>
         </div>
-      )}
+        <div className="video-card-grid">{videos.map((video) => <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}`} style={{ borderColor: selectedVideoIds.includes(video.video_id) ? 'var(--primary)' : undefined }}>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', color: '#fff', cursor: 'pointer' }}><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批量編輯</label>
+          <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <img className="video-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} /> : <div>無縮圖</div>}</div>
+          <div><h4 style={{ color: '#fff', fontSize: '0.95rem' }}>{video.title || '無標題影片'}</h4><p style={{ color: 'var(--text-dim)', fontSize: '0.76rem' }}>Video ID: {video.video_id}</p></div>
+          <div className="form-group" style={{ marginTop: 'auto' }}><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.video_id] || '不編輯'} onChange={(e) => setAssignments((current) => ({ ...current, [video.video_id]: e.target.value }))}><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
+        </div>)}</div>
+        <div className="glass-panel execution-bar"><div><strong style={{ color: '#fff' }}>將處理目前清單中的 {videos.length} 支影片</strong><p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>人物為「不編輯」的影片會安全略過。</p></div><button className="btn btn-success" onClick={requestExecute} disabled={executing}><Send size={18} /> {executing ? '批次更新中...' : '確認並開始覆寫'}</button></div>
+      </div>}
 
-      {result && (
-        <div className="glass-panel" style={{ padding: 24, display: 'grid', gap: 12 }}>
-          <h3 style={{ color: result.completed ? '#34d399' : '#fbbf24', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <CheckCircle2 size={22} /> {result.completed ? 'YouTube 更新已執行完成' : 'YouTube 更新部分完成'}
-          </h3>
-          <p style={{ color: 'var(--text-muted)' }}>
-            共 {result.total_count || 0} 筆：成功 {result.succeeded_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。
-          </p>
-          {result.quota_blocked && (
-            <div className="info-banner"><Info size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新送出。</span></div>
-          )}
-          {(result.results || []).map((item) => (
-            <div key={item.video_id} className="result-item" style={{ alignItems: 'flex-start' }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <strong style={{ color: '#fff' }}>{item.title || item.video_id}</strong>
-                <div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: 4 }}>ID: {item.video_id}{item.person ? ` · ${item.person}` : ''}</div>
-                {item.reason && <div style={{ color: item.status === 'failed' ? '#f87171' : '#fbbf24', fontSize: '0.8rem', marginTop: 4 }}>{item.reason}</div>}
-              </div>
-              <span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>
-                {item.status === 'succeeded' ? '成功' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      {result && <div className="glass-panel" style={{ padding: 24, display: 'grid', gap: 12 }}><h3 style={{ color: result.completed ? '#34d399' : '#fbbf24', display: 'flex', gap: 8, alignItems: 'center' }}><CheckCircle2 size={22} /> {result.completed ? 'YouTube 更新已執行完成' : 'YouTube 更新部分完成'}</h3><p style={{ color: 'var(--text-muted)' }}>共 {result.total_count || 0} 筆：成功 {result.succeeded_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。</p>{result.quota_blocked && <div className="info-banner"><Info size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新送出。</span></div>}{(result.results || []).map((item) => <div key={item.video_id} className="result-item" style={{ alignItems: 'flex-start' }}><div style={{ flex: 1, minWidth: 0 }}><strong style={{ color: '#fff' }}>{item.title || item.video_id}</strong><div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: 4 }}>ID: {item.video_id}{item.person ? ` · ${item.person}` : ''}</div>{item.reason && <div style={{ color: item.status === 'failed' ? '#f87171' : '#fbbf24', fontSize: '0.8rem', marginTop: 4 }}>{item.reason}</div>}</div><span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>{item.status === 'succeeded' ? '成功' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}</span></div>)}</div>}
       <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );
