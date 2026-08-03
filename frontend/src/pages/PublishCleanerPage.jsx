@@ -33,7 +33,11 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
-      toast.warning('請先在系統設定中連結 Google 帳號！');
+      toast.warning('請先登入控制台！');
+      return;
+    }
+    if (!authUser.youtube_authenticated && !authUser.youtube?.authenticated) {
+      toast.warning('請先在「全域與 Google 設定」連結 YouTube 頻道 Google 帳號！');
       return;
     }
     setLoading(true);

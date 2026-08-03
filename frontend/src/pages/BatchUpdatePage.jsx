@@ -61,6 +61,7 @@ function PreviewField({ label, value }) {
 
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
+  const youtubeConnected = Boolean(authUser?.youtube_authenticated || authUser?.youtube?.authenticated);
   const defaults = DEFAULT_COLUMNS[videoType];
   const initial = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
   const [spreadsheetId, setSpreadsheetId] = useState(initial.spreadsheetId);
@@ -310,6 +311,10 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const handleLoadVideos = async () => {
+    if (!youtubeConnected) {
+      toast.warning('請先在「全域與 Google 設定」連結 YouTube 頻道 Google 帳號！');
+      return;
+    }
     setLoadingVideos(true);
     setErrorMsg(null);
     setResult(null);
@@ -349,6 +354,11 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const doExecute = async () => {
+    if (!youtubeConnected) {
+      setConfirmOpen(false);
+      toast.warning('請先連結 YouTube 頻道 Google 帳號！');
+      return;
+    }
     setConfirmOpen(false);
     setExecuting(true);
     setErrorMsg(null);
@@ -404,6 +414,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       <div>
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1 style={{ fontSize: '1.8rem' }}>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先確認資料來源、工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
+        {!youtubeConnected && <div className="info-banner"><AlertCircle size={16} /><span>尚未連結 YouTube 頻道 Google 帳號；請先到「全域與 Google 設定」授權管理品牌帳號的 Google 帳號。</span></div>}
       </div>
 
       <SheetDataSourcePanel

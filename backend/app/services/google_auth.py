@@ -15,13 +15,21 @@ from backend.app.core.session_store import session_store
 
 logger = logging.getLogger(__name__)
 
-SCOPES = [
+LOGIN_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
+]
+YOUTUBE_SCOPES = [
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/youtube",
 ]
+# Keep the old export available for code importing the original single-flow
+# scope list. New OAuth flows must choose their scope set explicitly.
+SCOPES = LOGIN_SCOPES
 GOOGLE_TOKEN_REFRESH_WINDOW = timedelta(minutes=5)
 _google_refresh_lock = RLock()
 
@@ -40,8 +48,16 @@ def get_client_config() -> dict:
     }
 
 
-def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
-    """Create an OAuth2 flow, generating PKCE only for a new authorization request."""
+def _scopes_for(purpose: str) -> list[str]:
+    if purpose == "youtube":
+        return YOUTUBE_SCOPES
+    if purpose == "login":
+        return LOGIN_SCOPES
+    raise ValueError(f"Unsupported Google OAuth purpose: {purpose}")
+
+
+def create_oauth_flow(code_verifier: Optional[str] = None, purpose: str = "login") -> Flow:
+    """Create a PKCE OAuth flow for either login/Sheets or YouTube."""
     config = get_client_config()
     redirect_uri = settings.get_redirect_uri()
 
@@ -53,7 +69,7 @@ def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
 
     flow = Flow.from_client_config(
         config,
-        scopes=SCOPES,
+        scopes=_scopes_for(purpose),
         redirect_uri=redirect_uri,
         code_verifier=code_verifier,
         autogenerate_code_verifier=code_verifier is None,
@@ -61,18 +77,23 @@ def create_oauth_flow(code_verifier: Optional[str] = None) -> Flow:
     return flow
 
 
-def get_auth_url() -> tuple[str, str, str]:
-    """Generate the Google OAuth consent URL and return its PKCE state."""
-    flow = create_oauth_flow()
-    auth_url, state = flow.authorization_url(access_type="offline", include_granted_scopes="true", prompt="consent")
+def get_auth_url(purpose: str = "login") -> tuple[str, str, str]:
+    """Generate a Google OAuth URL and return its PKCE state."""
+    flow = create_oauth_flow(purpose=purpose)
+    prompt = "consent select_account" if purpose == "youtube" else "consent"
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt=prompt,
+    )
     if not flow.code_verifier:
         raise RuntimeError("Google OAuth PKCE code verifier was not generated.")
     return auth_url, state, flow.code_verifier
 
 
-def exchange_code_for_tokens(code: str, code_verifier: str) -> dict:
-    """Exchange an authorization code with its original PKCE verifier."""
-    flow = create_oauth_flow(code_verifier=code_verifier)
+def exchange_code_for_tokens(code: str, code_verifier: str, purpose: str = "login") -> dict:
+    """Exchange an authorization code with the matching flow and PKCE verifier."""
+    flow = create_oauth_flow(code_verifier=code_verifier, purpose=purpose)
     flow.fetch_token(code=code)
     creds = flow.credentials
 
@@ -124,7 +145,7 @@ def _build_credentials(token_dict: dict) -> Credentials:
         token_uri=token_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
         client_id=token_dict.get("client_id") or settings.GOOGLE_CLIENT_ID,
         client_secret=token_dict.get("client_secret") or settings.GOOGLE_CLIENT_SECRET,
-        scopes=token_dict.get("scopes", SCOPES),
+        scopes=token_dict.get("scopes", LOGIN_SCOPES),
         expiry=parsed_expiry,
     )
 
@@ -149,12 +170,20 @@ def _refresh_credentials(
     *,
     session_id: Optional[str],
     persistent: bool,
+    credential_key: str = "google",
 ) -> Credentials:
     """Refresh under one process-wide lock and persist the rotated token atomically."""
     with _google_refresh_lock:
         # Another request may have refreshed the persistent record while this
         # request was waiting for the lock. Always use the newest record.
-        latest = credential_store.get_google_credentials() if persistent else None
+        if persistent:
+            latest = (
+                credential_store.get_youtube_credentials()
+                if credential_key == "youtube"
+                else credential_store.get_google_credentials()
+            )
+        else:
+            latest = None
         active_dict = latest or token_dict
         credentials = _build_credentials(active_dict)
         if not _needs_refresh(credentials):
@@ -167,7 +196,10 @@ def _refresh_credentials(
             refreshed["refresh_token"] = credentials.refresh_token or active_dict.get("refresh_token")
             refreshed["expiry"] = credentials.expiry.isoformat() if credentials.expiry else None
             if persistent:
-                credential_store.save_google_connection(refreshed)
+                if credential_key == "youtube":
+                    credential_store.save_youtube_connection(refreshed)
+                else:
+                    credential_store.save_google_connection(refreshed)
             elif session_id:
                 # Backward compatibility for sessions created before the
                 # persistent credential store was introduced.
@@ -179,7 +211,10 @@ def _refresh_credentials(
                 marker in message.lower() for marker in ("invalid_grant", "invalid client", "revoked")
             )
             if persistent:
-                credential_store.mark_google_refresh_failed(message, requires_reauthorization)
+                if credential_key == "youtube":
+                    credential_store.mark_youtube_refresh_failed(message, requires_reauthorization)
+                else:
+                    credential_store.mark_google_refresh_failed(message, requires_reauthorization)
             logger.error("Failed to refresh Google token: %s", type(exc).__name__)
             return credentials
 
@@ -189,16 +224,22 @@ def build_credentials_from_dict(
     session_id: Optional[str] = None,
     *,
     persistent: bool = False,
+    credential_key: str = "google",
 ) -> Credentials:
     """Reconstruct credentials and proactively refresh them before expiry."""
     credentials = _build_credentials(token_dict)
     if _needs_refresh(credentials):
-        return _refresh_credentials(token_dict, session_id=session_id, persistent=persistent)
+        return _refresh_credentials(
+            token_dict,
+            session_id=session_id,
+            persistent=persistent,
+            credential_key=credential_key,
+        )
     return credentials
 
 
-def get_current_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
-    """Load the persistent Google credentials for exactly one server session."""
+def get_login_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
+    """Load control-panel login/Sheets credentials for one server session."""
     if not session_id:
         return None
     session_data = session_store.get(session_id)
@@ -208,7 +249,7 @@ def get_current_credentials(session_id: Optional[str] = None) -> Optional[Creden
     # New sessions contain only an account reference. OAuth credentials live in
     # the encrypted persistent credential store and survive session rotation or
     # a backend restart.
-    if session_data.get("credential_provider") == "google":
+    if session_data.get("credential_provider") in {"google", "google_login"}:
         token_dict = credential_store.get_google_credentials()
         if not token_dict or not token_dict.get("token"):
             return None
@@ -216,10 +257,26 @@ def get_current_credentials(session_id: Optional[str] = None) -> Optional[Creden
         credential_email = str((token_dict.get("user") or {}).get("email") or "").casefold()
         if session_email and credential_email and session_email != credential_email:
             return None
-        return build_credentials_from_dict(token_dict, persistent=True)
+        return build_credentials_from_dict(token_dict, persistent=True, credential_key="google")
 
     # Read old sessions during migration. They are refreshed in place and will
     # continue to work until the user signs in again.
     if not session_data.get("token"):
         return None
     return build_credentials_from_dict(session_data, session_id=session_id)
+
+
+def get_youtube_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
+    """Load the separately authorized YouTube credentials for a login session."""
+    login_credentials = get_login_credentials(session_id)
+    if not session_id or not login_credentials or not login_credentials.valid:
+        return None
+    token_dict = credential_store.get_youtube_credentials()
+    if not token_dict or not token_dict.get("token"):
+        return None
+    return build_credentials_from_dict(token_dict, persistent=True, credential_key="youtube")
+
+
+def get_current_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
+    """Backward-compatible alias for the control-panel login credentials."""
+    return get_login_credentials(session_id)

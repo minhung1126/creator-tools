@@ -24,12 +24,18 @@ function AppContent() {
     try {
       const res = await api.getUserStatus();
       if (res.authenticated) {
+        const youtube = res.youtube || {
+          authenticated: Boolean(res.youtube_authenticated),
+          user: res.youtube_user || null,
+        };
         const user = {
           ...res.user,
           token_expires_at: res.token_expires_at,
           token_status: res.token_status,
           last_refreshed_at: res.last_refreshed_at,
           last_refresh_error: res.last_refresh_error,
+          youtube,
+          youtube_authenticated: Boolean(res.youtube_authenticated || youtube.authenticated),
         };
         setAuthUser(user); return user;
       }
@@ -55,12 +61,19 @@ function AppContent() {
       const user = await fetchUser();
       const authResult = parseAuthHash();
       if (authResult?.type === 'google_success') {
-        toast.success('Google 帳號連線成功！');
+        toast.success('控制台 Google 登入成功！');
         clearAuthHash();
         const updatedUser = await fetchUser(); if (updatedUser) await fetchSettings();
+      } else if (authResult?.type === 'youtube_success') {
+        toast.success('YouTube 頻道 Google 授權成功！');
+        clearAuthHash();
+        await fetchUser();
       } else if (authResult?.type === 'google_error') {
-        const message = authResult.value || 'Google 帳號連線失敗，請重新嘗試。';
+        const message = authResult.value || '控制台 Google 登入失敗，請重新嘗試。';
         setAuthError(message); toast.error(message); clearAuthHash();
+      } else if (authResult?.type === 'youtube_error') {
+        const message = authResult.value || 'YouTube 頻道 Google 授權失敗，請重新嘗試。';
+        toast.error(message); clearAuthHash();
       } else if (user) await fetchSettings();
       setLoading(false);
     };
@@ -79,7 +92,7 @@ function AppContent() {
   }, [toast]);
 
   const handleLogout = async () => {
-    try { await api.logout(); setAuthUser(null); toast.success('已成功登出 Google 帳號！'); }
+    try { await api.logout(); setAuthUser(null); toast.success('已成功登出控制台！'); }
     catch (err) { console.error('Logout error:', err); toast.error('登出失敗，請稍後再試'); }
   };
 

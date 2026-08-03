@@ -35,7 +35,7 @@ class CredentialStore:
         key_material = settings.CREDENTIAL_ENCRYPTION_KEY or settings.SECRET_KEY
         digest = hashlib.sha256(key_material.encode("utf-8")).digest()
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
-        self._data: Dict[str, Any] = {"version": 3, "google": None}
+        self._data: Dict[str, Any] = {"version": 4, "google": None, "youtube": None}
         self._load()
 
     def _load(self):
@@ -46,10 +46,14 @@ class CredentialStore:
                 with self._path.open("r", encoding="utf-8") as handle:
                     loaded = json.load(handle)
                 if isinstance(loaded, dict):
-                    # Version 3 retires the former Instagram and R2 records.
-                    # Preserve only the Google credential when reading an older
-                    # store; the next legitimate write removes retired fields.
-                    self._data = {"version": 3, "google": loaded.get("google")}
+                    # ``google`` is the control-panel login/Sheets connection.
+                    # Older stores only have this record; YouTube is deliberately
+                    # left empty so the channel account must be authorized again.
+                    self._data = {
+                        "version": 4,
+                        "google": loaded.get("google"),
+                        "youtube": loaded.get("youtube"),
+                    }
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", exc)
 
@@ -106,14 +110,14 @@ class CredentialStore:
                 return None
         return None
 
-    def save_google_connection(self, token_dict: Dict[str, Any]) -> Dict[str, Any]:
-        """Persist Google OAuth credentials separately from short-lived login sessions."""
+    def _save_connection(self, key: str, token_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist one OAuth connection separately from browser login sessions."""
         if not isinstance(token_dict, dict) or not token_dict.get("token"):
             raise ValueError("Google OAuth response did not contain an access token")
 
         now = utc_now()
         with self._lock:
-            previous = self._data.get("google")
+            previous = self._data.get(key)
             previous_credentials = (
                 self._decrypt_json(previous.get("credentials_encrypted")) if isinstance(previous, dict) else None
             )
@@ -136,7 +140,7 @@ class CredentialStore:
                 credentials["refresh_token"] = previous_credentials.get("refresh_token")
 
             scopes = credentials.get("scopes") if isinstance(credentials.get("scopes"), list) else []
-            self._data["google"] = {
+            self._data[key] = {
                 "credentials_encrypted": self._encrypt(json.dumps(credentials, ensure_ascii=False)),
                 "user": user,
                 "scopes": sorted({str(scope) for scope in scopes if str(scope).strip()}),
@@ -151,24 +155,49 @@ class CredentialStore:
                 "status": "active",
             }
             self._save()
-        return self.get_google_public() or {}
+        return self._get_public(key) or {}
 
-    def get_google_credentials(self) -> Optional[Dict[str, Any]]:
+    def save_google_connection(self, token_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist the control-panel login and Google Sheets connection.
+
+        The name remains for compatibility with existing deployments and tests.
+        """
+        return self._save_connection("google", token_dict)
+
+    def save_youtube_connection(self, token_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Persist the Google account authorized to operate the YouTube channel."""
+        return self._save_connection("youtube", token_dict)
+
+    def _get_credentials(self, key: str) -> Optional[Dict[str, Any]]:
         with self._lock:
-            record = self._data.get("google")
+            record = self._data.get(key)
             encrypted = record.get("credentials_encrypted") if isinstance(record, dict) else None
         return self._decrypt_json(encrypted)
 
-    def get_google_public(self) -> Optional[Dict[str, Any]]:
+    def get_google_credentials(self) -> Optional[Dict[str, Any]]:
+        """Return the control-panel login/Sheets credentials."""
+        return self._get_credentials("google")
+
+    def get_youtube_credentials(self) -> Optional[Dict[str, Any]]:
+        """Return the separately authorized YouTube channel credentials."""
+        return self._get_credentials("youtube")
+
+    def _get_public(self, key: str) -> Optional[Dict[str, Any]]:
         with self._lock:
-            record = self._data.get("google")
+            record = self._data.get(key)
             if not isinstance(record, dict):
                 return None
             return {key: value for key, value in record.items() if key != "credentials_encrypted"}
 
-    def mark_google_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
+    def get_google_public(self) -> Optional[Dict[str, Any]]:
+        return self._get_public("google")
+
+    def get_youtube_public(self) -> Optional[Dict[str, Any]]:
+        return self._get_public("youtube")
+
+    def _mark_refresh_failed(self, key: str, message: str, requires_reauthorization: bool = False) -> None:
         with self._lock:
-            record = self._data.get("google")
+            record = self._data.get(key)
             if not isinstance(record, dict):
                 return
             record["status"] = "reauthorization_required" if requires_reauthorization else "refresh_failed"
@@ -176,10 +205,22 @@ class CredentialStore:
             record["last_refresh_failed_at"] = to_iso(utc_now())
             self._save()
 
-    def clear_google(self) -> None:
+    def mark_google_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
+        self._mark_refresh_failed("google", message, requires_reauthorization)
+
+    def mark_youtube_refresh_failed(self, message: str, requires_reauthorization: bool = False) -> None:
+        self._mark_refresh_failed("youtube", message, requires_reauthorization)
+
+    def _clear(self, key: str) -> None:
         with self._lock:
-            self._data["google"] = None
+            self._data[key] = None
             self._save()
+
+    def clear_google(self) -> None:
+        self._clear("google")
+
+    def clear_youtube(self) -> None:
+        self._clear("youtube")
 
 
 credential_store = CredentialStore()

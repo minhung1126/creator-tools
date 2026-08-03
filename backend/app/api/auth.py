@@ -15,9 +15,14 @@ from backend.app.core.security import (
 )
 from backend.app.core.session_store import SESSION_MAX_AGE, session_store
 from backend.app.services.google_auth import (
+    LOGIN_SCOPES,
+    YOUTUBE_SCOPES,
     exchange_code_for_tokens,
-    get_auth_url,
-    get_current_credentials,
+    get_login_credentials,
+    get_youtube_credentials,
+)
+from backend.app.services.google_auth import (
+    get_auth_url as build_google_auth_url,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,59 +32,123 @@ router = APIRouter(prefix="/auth", tags=["Google OAuth"])
 OAUTH_FLOW_COOKIE = "creator_tools_oauth_flow"
 OAUTH_FLOW_MAX_AGE = 10 * 60
 SESSION_COOKIE = "creator_tools_session"
+LOGIN_FLOW = "login"
+YOUTUBE_FLOW = "youtube"
 
 
-def redirect_with_auth_error(message: str) -> RedirectResponse:
+def redirect_with_auth_error(message: str, flow_type: str = LOGIN_FLOW) -> RedirectResponse:
     """Redirect to the frontend with a safely encoded OAuth error."""
-    response = RedirectResponse(url=f"{settings.frontend_url}/#auth_error={quote(message, safe='')}")
+    hash_key = "youtube_auth_error" if flow_type == YOUTUBE_FLOW else "auth_error"
+    response = RedirectResponse(url=f"{settings.frontend_url}/#{hash_key}={quote(message, safe='')}")
     response.delete_cookie(OAUTH_FLOW_COOKIE)
     return response
 
 
+def _check_oauth_configuration() -> None:
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+        raise HTTPException(
+            status_code=400,
+            detail="Google Client ID and Client Secret are not configured. Please set them in .env file.",
+        )
+
+
+def _set_flow_cookie(
+    response: Response,
+    *,
+    flow_type: str,
+    state: str,
+    code_verifier: str,
+    session_id: Optional[str] = None,
+) -> None:
+    flow_payload = {
+        "flow_type": flow_type,
+        "state": state,
+        "code_verifier": code_verifier,
+    }
+    if session_id:
+        flow_payload["session_id"] = session_id
+    response.set_cookie(
+        key=OAUTH_FLOW_COOKIE,
+        value=sign_timed_data(flow_payload, salt=GOOGLE_OAUTH_STATE_SALT),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=OAUTH_FLOW_MAX_AGE,
+    )
+
+
+def _get_authenticated_session_id(request: Request) -> str:
+    session_id = request.cookies.get(SESSION_COOKIE)
+    creds = get_login_credentials(session_id)
+    if not session_id or not creds or not creds.valid:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "login_required",
+                "message": "請先登入控制台，再連結 YouTube 頻道 Google 帳號。",
+            },
+        )
+    return session_id
+
+
 @router.get("/config")
 def get_auth_config():
-    """Return OAuth configuration status (without exposing any credentials)."""
+    """Return OAuth configuration status without exposing credentials."""
     return {
         "host": settings.base_url,
         "frontend_url": settings.frontend_url,
         "redirect_uri": settings.get_redirect_uri(),
         "has_client_id": bool(settings.GOOGLE_CLIENT_ID),
         "has_client_secret": bool(settings.GOOGLE_CLIENT_SECRET),
-        "scopes": ["Google Sheets API", "YouTube Data API v3", "Google Drive API"],
+        "login_scopes": list(LOGIN_SCOPES),
+        "youtube_scopes": list(YOUTUBE_SCOPES),
+        # ``scopes`` remains as a compatibility field for older clients.
+        "scopes": list(LOGIN_SCOPES),
     }
 
 
 @router.get("/url")
 def get_google_auth_url(response: Response):
-    """Generate the Google OAuth URL and store its short-lived PKCE state."""
-    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-        raise HTTPException(
-            status_code=400,
-            detail="Google Client ID and Client Secret are not configured. Please set them in .env file.",
-        )
+    """Generate the control-panel login/Sheets OAuth URL."""
+    _check_oauth_configuration()
     if settings.is_production and not settings.allowed_google_emails:
         raise HTTPException(status_code=503, detail="正式環境必須設定 ALLOWED_GOOGLE_EMAILS")
     try:
-        url, state, code_verifier = get_auth_url()
-        flow_cookie = sign_timed_data(
-            {
-                "state": state,
-                "code_verifier": code_verifier,
-            },
-            salt=GOOGLE_OAUTH_STATE_SALT,
-        )
-        response.set_cookie(
-            key=OAUTH_FLOW_COOKIE,
-            value=flow_cookie,
-            httponly=True,
-            secure=settings.cookie_secure,
-            samesite="lax",
-            max_age=OAUTH_FLOW_MAX_AGE,
+        url, state, code_verifier = build_google_auth_url(LOGIN_FLOW)
+        _set_flow_cookie(
+            response,
+            flow_type=LOGIN_FLOW,
+            state=state,
+            code_verifier=code_verifier,
         )
         return {"auth_url": url}
+    except HTTPException:
+        raise
     except Exception as exc:
-        logger.error("Failed to generate auth URL: %s", type(exc).__name__, exc_info=True)
-        raise HTTPException(status_code=500, detail="無法建立 Google OAuth 授權網址，請稍後再試。") from exc
+        logger.error("Failed to generate login auth URL: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="無法建立 Google 登入授權網址，請稍後再試。") from exc
+
+
+@router.get("/youtube/url")
+def get_youtube_auth_url(request: Request, response: Response):
+    """Generate a separate OAuth URL for the Google account managing YouTube."""
+    _check_oauth_configuration()
+    session_id = _get_authenticated_session_id(request)
+    try:
+        url, state, code_verifier = build_google_auth_url(YOUTUBE_FLOW)
+        _set_flow_cookie(
+            response,
+            flow_type=YOUTUBE_FLOW,
+            state=state,
+            code_verifier=code_verifier,
+            session_id=session_id,
+        )
+        return {"auth_url": url}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Failed to generate YouTube auth URL: %s", type(exc).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="無法建立 YouTube 頻道授權網址，請稍後再試。") from exc
 
 
 @router.get("/callback")
@@ -90,46 +159,73 @@ def google_oauth_callback(
     error: Optional[str] = Query(None),
     error_description: Optional[str] = Query(None),
 ):
-    """Handle the OAuth2 callback from Google and verify PKCE state."""
-    if error:
-        logger.info("Google OAuth provider returned an error: %s", error)
-        return redirect_with_auth_error("Google OAuth 授權遭拒，請重新嘗試。")
-
-    if not code or not state:
-        return redirect_with_auth_error("Google OAuth callback is missing code or state.")
-
+    """Handle either the login or the separately initiated YouTube callback."""
     flow_cookie = request.cookies.get(OAUTH_FLOW_COOKIE)
     flow_state = (
         verify_timed_data(flow_cookie, salt=GOOGLE_OAUTH_STATE_SALT, max_age=OAUTH_FLOW_MAX_AGE)
         if flow_cookie
         else None
     )
+    flow_type = (flow_state or {}).get("flow_type", LOGIN_FLOW)
+    if flow_type not in {LOGIN_FLOW, YOUTUBE_FLOW}:
+        flow_type = LOGIN_FLOW
+
+    if error:
+        logger.info("Google OAuth provider returned an error: %s", error)
+        message = "YouTube 頻道 Google 授權遭拒，請重新嘗試。" if flow_type == YOUTUBE_FLOW else "Google 登入授權遭拒，請重新嘗試。"
+        if error_description:
+            logger.debug("Google OAuth error description: %s", error_description)
+        return redirect_with_auth_error(message, flow_type)
+
+    if not code or not state:
+        return redirect_with_auth_error("Google OAuth callback is missing code or state.", flow_type)
+
     if not flow_state:
-        return redirect_with_auth_error("Google OAuth session expired. Please try signing in again.")
+        message = "YouTube Google OAuth session expired. Please try again." if flow_type == YOUTUBE_FLOW else "Google OAuth session expired. Please try signing in again."
+        return redirect_with_auth_error(message, flow_type)
 
     expected_state = flow_state.get("state")
     code_verifier = flow_state.get("code_verifier")
     if not expected_state or not code_verifier:
-        return redirect_with_auth_error("Google OAuth session data is incomplete.")
+        return redirect_with_auth_error("Google OAuth session data is incomplete.", flow_type)
 
     if not secrets.compare_digest(state, expected_state):
-        return redirect_with_auth_error("Google OAuth state verification failed.")
+        return redirect_with_auth_error("Google OAuth state verification failed.", flow_type)
 
     try:
         token_dict = exchange_code_for_tokens(
             code=code,
             code_verifier=code_verifier,
+            purpose=flow_type,
         )
         user_info = token_dict.get("user") or {}
+
+        if flow_type == YOUTUBE_FLOW:
+            session_id = request.cookies.get(SESSION_COOKIE)
+            expected_session_id = flow_state.get("session_id")
+            login_credentials = get_login_credentials(session_id)
+            if (
+                not session_id
+                or not expected_session_id
+                or not secrets.compare_digest(session_id, str(expected_session_id))
+                or not login_credentials
+                or not login_credentials.valid
+            ):
+                return redirect_with_auth_error("控制台登入已失效，請重新登入後再連結 YouTube。", YOUTUBE_FLOW)
+            credential_store.save_youtube_connection(token_dict)
+            response = RedirectResponse(url=f"{settings.frontend_url}/#youtube_auth_success=1")
+            response.delete_cookie(OAUTH_FLOW_COOKIE)
+            return response
+
         email = str(user_info.get("email") or "").strip()
         if not settings.is_google_email_allowed(email):
             raise RuntimeError("此 Google 帳號不在 ALLOWED_GOOGLE_EMAILS")
-        # Keep OAuth secrets in the encrypted persistent store. The browser
-        # session only carries the account identity and a random session id.
+        # Keep login/Sheets OAuth secrets in the encrypted persistent store. The
+        # browser session only carries the account identity and a random id.
         credential_store.save_google_connection(token_dict)
         session_id = session_store.create(
             {
-                "credential_provider": "google",
+                "credential_provider": "google_login",
                 "user": user_info,
             },
             max_age=SESSION_MAX_AGE,
@@ -146,22 +242,41 @@ def google_oauth_callback(
         )
         response.delete_cookie(OAUTH_FLOW_COOKIE)
         return response
-    except Exception as e:
-        logger.error("OAuth callback error: %s", type(e).__name__, exc_info=True)
-        return redirect_with_auth_error("Google OAuth 登入失敗，請重新嘗試。")
+    except Exception as exc:
+        logger.error("OAuth callback error (%s): %s", flow_type, type(exc).__name__, exc_info=True)
+        message = "YouTube 頻道 Google 授權失敗，請重新嘗試。" if flow_type == YOUTUBE_FLOW else "Google OAuth 登入失敗，請重新嘗試。"
+        return redirect_with_auth_error(message, flow_type)
 
 
 @router.get("/user")
 def get_user_status(request: Request):
-    """Check current authentication status."""
+    """Check control-panel login and independent YouTube authorization status."""
     session_id = request.cookies.get(SESSION_COOKIE)
-    creds = get_current_credentials(session_id)
+    creds = get_login_credentials(session_id)
     if not creds or not creds.valid:
-        return {"authenticated": False, "user": None}
+        return {
+            "authenticated": False,
+            "user": None,
+            "youtube_authenticated": False,
+            "youtube": {"authenticated": False, "user": None},
+        }
 
     session_data = session_store.get(session_id) or {}
     user_info = session_data.get("user") or {"email": "Authenticated User"}
     token_status = credential_store.get_google_public() or {}
+
+    youtube_public = credential_store.get_youtube_public() or {}
+    youtube_creds = get_youtube_credentials(session_id)
+    youtube_authenticated = bool(youtube_creds and youtube_creds.valid)
+    youtube_connection = {
+        "authenticated": youtube_authenticated,
+        "user": youtube_public.get("user"),
+        "token_expired": bool(youtube_creds and youtube_creds.expired),
+        "token_expires_at": youtube_public.get("token_expires_at"),
+        "token_status": youtube_public.get("status", "not_connected"),
+        "last_refreshed_at": youtube_public.get("last_refreshed_at"),
+        "last_refresh_error": youtube_public.get("last_refresh_error"),
+    }
     return {
         "authenticated": True,
         "user": user_info,
@@ -170,12 +285,22 @@ def get_user_status(request: Request):
         "token_status": token_status.get("status", "active"),
         "last_refreshed_at": token_status.get("last_refreshed_at"),
         "last_refresh_error": token_status.get("last_refresh_error"),
+        "youtube_authenticated": youtube_authenticated,
+        "youtube": youtube_connection,
     }
+
+
+@router.post("/youtube/disconnect")
+def disconnect_youtube(request: Request):
+    """Remove only the persistent YouTube authorization, keeping page login."""
+    _get_authenticated_session_id(request)
+    credential_store.clear_youtube()
+    return {"status": "youtube_disconnected"}
 
 
 @router.post("/logout")
 def logout(request: Request):
-    """Clear authentication session."""
+    """Clear the control-panel login session without removing YouTube access."""
     res = Response(content='{"status":"logged_out"}', media_type="application/json")
     session_store.delete(request.cookies.get(SESSION_COOKIE, ""))
     res.delete_cookie(SESSION_COOKIE)

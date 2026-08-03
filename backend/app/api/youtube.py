@@ -3,10 +3,11 @@ import math
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.params import Depends as DependsMarker
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel
 
-from backend.app.core.dependencies import require_credentials
+from backend.app.core.dependencies import require_login_credentials, require_youtube_credentials
 from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
@@ -145,7 +146,7 @@ def get_quota_usage():
 
 
 @router.post("/quota-estimate")
-def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(require_credentials)):
+def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(require_login_credentials)):
     del creds
     if payload.item_count < 0:
         raise HTTPException(status_code=400, detail="item_count 不可小於 0")
@@ -156,7 +157,7 @@ def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(req
 
 
 @router.post("/playlist-items")
-def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depends(require_credentials)):
+def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depends(require_youtube_credentials)):
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
@@ -226,8 +227,18 @@ def _direct_workflow_response(
 
 
 @router.post("/batch-update")
-def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = Depends(require_credentials)):
+def run_batch_metadata_update(
+    payload: BatchUpdateInput,
+    creds: Credentials = Depends(require_youtube_credentials),
+    sheet_creds: Credentials = Depends(require_login_credentials),
+):
     """Validate and update selected videos synchronously, returning one result per video."""
+
+    # Direct callers in the existing workflow tests pass one credential object;
+    # FastAPI supplies the second dependency in real requests. Keeping this
+    # fallback makes the workflow function easy to exercise without HTTP.
+    if isinstance(sheet_creds, DependsMarker):
+        sheet_creds = creds
 
     spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
     if not spreadsheet_id:
@@ -246,7 +257,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
     if not active_assignments:
         raise HTTPException(status_code=400, detail="目前沒有任何影片被指定人物；請先選擇人物或套用批量編輯後再執行。")
     try:
-        headers = get_sheet_headers(creds, spreadsheet_id, payload.worksheet_name)
+        headers = get_sheet_headers(sheet_creds, spreadsheet_id, payload.worksheet_name)
         required_headers = ["所屬團體", "人", title_column, description_column]
         missing_headers = [header for header in required_headers if header not in headers]
         if missing_headers:
@@ -254,7 +265,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
                 status_code=400,
                 detail=f"工作表「{payload.worksheet_name}」缺少欄位：{', '.join(missing_headers)}。請重新刷新並選擇正確欄位。",
             )
-        sheet_rows = get_all_rows_for_sheet(creds, spreadsheet_id, payload.worksheet_name)
+        sheet_rows = get_all_rows_for_sheet(sheet_creds, spreadsheet_id, payload.worksheet_name)
         if not sheet_rows:
             raise HTTPException(status_code=400, detail=f"工作表「{payload.worksheet_name}」沒有可用資料列。")
 
@@ -367,7 +378,7 @@ def run_batch_metadata_update(payload: BatchUpdateInput, creds: Credentials = De
 
 
 @router.post("/publish-and-cleanup")
-def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = Depends(require_credentials)):
+def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = Depends(require_youtube_credentials)):
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
 
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")

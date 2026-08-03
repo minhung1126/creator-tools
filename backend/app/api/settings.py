@@ -7,7 +7,7 @@ from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field, model_validator
 
 from backend.app.core.config import settings
-from backend.app.core.dependencies import require_credentials
+from backend.app.core.dependencies import require_login_credentials
 from backend.app.core.runtime_config import runtime_config
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def _read_draft_config(video_type: str) -> Dict:
 
 
 @router.get("/shared")
-def get_shared_settings(creds: Credentials = Depends(require_credentials)):
+def get_shared_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {
         "default_spreadsheet_id": runtime_config.get("default_spreadsheet_id", ""),
@@ -84,7 +84,7 @@ def get_shared_settings(creds: Credentials = Depends(require_credentials)):
 
 
 @router.get("/system")
-def get_system_info(creds: Credentials = Depends(require_credentials)):
+def get_system_info(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {
         "host": settings.base_url,
@@ -97,14 +97,14 @@ def get_system_info(creds: Credentials = Depends(require_credentials)):
 
 
 @router.put("/shared")
-def update_shared_settings(payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
+def update_shared_settings(payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)):
     runtime_config.update({"default_spreadsheet_id": payload.default_spreadsheet_id.strip()})
     logger.info("Shared resource settings updated: default_spreadsheet_id")
     return {"status": "success", "settings": get_shared_settings(creds)}
 
 
 @router.get("/youtube")
-def get_youtube_settings(creds: Credentials = Depends(require_credentials)):
+def get_youtube_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {
         "default_playlist_id": runtime_config.get("default_playlist_id", ""),
@@ -114,7 +114,7 @@ def get_youtube_settings(creds: Credentials = Depends(require_credentials)):
 
 
 @router.put("/youtube")
-def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_credentials)):
+def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)):
     current_limit = int(runtime_config.get("youtube_general_quota_limit", 10_000))
     current_buffer = int(runtime_config.get("youtube_quota_safety_buffer_units", 1_000))
     limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit
@@ -139,14 +139,14 @@ def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Creden
 
 
 @router.get("/youtube-drafts")
-def get_youtube_draft_settings(creds: Credentials = Depends(require_credentials)):
+def get_youtube_draft_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {"video": _read_draft_config("Video"), "shorts": _read_draft_config("Shorts")}
 
 
 @router.put("/youtube-drafts")
 def update_youtube_draft_settings(
-    payload: YouTubeDraftConfigUpdateModel, creds: Credentials = Depends(require_credentials)
+    payload: YouTubeDraftConfigUpdateModel, creds: Credentials = Depends(require_login_credentials)
 ):
     del creds
     key = _draft_config_key(payload.video_type)

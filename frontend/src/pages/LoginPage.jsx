@@ -74,7 +74,7 @@ export default function LoginPage({ initialError }) {
 
         {/* Description */}
         <p className="login-description">
-          歡迎使用 Creator Tools。開啟控制台與內部功能前，請先登入 Google 帳號授權存取對應之 API 資源。
+          歡迎使用 Creator Tools。開啟控制台與共用 Google Sheet 功能前，請先登入控制台 Google 帳號；YouTube 頻道授權會在登入後獨立設定。
         </p>
 
         {/* Feature List */}
@@ -85,7 +85,7 @@ export default function LoginPage({ initialError }) {
           </div>
           <div className="feature-item">
             <CheckCircle2 size={18} className="feature-icon" />
-            <span>整合 <strong>YouTube Data API v3</strong> 批次更新與發布管理</span>
+            <span>控制台登入與 <strong>Google Sheets API</strong> 授權分開管理</span>
           </div>
           <div className="feature-item">
             <CheckCircle2 size={18} className="feature-icon" />
@@ -135,7 +135,7 @@ export default function LoginPage({ initialError }) {
         </div>
 
         <p className="login-footer">
-          點擊登入即代表透過 Google OAuth 2.0 授權本系統存取必要權限
+          點擊登入即代表透過 Google OAuth 2.0 授權本系統存取控制台與 Sheet 所需權限；YouTube 頻道會另外授權
         </p>
       </div>
     </div>

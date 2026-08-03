@@ -22,8 +22,12 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
       <div className="status-grid">
         <div className="glass-panel" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>Google API 連線</span>{authUser ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未授權</span>}</div>
-          <h3 style={{ fontSize: '1rem', color: '#fff' }}>{authUser ? authUser.email : '尚未連線 Google 帳號'}</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>控制台登入</span>{authUser ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已登入</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未登入</span>}</div>
+          <h3 style={{ fontSize: '1rem', color: '#fff' }}>{authUser ? authUser.email : '尚未登入控制台'}</h3>
+        </div>
+        <div className="glass-panel" style={{ padding: '20px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>YouTube 頻道授權</span>{authUser?.youtube_authenticated ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未連結</span>}</div>
+          <h3 style={{ fontSize: '1rem', color: '#fff', wordBreak: 'break-all' }}>{authUser?.youtube?.user?.email || '請在設定中連結品牌帳號'}</h3>
         </div>
         <div className="glass-panel" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}><span style={{ color: 'var(--text-muted)' }}>主要設定試算表</span><SourceLinkButton value={sysSettings.default_spreadsheet_id} sourceType="spreadsheet" label="開啟主要設定試算表" /></div>
@@ -38,7 +42,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
       <h2 style={{ fontSize: '1.4rem' }}>功能模組</h2>
       <div className="feature-grid">
-        <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="icon-box icon-box-primary"><Clapperboard size={28} /></div>
           <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>Video 草稿</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>使用 Video 專屬工作表、欄位與人物篩選設定。</p></div>
           <button className="btn btn-primary" onClick={() => setActiveTab('youtube_video_drafts')} style={{ marginTop: 'auto' }}>進入 Video 草稿 <ArrowRight size={16} /></button>
@@ -58,7 +62,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
         <div className="glass-panel glass-panel-interactive" style={{ padding: '28px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           <div className="icon-box icon-box-accent"><Settings size={28} /></div>
-          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>全域與 Google 設定</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>管理登入授權、共用試算表與系統資訊；YouTube 設定位於 YouTube 分組中。</p></div>
+          <div><h3 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>全域與 Google 設定</h3><p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>管理控制台登入、共用試算表與獨立的 YouTube 頻道 Google 授權。</p></div>
           <button className="btn btn-secondary" onClick={() => setActiveTab('settings')} style={{ marginTop: 'auto' }}>進入系統設定 <ArrowRight size={16} /></button>
         </div>
       </div>

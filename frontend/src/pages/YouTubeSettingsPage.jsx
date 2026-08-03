@@ -43,7 +43,7 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
     <div className="section-gap" style={{ maxWidth: 1000 }}>
       <div>
         <h1 style={{ fontSize: '1.8rem', marginBottom: 6 }}>YouTube 設定</h1>
-        <p className="section-desc">管理 YouTube 發布流程的預設資源；Google 帳號授權與共用 Sheet 請至「全域與 Google 設定」。</p>
+        <p className="section-desc">管理 YouTube 發布流程的預設資源；YouTube 頻道 Google 授權與共用 Sheet 請至「全域與 Google 設定」，兩者可使用不同 Google 帳號。</p>
       </div>
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}

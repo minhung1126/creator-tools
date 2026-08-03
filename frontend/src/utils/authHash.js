@@ -1,6 +1,8 @@
 const AUTH_HASH_KEYS = [
   ['auth_success', 'google_success'],
   ['auth_error', 'google_error'],
+  ['youtube_auth_success', 'youtube_success'],
+  ['youtube_auth_error', 'youtube_error'],
 ];
 
 export function parseAuthHash(hash = window.location.hash) {
