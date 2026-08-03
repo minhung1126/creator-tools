@@ -1,13 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, ExternalLink, FileSpreadsheet, Globe, Key, RefreshCw, Save, XCircle, Youtube } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
+import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 
 const GITHUB_DOCS = {
   google: 'https://github.com/minhung1126/creator-tools/blob/main/docs/GOOGLE_API_SETUP.md',
   deployment: 'https://github.com/minhung1126/creator-tools/blob/main/docs/DEPLOYMENT.md',
 };
+const STORAGE_KEY = 'creator-tools.settings.v1';
+
+function initialFormData(defaultSpreadsheetId) {
+  const saved = readPersistentJson(STORAGE_KEY, {});
+  return {
+    default_spreadsheet_id: defaultSpreadsheetId ?? saved.default_spreadsheet_id ?? '',
+  };
+}
 
 function formatTokenDate(value) {
   if (!value) return '—';
@@ -26,37 +35,77 @@ function tokenStatusLabel(status) {
 
 export default function SettingsPage({ authUser, sysSettings, refreshSettings }) {
   const toast = useToast();
-  const [formData, setFormData] = useState({ default_spreadsheet_id: sysSettings.default_spreadsheet_id || '' });
+  const [formData, setFormData] = useState(() => initialFormData(sysSettings.default_spreadsheet_id));
   const [saving, setSaving] = useState(false);
   const [youtubeConnecting, setYoutubeConnecting] = useState(false);
   const [msg, setMsg] = useState(null);
+  const saveTimerRef = useRef(null);
+  const saveChainRef = useRef(Promise.resolve());
+  const saveVersionRef = useRef(0);
+  const dirtyRef = useRef(false);
 
   const youtube = authUser?.youtube || {};
   const youtubeConnected = Boolean(authUser?.youtube_authenticated || youtube.authenticated);
   const youtubeUser = youtube.user || {};
 
   useEffect(() => {
-    setFormData({ default_spreadsheet_id: sysSettings.default_spreadsheet_id || '' });
-  }, [sysSettings]);
+    if (dirtyRef.current) return;
+    setFormData(initialFormData(sysSettings.default_spreadsheet_id));
+  }, [sysSettings.default_spreadsheet_id]);
 
-  const handleChange = (field, value) => setFormData((current) => ({ ...current, [field]: value }));
+  const queueSave = (nextData, { notify = false } = {}) => {
+    const version = saveVersionRef.current + 1;
+    saveVersionRef.current = version;
+    saveChainRef.current = saveChainRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (version !== saveVersionRef.current) return;
+        setSaving(true);
+        setMsg(null);
+        try {
+          await api.updateSharedSettings(nextData);
+          if (version !== saveVersionRef.current) return;
+          dirtyRef.current = false;
+          await refreshSettings();
+          if (version === saveVersionRef.current) {
+            setMsg({ type: 'success', text: '共用 Google Sheet 設定已自動儲存。' });
+            if (notify) toast.success('設定已儲存');
+          }
+        } catch (error) {
+          if (version !== saveVersionRef.current) return;
+          setMsg({ type: 'error', text: error.message || '儲存失敗；瀏覽器快取仍已保留。' });
+          if (notify) toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
+        } finally {
+          if (version === saveVersionRef.current) setSaving(false);
+        }
+      });
+    return saveChainRef.current;
+  };
+
+  const scheduleSave = (nextData) => {
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      queueSave(nextData);
+    }, 500);
+  };
+
+  const handleChange = (field, value) => {
+    const nextData = { ...formData, [field]: value };
+    dirtyRef.current = true;
+    setFormData(nextData);
+    writePersistentJson(STORAGE_KEY, nextData);
+    scheduleSave(nextData);
+  };
 
   const handleSave = async (event) => {
     event.preventDefault();
-    setSaving(true);
-    setMsg(null);
-    try {
-      await api.updateSharedSettings(formData);
-      await refreshSettings();
-      setMsg({ type: 'success', text: '共用 Google Sheet 設定已儲存。' });
-      toast.success('設定已儲存');
-    } catch (error) {
-      setMsg({ type: 'error', text: error.message || '儲存失敗' });
-      toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
-    } finally {
-      setSaving(false);
-    }
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    await queueSave(formData, { notify: true });
   };
+
+  useEffect(() => () => window.clearTimeout(saveTimerRef.current), []);
 
   const handleStartLoginOAuth = async () => {
     try {
@@ -140,13 +189,13 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
       </div>
 
       <div className="glass-panel card-padding" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <div><h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 10 }}><FileSpreadsheet size={20} color="var(--accent)" /> 共用 Google Sheet</h3><p className="section-desc">這是未指定其他來源時的共用預設值，供 Sheet 內容複製與 YouTube 工作流作為 fallback 使用。</p></div>
-        <div className="form-group"><label className="form-label"><FileSpreadsheet size={14} /> 預設 Google Sheet 網址或 Spreadsheet ID</label><SourceLinkInput value={formData.default_spreadsheet_id} onChange={(e) => handleChange('default_spreadsheet_id', e.target.value)} sourceType="spreadsheet" /></div>
+        <div><h3 style={{ fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: 10 }}><FileSpreadsheet size={20} color="var(--accent)" /> 共用 Google Sheet</h3><p className="section-desc">這是未指定其他來源時的共用預設值，供 Sheet 內容複製與 YouTube 工作流作為 fallback 使用；修改後會自動儲存。</p></div>
+        <div className="form-group"><label className="form-label"><FileSpreadsheet size={14} /> 預設 Google Sheet 網址或 Spreadsheet ID</label><SourceLinkInput value={formData.default_spreadsheet_id} onChange={(e) => handleChange('default_spreadsheet_id', e.target.value)} sourceType="spreadsheet" /><p className="section-desc">修改後會自動儲存，並同步保留於此瀏覽器作為離線快取。</p></div>
       </div>
 
       <div className="glass-panel card-padding"><h3 style={{ display: 'flex', alignItems: 'center', gap: 10 }}><Globe size={20} /> 系統／部署資訊（唯讀）</h3><div className="form-grid-2"><div className="form-group"><label className="form-label">對外公開網址（PUBLIC_BASE_URL）</label><input className="form-input" value={sysSettings.public_base_url || sysSettings.host || ''} readOnly /></div><div className="form-group"><label className="form-label">伺服器監聽位址（BIND_HOST）</label><input className="form-input" value={sysSettings.bind_host || ''} readOnly /></div><div className="form-group"><label className="form-label">Frontend URL</label><input className="form-input" value={sysSettings.frontend_url || ''} readOnly /></div></div><p className="section-desc">這些值由部署環境的 `.env` 管理，不屬於 Google 或 YouTube 工作流設定。BIND_HOST 控制服務監聽哪張網卡；PUBLIC_BASE_URL 是外部使用者網址，也是 Google OAuth callback 的來源。</p></div>
 
-      <button className="btn btn-success" onClick={handleSave} disabled={saving} style={{ width: 'fit-content' }}><Save size={18} /> {saving ? '儲存中...' : '儲存共用設定'}</button>
+      <button className="btn btn-success" onClick={handleSave} disabled={saving} style={{ width: 'fit-content' }}><Save size={18} /> {saving ? '儲存中...' : '立即儲存共用設定'}</button>
     </div>
   );
 }

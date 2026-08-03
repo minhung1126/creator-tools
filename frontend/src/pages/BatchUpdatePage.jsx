@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
@@ -27,11 +28,7 @@ const DEFAULT_COLUMNS = {
 const storageKey = (videoType) => `youtube-draft-config-${videoType.toLowerCase()}`;
 
 function readRemembered(videoType) {
-  try {
-    return JSON.parse(localStorage.getItem(storageKey(videoType)) || '{}');
-  } catch {
-    return {};
-  }
+  return readPersistentJson(storageKey(videoType), {});
 }
 
 function normalizeConfig(raw, defaults, sysSettings) {
@@ -63,7 +60,12 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const toast = useToast();
   const youtubeConnected = Boolean(authUser?.youtube_authenticated || authUser?.youtube?.authenticated);
   const defaults = DEFAULT_COLUMNS[videoType];
-  const initial = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
+  const remembered = useMemo(() => readRemembered(videoType), [videoType]);
+  const persistedDefaults = useMemo(() => ({
+    default_spreadsheet_id: sysSettings.default_spreadsheet_id,
+    default_playlist_id: sysSettings.default_playlist_id,
+  }), [sysSettings.default_playlist_id, sysSettings.default_spreadsheet_id]);
+  const initial = normalizeConfig(remembered, defaults, persistedDefaults);
   const [spreadsheetId, setSpreadsheetId] = useState(initial.spreadsheetId);
   const [appliedSpreadsheetId, setAppliedSpreadsheetId] = useState(initial.spreadsheetId);
   const [sourceReady, setSourceReady] = useState(false);
@@ -78,9 +80,13 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewError, setPreviewError] = useState('');
   const [videos, setVideos] = useState([]);
-  const [assignments, setAssignments] = useState({});
-  const [selectedVideoIds, setSelectedVideoIds] = useState([]);
-  const [bulkPerson, setBulkPerson] = useState('');
+  const [assignments, setAssignments] = useState(() => (
+    remembered.assignments && typeof remembered.assignments === 'object' ? remembered.assignments : {}
+  ));
+  const [selectedVideoIds, setSelectedVideoIds] = useState(() => (
+    Array.isArray(remembered.selectedVideoIds) ? remembered.selectedVideoIds : []
+  ));
+  const [bulkPerson, setBulkPerson] = useState(remembered.bulkPerson || '');
   const [playlistSource, setPlaylistSource] = useState('');
   const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
   const [loadingSheet, setLoadingSheet] = useState(false);
@@ -96,6 +102,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [estimateLoading, setEstimateLoading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const initialLoadRequestedRef = useRef(false);
+  const restoreVideoOptionsRef = useRef(true);
 
   const sourceStale = spreadsheetId.trim() !== appliedSpreadsheetId.trim();
   const teamPersonFilter = useTeamPersonFilter({
@@ -135,7 +142,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
   useEffect(() => {
     let cancelled = false;
-    const cached = normalizeConfig(readRemembered(videoType), defaults, sysSettings);
+    const cached = normalizeConfig(remembered, defaults, persistedDefaults);
     setHydrated(false);
     setWorksheets([]);
     setColumns([]);
@@ -144,10 +151,11 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setRandomPreview(null);
     setPreviewError('');
     setVideos([]);
-    setAssignments({});
-    setSelectedVideoIds([]);
-    setBulkPerson('');
+    setAssignments(remembered.assignments && typeof remembered.assignments === 'object' ? remembered.assignments : {});
+    setSelectedVideoIds(Array.isArray(remembered.selectedVideoIds) ? remembered.selectedVideoIds : []);
+    setBulkPerson(remembered.bulkPerson || '');
     initialLoadRequestedRef.current = false;
+    restoreVideoOptionsRef.current = true;
     applyConfig(cached);
 
     if (!authUser) {
@@ -159,7 +167,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       .then((data) => {
         if (cancelled) return;
         const serverConfig = data?.[videoType.toLowerCase()];
-        applyConfig(normalizeConfig(serverConfig || cached, defaults, sysSettings));
+        applyConfig(normalizeConfig(serverConfig || cached, defaults, persistedDefaults));
       })
       .catch((err) => console.error('Failed to load YouTube draft settings:', err))
       .finally(() => {
@@ -167,17 +175,31 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       });
 
     return () => { cancelled = true; };
-  }, [videoType, authUser, defaults, sysSettings, applyConfig]);
+  }, [videoType, authUser, defaults, remembered, persistedDefaults, applyConfig]);
 
   useEffect(() => {
-    if (!hydrated || !sourceReady || (worksheetName && !teamPersonReady)) return undefined;
-    const cache = { spreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople };
-    localStorage.setItem(storageKey(videoType), JSON.stringify(cache));
+    if (!hydrated) return undefined;
+    const saved = readRemembered(videoType);
+    const selectionsReady = sourceReady && (!worksheetName || (teamPersonReady && !loadingPeople));
+    const cache = {
+      ...saved,
+      spreadsheetId,
+      playlistId,
+      worksheetName,
+      titleColumn,
+      descriptionColumn,
+      selectedTeam: selectionsReady ? selectedTeam : (saved.selectedTeam ?? selectedTeam),
+      enabledPeople: selectionsReady ? enabledPeople : (Array.isArray(saved.enabledPeople) ? saved.enabledPeople : enabledPeople),
+      assignments,
+      selectedVideoIds,
+      bulkPerson,
+    };
+    writePersistentJson(storageKey(videoType), cache);
     return undefined;
-  }, [hydrated, sourceReady, teamPersonReady, videoType, spreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
+  }, [assignments, bulkPerson, descriptionColumn, enabledPeople, hydrated, loadingPeople, playlistId, selectedTeam, selectedVideoIds, sourceReady, spreadsheetId, teamPersonReady, titleColumn, videoType, worksheetName]);
 
   useEffect(() => {
-    if (!hydrated || !authUser || !sourceReady || (worksheetName && !teamPersonReady)) return undefined;
+    if (!hydrated || !authUser || !sourceReady || (worksheetName && (!teamPersonReady || loadingPeople))) return undefined;
     const timer = window.setTimeout(() => {
       setConfigSaveError('');
       api.updateYoutubeDraftSettings(videoType, {
@@ -191,7 +213,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       }).catch((err) => setConfigSaveError(`設定未能同步至伺服器：${err.message}`));
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [hydrated, authUser, sourceReady, teamPersonReady, videoType, appliedSpreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
+  }, [hydrated, authUser, loadingPeople, sourceReady, teamPersonReady, videoType, appliedSpreadsheetId, playlistId, worksheetName, titleColumn, descriptionColumn, selectedTeam, enabledPeople]);
 
   useEffect(() => {
     const selectedWorksheet = worksheets.find((sheet) => sheet.title === worksheetName);
@@ -208,16 +230,16 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const availablePeople = useMemo(() => sourceStale ? [] : teamPeople.filter((person) => enabledPeople.includes(person)), [sourceStale, teamPeople, enabledPeople]);
 
   useEffect(() => {
-    if (!sourceStale && bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
-  }, [availablePeople, bulkPerson, sourceStale]);
+    if (!sourceStale && !loadingPeople && teamPersonReady && bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
+  }, [availablePeople, bulkPerson, loadingPeople, sourceStale, teamPersonReady]);
 
   useEffect(() => {
-    if (sourceStale) return;
+    if (sourceStale || loadingPeople || !teamPersonReady || !videos.length) return;
     setAssignments((current) => Object.fromEntries(Object.entries(current).map(([videoId, person]) => [
       videoId,
       person === '不編輯' || availablePeople.includes(person) ? person : '不編輯',
     ])));
-  }, [availablePeople, sourceStale]);
+  }, [availablePeople, loadingPeople, sourceStale, teamPersonReady, videos.length]);
 
   const loadRandomPreview = useCallback(async () => {
     if (!appliedSpreadsheetId || !sourceReady || sourceStale || !worksheetName || !selectedTeam || !titleColumn || !descriptionColumn) {
@@ -273,6 +295,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         setSelectedVideoIds([]);
         setBulkPerson('');
         setAssignments(Object.fromEntries(videos.map((video) => [video.video_id, '不編輯'])));
+        restoreVideoOptionsRef.current = false;
       }
       setAppliedSpreadsheetId(nextSource);
       setWorksheetName(nextWorksheet);
@@ -308,6 +331,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setSelectedVideoIds([]);
     setBulkPerson('');
     setAssignments(Object.fromEntries(videos.map((video) => [video.video_id, '不編輯'])));
+    restoreVideoOptionsRef.current = false;
   };
 
   const handleLoadVideos = async () => {
@@ -321,10 +345,18 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     try {
       const res = await api.getPlaylistVideos(playlistId);
       const videoList = sortVideosByUploadTime(res.videos || []);
+      const shouldRestore = restoreVideoOptionsRef.current;
+      const rememberedAssignments = shouldRestore && assignments && typeof assignments === 'object' ? assignments : {};
+      const nextAssignments = Object.fromEntries(videoList.map((video) => [
+        video.video_id,
+        shouldRestore ? (rememberedAssignments[video.video_id] || '不編輯') : '不編輯',
+      ]));
+      const videoIds = new Set(videoList.map((video) => video.video_id));
       setVideos(videoList);
-      setAssignments(Object.fromEntries(videoList.map((video) => [video.video_id, '不編輯'])));
-      setSelectedVideoIds([]);
-      setBulkPerson('');
+      setAssignments(nextAssignments);
+      setSelectedVideoIds(shouldRestore ? selectedVideoIds.filter((videoId) => videoIds.has(videoId)) : []);
+      if (!shouldRestore) setBulkPerson('');
+      restoreVideoOptionsRef.current = false;
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
     } catch (err) {
@@ -432,7 +464,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         <div className="form-group"><label className="form-label" htmlFor="batch-title-column">標題套用欄位</label><select id="batch-title-column" className="form-select" value={titleColumn} onChange={(e) => setTitleColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
         <div className="form-group"><label className="form-label" htmlFor="batch-description-column">描述套用欄位</label><select id="batch-description-column" className="form-select" value={descriptionColumn} onChange={(e) => setDescriptionColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
         <div className="form-group"><label className="form-label" htmlFor="batch-playlist-id"><PlaySquare size={14} /> 目標播放清單 ID</label><SourceLinkInput id="batch-playlist-id" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" /></div>
-        <div className="info-banner filter-panel-full-width"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作流設定；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。設定以伺服器記憶為準，並同步保留於此瀏覽器的 localStorage 作快速快取。</span></div>
+        <div className="info-banner filter-panel-full-width"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存所有工作流選項；未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。變更會即時保留於此瀏覽器，並在條件穩定後同步至伺服器。</span></div>
       </SheetDataSourcePanel>
 
       <TeamPersonFilterPanel

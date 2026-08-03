@@ -11,14 +11,21 @@ import ApiHealthPage from './pages/ApiHealthPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
 import { clearAuthHash, parseAuthHash } from './utils/authHash';
+import { readPersistentJson, writePersistentJson } from './utils/persistentStorage';
+
+const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState(() => readPersistentJson(NAVIGATION_STORAGE_KEY, {}).activeTab || 'dashboard');
   const [authUser, setAuthUser] = useState(null);
   const [sysSettings, setSysSettings] = useState({});
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const toast = useToast();
+
+  useEffect(() => {
+    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab });
+  }, [activeTab]);
 
   const fetchUser = async () => {
     try {

@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, ChevronRight, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Send, Settings, Smartphone, Video, Youtube } from 'lucide-react';
+import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 
 const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
+const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) {
-  const [youtubeOpen, setYoutubeOpen] = useState(youtubeItems.some((i) => i.id === activeTab));
-  const [sheetOpen, setSheetOpen] = useState(sheetItems.some((i) => i.id === activeTab));
+  const savedNavigation = readPersistentJson(NAVIGATION_STORAGE_KEY, {});
+  const [youtubeOpen, setYoutubeOpen] = useState(savedNavigation.youtubeOpen ?? youtubeItems.some((i) => i.id === activeTab));
+  const [sheetOpen, setSheetOpen] = useState(savedNavigation.sheetOpen ?? sheetItems.some((i) => i.id === activeTab));
   useEffect(() => {
     if (youtubeItems.some((i) => i.id === activeTab)) setYoutubeOpen(true);
     if (sheetItems.some((i) => i.id === activeTab)) setSheetOpen(true);
   }, [activeTab]);
+  useEffect(() => {
+    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab, youtubeOpen, sheetOpen });
+  }, [activeTab, sheetOpen, youtubeOpen]);
   const item = (value, child = false) => { const Icon = value.icon; return <div key={value.id} className={`nav-item ${activeTab === value.id ? 'active' : ''}`} onClick={() => setActiveTab(value.id)} style={child ? { marginLeft: 22, padding: '10px 14px', fontSize: '.9rem' } : undefined}><Icon size={child ? 16 : 18} /><span>{value.label}</span></div>; };
   const group = (label, Icon, open, setOpen, items) => <div><button type="button" className={`nav-item ${items.some((i) => i.id === activeTab) ? 'active' : ''}`} onClick={() => setOpen(!open)} style={{ width: '100%', border: 0, font: 'inherit', textAlign: 'left' }}><Icon size={18} /><span style={{ flex: 1 }}>{label}</span>{open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}</button>{open && <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '4px 0 0 8px', paddingLeft: 8, borderLeft: '1px solid var(--border-color)' }}>{items.map((i) => item(i, true))}</div>}</div>;
   return <aside className="sidebar"><div><div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><div style={{ background: 'linear-gradient(135deg,#6366f1,#ec4899)', padding: 8, borderRadius: 10 }}><Video size={24} /></div><div><h2 style={{ fontSize: '1.15rem' }}>Creator Tools</h2><p style={{ fontSize: '.75rem', color: 'var(--text-muted)' }}>創作者自動化控制台</p></div></div></div>

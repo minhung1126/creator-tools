@@ -4,15 +4,12 @@ import { api } from '../services/api';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
 import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
 import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
+import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 
 const STORAGE_KEY = 'creator-tools.sheet-copy.v1';
 
 function loadSaved() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-  } catch {
-    return {};
-  }
+  return readPersistentJson(STORAGE_KEY, {});
 }
 
 export function migrateSelectedPeople(saved) {
@@ -76,9 +73,20 @@ export default function SheetCopyPage({ sysSettings }) {
   } = teamPersonFilter;
 
   useEffect(() => {
-    if (!sourceReady || (worksheetName && !teamPersonReady)) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ spreadsheetId, worksheetName, visibleKeys, team: selectedTeam, selectedPeople, query }));
-  }, [query, selectedPeople, selectedTeam, sourceReady, spreadsheetId, teamPersonReady, visibleKeys, worksheetName]);
+    const savedState = loadSaved();
+    const selectionsReady = sourceReady && (!worksheetName || (teamPersonReady && !loadingPeople));
+    writePersistentJson(STORAGE_KEY, {
+      ...savedState,
+      spreadsheetId,
+      worksheetName,
+      visibleKeys,
+      team: selectionsReady ? selectedTeam : (savedState.team ?? selectedTeam),
+      selectedPeople: selectionsReady
+        ? selectedPeople
+        : (Array.isArray(savedState.selectedPeople) ? savedState.selectedPeople : selectedPeople),
+      query,
+    });
+  }, [loadingPeople, query, selectedPeople, selectedTeam, sourceReady, spreadsheetId, teamPersonReady, visibleKeys, worksheetName]);
 
   useEffect(() => {
     if (!copiedCell) return undefined;
@@ -181,7 +189,7 @@ export default function SheetCopyPage({ sysSettings }) {
     <div className="section-gap">
       <div>
         <h1 className="sheet-copy-title"><FileSpreadsheet size={28} /> Sheet 內容複製</h1>
-        <p className="section-desc">先確認資料來源與工作表，再選擇團體、人物及要顯示的內容；點擊任一儲存格即可原樣複製，包含換行。</p>
+        <p className="section-desc">先確認資料來源與工作表，再選擇團體、人物及要顯示的內容；所有篩選與顯示選項會即時記住，點擊任一儲存格即可原樣複製，包含換行。</p>
       </div>
 
       <SheetDataSourcePanel spreadsheetId={spreadsheetId} onSpreadsheetIdChange={handleSpreadsheetChange} worksheets={worksheets} worksheetName={worksheetName} onWorksheetChange={handleWorksheetChange} onRefresh={refresh} loading={loading} sourceReady={sourceReady} stale={sourceStale} error={sourceError} />

@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import SourceLinkInput from '../components/SourceLinkInput';
+import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,9 +17,12 @@ import {
   Trash2,
 } from 'lucide-react';
 
+const STORAGE_KEY = 'creator-tools.youtube-publish-cleaner.v1';
+
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
-  const [playlistId, setPlaylistId] = useState(sysSettings.default_playlist_id || '');
+  const saved = readPersistentJson(STORAGE_KEY, {});
+  const [playlistId, setPlaylistId] = useState(saved.playlistId || sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
   const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
@@ -30,6 +34,10 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
+
+  useEffect(() => {
+    writePersistentJson(STORAGE_KEY, { playlistId });
+  }, [playlistId]);
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
