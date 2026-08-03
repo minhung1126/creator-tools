@@ -31,6 +31,14 @@ function readRemembered(videoType) {
   return readPersistentJson(storageKey(videoType), {});
 }
 
+export function resolveDraftConfig(serverConfig, cached) {
+  const hasServerConfig = serverConfig
+    && typeof serverConfig === 'object'
+    && !Array.isArray(serverConfig)
+    && Object.keys(serverConfig).length > 0;
+  return hasServerConfig ? serverConfig : cached;
+}
+
 function normalizeConfig(raw, defaults, sysSettings) {
   const enabledPeople = raw?.enabledPeople ?? raw?.enabled_people;
   return {
@@ -167,7 +175,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       .then((data) => {
         if (cancelled) return;
         const serverConfig = data?.[videoType.toLowerCase()];
-        applyConfig(normalizeConfig(serverConfig || cached, defaults, persistedDefaults));
+        applyConfig(normalizeConfig(resolveDraftConfig(serverConfig, cached), defaults, persistedDefaults));
       })
       .catch((err) => console.error('Failed to load YouTube draft settings:', err))
       .finally(() => {

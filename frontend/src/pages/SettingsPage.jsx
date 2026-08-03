@@ -3,7 +3,7 @@ import { CheckCircle2, ExternalLink, FileSpreadsheet, Globe, Key, RefreshCw, Sav
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
+import { readPersistentJson, resolvePersistentValue, writePersistentJson } from '../utils/persistentStorage';
 
 const GITHUB_DOCS = {
   google: 'https://github.com/minhung1126/creator-tools/blob/main/docs/GOOGLE_API_SETUP.md',
@@ -11,10 +11,10 @@ const GITHUB_DOCS = {
 };
 const STORAGE_KEY = 'creator-tools.settings.v1';
 
-function initialFormData(defaultSpreadsheetId) {
+export function initialFormData(defaultSpreadsheetId) {
   const saved = readPersistentJson(STORAGE_KEY, {});
   return {
-    default_spreadsheet_id: defaultSpreadsheetId ?? saved.default_spreadsheet_id ?? '',
+    default_spreadsheet_id: resolvePersistentValue(saved, 'default_spreadsheet_id', defaultSpreadsheetId, ''),
   };
 }
 
@@ -65,6 +65,7 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
         try {
           await api.updateSharedSettings(nextData);
           if (version !== saveVersionRef.current) return;
+          writePersistentJson(STORAGE_KEY, { ...nextData, _pending: false });
           dirtyRef.current = false;
           await refreshSettings();
           if (version === saveVersionRef.current) {
@@ -94,7 +95,7 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
     const nextData = { ...formData, [field]: value };
     dirtyRef.current = true;
     setFormData(nextData);
-    writePersistentJson(STORAGE_KEY, nextData);
+    writePersistentJson(STORAGE_KEY, { ...nextData, _pending: true });
     scheduleSave(nextData);
   };
 

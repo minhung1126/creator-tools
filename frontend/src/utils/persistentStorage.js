@@ -19,3 +19,10 @@ export function writePersistentJson(key, value) {
     // the source of truth for settings that are also sent to the API.
   }
 }
+
+export function resolvePersistentValue(saved, key, serverValue, fallback) {
+  const hasSavedValue = saved && Object.prototype.hasOwnProperty.call(saved, key);
+  if (hasSavedValue && saved._pending !== false) return saved[key];
+  if (serverValue !== undefined && serverValue !== null) return serverValue;
+  return hasSavedValue ? saved[key] : fallback;
+}

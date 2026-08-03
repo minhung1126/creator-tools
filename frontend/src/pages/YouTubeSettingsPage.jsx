@@ -3,16 +3,16 @@ import { ArrowRight, CheckCircle2, Clapperboard, PlaySquare, Save, Smartphone, X
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
+import { readPersistentJson, resolvePersistentValue, writePersistentJson } from '../utils/persistentStorage';
 
 const STORAGE_KEY = 'creator-tools.youtube-settings.v1';
 
-function initialSettings(defaultPlaylistId, quotaLimit, quotaBuffer) {
+export function initialSettings(defaultPlaylistId, quotaLimit, quotaBuffer) {
   const saved = readPersistentJson(STORAGE_KEY, {});
   return {
-    playlistId: defaultPlaylistId ?? saved.playlistId ?? '',
-    quotaLimit: quotaLimit ?? saved.quotaLimit ?? 10000,
-    quotaBuffer: quotaBuffer ?? saved.quotaBuffer ?? 1000,
+    playlistId: resolvePersistentValue(saved, 'playlistId', defaultPlaylistId, ''),
+    quotaLimit: resolvePersistentValue(saved, 'quotaLimit', quotaLimit, 10000),
+    quotaBuffer: resolvePersistentValue(saved, 'quotaBuffer', quotaBuffer, 1000),
   };
 }
 
@@ -63,6 +63,7 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
         try {
           await api.updateYoutubeSettings(payload);
           if (version !== saveVersionRef.current) return false;
+          writePersistentJson(STORAGE_KEY, { ...nextData, _pending: false });
           dirtyRef.current = false;
           await refreshSettings();
           if (version === saveVersionRef.current) {
@@ -96,7 +97,7 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
     if (field === 'playlistId') setPlaylistId(value);
     if (field === 'quotaLimit') setQuotaLimit(value);
     if (field === 'quotaBuffer') setQuotaBuffer(value);
-    writePersistentJson(STORAGE_KEY, nextData);
+    writePersistentJson(STORAGE_KEY, { ...nextData, _pending: true });
     scheduleSave(nextData);
   };
 
