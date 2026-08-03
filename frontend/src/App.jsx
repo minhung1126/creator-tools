@@ -112,7 +112,7 @@ function AppContent() {
     {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
     {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
     {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
-    {activeTab === 'youtube_settings' && <YouTubeSettingsPage sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
+    {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main></div>;

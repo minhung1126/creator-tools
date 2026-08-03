@@ -55,7 +55,7 @@ def require_youtube_credentials(request: Request) -> Credentials:
             status_code=403,
             detail={
                 "code": "youtube_not_connected",
-                "message": "尚未連結 YouTube 頻道 Google 帳號，請至「全域與 Google 設定」完成授權。",
+                "message": "尚未連結 YouTube 頻道 Google 帳號，請至「YouTube 設定」完成授權。",
             },
         )
     return creds

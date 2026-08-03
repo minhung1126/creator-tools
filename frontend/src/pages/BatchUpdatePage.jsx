@@ -344,7 +344,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
   const handleLoadVideos = async () => {
     if (!youtubeConnected) {
-      toast.warning('請先在「全域與 Google 設定」連結 YouTube 頻道 Google 帳號！');
+      toast.warning('請先在「YouTube 設定」連結 YouTube 頻道 Google 帳號！');
       return;
     }
     setLoadingVideos(true);
@@ -454,7 +454,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       <div>
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1 style={{ fontSize: '1.8rem' }}>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先確認資料來源、工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
-        {!youtubeConnected && <div className="info-banner"><AlertCircle size={16} /><span>尚未連結 YouTube 頻道 Google 帳號；請先到「全域與 Google 設定」授權管理品牌帳號的 Google 帳號。</span></div>}
+        {!youtubeConnected && <div className="info-banner"><AlertCircle size={16} /><span>尚未連結 YouTube 頻道 Google 帳號；請先到「YouTube 設定」授權管理品牌帳號的 Google 帳號。</span></div>}
       </div>
 
       <SheetDataSourcePanel

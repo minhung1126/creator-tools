@@ -45,7 +45,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       return;
     }
     if (!authUser.youtube_authenticated && !authUser.youtube?.authenticated) {
-      toast.warning('請先在「全域與 Google 設定」連結 YouTube 頻道 Google 帳號！');
+      toast.warning('請先在「YouTube 設定」連結 YouTube 頻道 Google 帳號！');
       return;
     }
     setLoading(true);

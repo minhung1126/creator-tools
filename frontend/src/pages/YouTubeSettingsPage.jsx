@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, CheckCircle2, Clapperboard, PlaySquare, Save, Smartphone, XCircle } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Clapperboard, ExternalLink, PlaySquare, Save, Smartphone, XCircle, Youtube } from 'lucide-react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -28,18 +28,37 @@ function toPayload(data) {
   };
 }
 
-export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setActiveTab }) {
+function formatTokenDate(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-TW');
+}
+
+function tokenStatusLabel(status) {
+  return {
+    active: '正常（會自動更新）',
+    refresh_failed: '暫時更新失敗',
+    reauthorization_required: '需要重新授權',
+    not_connected: '尚未連結',
+  }[status] || '未取得狀態';
+}
+
+export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSettings, setActiveTab }) {
   const toast = useToast();
   const initial = initialSettings(sysSettings.default_playlist_id, sysSettings.youtube_general_quota_limit, sysSettings.youtube_quota_safety_buffer_units);
   const [playlistId, setPlaylistId] = useState(initial.playlistId);
   const [quotaLimit, setQuotaLimit] = useState(initial.quotaLimit);
   const [quotaBuffer, setQuotaBuffer] = useState(initial.quotaBuffer);
   const [saving, setSaving] = useState(false);
+  const [youtubeConnecting, setYoutubeConnecting] = useState(false);
   const [msg, setMsg] = useState(null);
   const saveTimerRef = useRef(null);
   const saveChainRef = useRef(Promise.resolve());
   const saveVersionRef = useRef(0);
   const dirtyRef = useRef(false);
+  const youtube = authUser?.youtube || {};
+  const youtubeConnected = Boolean(authUser?.youtube_authenticated || youtube.authenticated);
+  const youtubeUser = youtube.user || {};
 
   useEffect(() => {
     if (dirtyRef.current) return;
@@ -123,16 +142,51 @@ export default function YouTubeSettingsPage({ sysSettings, refreshSettings, setA
     await queueSave(nextData, { notify: true });
   };
 
+  const handleStartYoutubeOAuth = async () => {
+    setYoutubeConnecting(true);
+    try {
+      const result = await api.getYoutubeAuthUrl();
+      if (result.auth_url) window.location.href = result.auth_url;
+    } catch (error) {
+      toast.error(`取得 YouTube 頻道授權網址失敗：${error.message}`);
+      setYoutubeConnecting(false);
+    }
+  };
+
   useEffect(() => () => window.clearTimeout(saveTimerRef.current), []);
 
   return (
     <div className="section-gap" style={{ maxWidth: 1000 }}>
       <div>
         <h1 style={{ fontSize: '1.8rem', marginBottom: 6 }}>YouTube 設定</h1>
-        <p className="section-desc">管理 YouTube 發布流程的預設資源；YouTube 頻道 Google 授權與共用 Sheet 請至「全域與 Google 設定」，兩者可使用不同 Google 帳號。</p>
+        <p className="section-desc">管理 YouTube 頻道授權、發布流程預設資源與 API 配額；共用 Google Sheet 請至「全域與 Google 設定」。</p>
       </div>
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
+
+      <div className="glass-panel card-padding" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="card-header">
+          <div className="card-header-title"><Youtube size={20} color="#ff4d6d" /><h2 style={{ fontSize: '1.2rem' }}>YouTube 頻道 Google 授權</h2></div>
+          {youtubeConnected
+            ? <span className="badge badge-connected"><CheckCircle2 size={14} /> 已連線：{youtubeUser.email || 'YouTube 帳號'}</span>
+            : <span className="badge badge-disconnected"><XCircle size={14} /> 尚未連結</span>}
+        </div>
+        <div className="info-banner">
+          <Youtube size={18} />
+          <span>這個授權與控制台登入完全分開。請在 Google 授權視窗選擇「管理品牌帳號的 Google 帳號」，YouTube API 將使用該帳號可管理的頻道。</span>
+        </div>
+        {youtubeConnected && <div className="form-grid-2">
+          <div className="glass-panel" style={{ padding: 12 }}><strong>授權帳號</strong><p style={{ wordBreak: 'break-all' }}>{youtubeUser.email || '—'}</p></div>
+          <div className="glass-panel" style={{ padding: 12 }}><strong>Token 狀態</strong><p>{tokenStatusLabel(youtube.token_status)}</p></div>
+          <div className="glass-panel" style={{ padding: 12 }}><strong>最近更新</strong><p>{formatTokenDate(youtube.last_refreshed_at)}</p></div>
+          <div className="glass-panel" style={{ padding: 12 }}><strong>目前到期時間</strong><p>{formatTokenDate(youtube.token_expires_at)}</p></div>
+        </div>}
+        {youtube.last_refresh_error && <div className="info-banner"><XCircle size={16} /><span>YouTube 授權 Token 最近更新未成功，請重新授權管理品牌帳號的 Google 帳號。</span></div>}
+        <p className="section-desc">重新授權會替換目前保存的 YouTube 頻道連線，但不會登出控制台，也不會改變共用 Google Sheet 的登入帳號。</p>
+        <button className="btn btn-primary" onClick={handleStartYoutubeOAuth} type="button" disabled={youtubeConnecting} style={{ width: 'fit-content' }}>
+          {youtubeConnecting ? <><span className="login-spinner"></span> 正在傳送至 Google 授權...</> : <><ExternalLink size={16} /> {youtubeConnected ? '重新授權 YouTube 頻道' : '連結 YouTube 頻道 Google 帳號'}</>}
+        </button>
+      </div>
 
       <form className="glass-panel card-padding" onSubmit={handleSave} style={{ display: 'grid', gap: 20 }}>
         <div>
