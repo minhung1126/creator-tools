@@ -1,5 +1,5 @@
 # Step 1: Build Frontend
-FROM node:20-alpine AS frontend-builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Step 2: Build Python FastAPI Backend
-FROM python:3.11-slim
+FROM python:3.11-slim@sha256:db3ff2e1800a8581e2c48a27c3995339d47bdf046da21c7627accd3d51053a93
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

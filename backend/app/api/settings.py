@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Dict, List, Literal
+from typing import Annotated, Dict, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
@@ -17,13 +17,13 @@ router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
 class SharedResourceSettingsModel(BaseModel):
     """Settings shared by Sheet and platform workflows unless overridden."""
 
-    default_spreadsheet_id: str = ""
+    default_spreadsheet_id: str = Field(default="", max_length=512)
 
 
 class YouTubeResourceSettingsModel(BaseModel):
     """YouTube-only fallback resources."""
 
-    default_playlist_id: str = ""
+    default_playlist_id: str = Field(default="", max_length=256)
     youtube_general_quota_limit: int | None = None
     youtube_quota_safety_buffer_units: int | None = None
 
@@ -43,13 +43,13 @@ class YouTubeResourceSettingsModel(BaseModel):
 
 
 class YouTubeDraftConfigModel(BaseModel):
-    spreadsheet_id: str = ""
-    playlist_id: str = ""
-    worksheet_name: str = ""
-    title_column: str = ""
-    description_column: str = ""
-    team: str = ""
-    enabled_people: List[str] = Field(default_factory=list)
+    spreadsheet_id: str = Field(default="", max_length=512)
+    playlist_id: str = Field(default="", max_length=256)
+    worksheet_name: str = Field(default="", max_length=200)
+    title_column: str = Field(default="", max_length=200)
+    description_column: str = Field(default="", max_length=200)
+    team: str = Field(default="", max_length=200)
+    enabled_people: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=200)
 
 
 class YouTubeDraftConfigUpdateModel(BaseModel):
@@ -97,7 +97,9 @@ def get_system_info(creds: Credentials = Depends(require_login_credentials)):
 
 
 @router.put("/shared")
-def update_shared_settings(payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)):
+def update_shared_settings(
+    payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)
+):
     runtime_config.update({"default_spreadsheet_id": payload.default_spreadsheet_id.strip()})
     logger.info("Shared resource settings updated: default_spreadsheet_id")
     return {"status": "success", "settings": get_shared_settings(creds)}
@@ -114,7 +116,9 @@ def get_youtube_settings(creds: Credentials = Depends(require_login_credentials)
 
 
 @router.put("/youtube")
-def update_youtube_settings(payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)):
+def update_youtube_settings(
+    payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)
+):
     current_limit = int(runtime_config.get("youtube_general_quota_limit", 10_000))
     current_buffer = int(runtime_config.get("youtube_quota_safety_buffer_units", 1_000))
     limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit

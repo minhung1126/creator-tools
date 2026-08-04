@@ -120,13 +120,16 @@ def get_user_profile(credentials: Credentials) -> dict:
         service = googleapiclient.discovery.build("oauth2", "v2", credentials=credentials)
         user_info = service.userinfo().get().execute()
         return {
+            # The v2 userinfo endpoint exposes Google's stable OIDC subject as
+            # ``id``. Keep both spellings accepted for test doubles/providers.
+            "sub": user_info.get("sub") or user_info.get("id", ""),
             "email": user_info.get("email", ""),
             "name": user_info.get("name", ""),
             "picture": user_info.get("picture", ""),
         }
     except Exception as e:
-        logger.error("Error fetching user profile: %s", e, exc_info=True)
-        return {"email": "Connected Account", "name": "", "picture": ""}
+        logger.error("Error fetching user profile: %s", type(e).__name__)
+        return {"sub": "", "email": "Connected Account", "name": "", "picture": ""}
 
 
 def _build_credentials(token_dict: dict) -> Credentials:
@@ -169,6 +172,7 @@ def _refresh_credentials(
     token_dict: dict,
     *,
     session_id: Optional[str],
+    owner_sub: Optional[str],
     persistent: bool,
     credential_key: str = "google",
 ) -> Credentials:
@@ -178,9 +182,9 @@ def _refresh_credentials(
         # request was waiting for the lock. Always use the newest record.
         if persistent:
             latest = (
-                credential_store.get_youtube_credentials()
+                credential_store.get_youtube_credentials(owner_sub)
                 if credential_key == "youtube"
-                else credential_store.get_google_credentials()
+                else credential_store.get_google_credentials(owner_sub)
             )
         else:
             latest = None
@@ -197,24 +201,31 @@ def _refresh_credentials(
             refreshed["expiry"] = credentials.expiry.isoformat() if credentials.expiry else None
             if persistent:
                 if credential_key == "youtube":
-                    credential_store.save_youtube_connection(refreshed)
+                    credential_store.save_youtube_connection(refreshed, owner_sub=owner_sub)
                 else:
-                    credential_store.save_google_connection(refreshed)
+                    credential_store.save_google_connection(refreshed, owner_sub=owner_sub)
             elif session_id:
                 # Backward compatibility for sessions created before the
                 # persistent credential store was introduced.
                 session_store.update(session_id, refreshed)
             return credentials
         except Exception as exc:
-            message = str(exc) or type(exc).__name__
+            raw_message = str(exc).casefold()
             requires_reauthorization = any(
-                marker in message.lower() for marker in ("invalid_grant", "invalid client", "revoked")
+                marker in raw_message for marker in ("invalid_grant", "invalid client", "revoked")
+            )
+            # Never persist or expose the provider's raw response body. The
+            # status is enough for the UI; diagnostics retain only the type.
+            message = (
+                "Google OAuth refresh requires reauthorization."
+                if requires_reauthorization
+                else "Google OAuth refresh failed."
             )
             if persistent:
                 if credential_key == "youtube":
-                    credential_store.mark_youtube_refresh_failed(message, requires_reauthorization)
+                    credential_store.mark_youtube_refresh_failed(message, requires_reauthorization, owner_sub=owner_sub)
                 else:
-                    credential_store.mark_google_refresh_failed(message, requires_reauthorization)
+                    credential_store.mark_google_refresh_failed(message, requires_reauthorization, owner_sub=owner_sub)
             logger.error("Failed to refresh Google token: %s", type(exc).__name__)
             return credentials
 
@@ -225,6 +236,7 @@ def build_credentials_from_dict(
     *,
     persistent: bool = False,
     credential_key: str = "google",
+    owner_sub: Optional[str] = None,
 ) -> Credentials:
     """Reconstruct credentials and proactively refresh them before expiry."""
     credentials = _build_credentials(token_dict)
@@ -232,6 +244,7 @@ def build_credentials_from_dict(
         return _refresh_credentials(
             token_dict,
             session_id=session_id,
+            owner_sub=owner_sub,
             persistent=persistent,
             credential_key=credential_key,
         )
@@ -246,18 +259,36 @@ def get_login_credentials(session_id: Optional[str] = None) -> Optional[Credenti
     if not session_data:
         return None
 
+    session_user = session_data.get("user") if isinstance(session_data.get("user"), dict) else {}
+    session_sub = str(session_user.get("sub") or "").strip() or None
+
     # New sessions contain only an account reference. OAuth credentials live in
     # the encrypted persistent credential store and survive session rotation or
     # a backend restart.
     if session_data.get("credential_provider") in {"google", "google_login"}:
-        token_dict = credential_store.get_google_credentials()
+        token_dict = credential_store.get_google_credentials(session_sub)
+        # Old sessions created before OIDC subjects were stored can only use a
+        # legacy record. New sessions never fall back to this branch.
+        if not token_dict and not session_sub:
+            token_dict = credential_store.get_google_credentials()
         if not token_dict or not token_dict.get("token"):
             return None
-        session_email = str((session_data.get("user") or {}).get("email") or "").casefold()
-        credential_email = str((token_dict.get("user") or {}).get("email") or "").casefold()
-        if session_email and credential_email and session_email != credential_email:
-            return None
-        return build_credentials_from_dict(token_dict, persistent=True, credential_key="google")
+        credential_user = token_dict.get("user") if isinstance(token_dict.get("user"), dict) else {}
+        credential_sub = str(credential_user.get("sub") or credential_user.get("id") or "").strip() or None
+        if session_sub:
+            if credential_sub != session_sub:
+                return None
+        else:
+            session_email = str(session_user.get("email") or "").casefold()
+            credential_email = str(credential_user.get("email") or "").casefold()
+            if session_email and credential_email and session_email != credential_email:
+                return None
+        return build_credentials_from_dict(
+            token_dict,
+            persistent=True,
+            credential_key="google",
+            owner_sub=session_sub,
+        )
 
     # Read old sessions during migration. They are refreshed in place and will
     # continue to work until the user signs in again.
@@ -268,13 +299,25 @@ def get_login_credentials(session_id: Optional[str] = None) -> Optional[Credenti
 
 def get_youtube_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:
     """Load the separately authorized YouTube credentials for a login session."""
+    session_data = session_store.get(session_id) if session_id else None
+    session_user = session_data.get("user") if isinstance(session_data, dict) else None
+    owner_sub = str((session_user or {}).get("sub") or "").strip() or None
+    # A YouTube credential must have a real owner. Legacy sessions are forced
+    # through reauthorization instead of inheriting a global channel token.
+    if not owner_sub:
+        return None
     login_credentials = get_login_credentials(session_id)
     if not session_id or not login_credentials or not login_credentials.valid:
         return None
-    token_dict = credential_store.get_youtube_credentials()
+    token_dict = credential_store.get_youtube_credentials(owner_sub)
     if not token_dict or not token_dict.get("token"):
         return None
-    return build_credentials_from_dict(token_dict, persistent=True, credential_key="youtube")
+    return build_credentials_from_dict(
+        token_dict,
+        persistent=True,
+        credential_key="youtube",
+        owner_sub=owner_sub,
+    )
 
 
 def get_current_credentials(session_id: Optional[str] = None) -> Optional[Credentials]:

@@ -1,9 +1,9 @@
 import logging
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.app.core.dependencies import require_login_credentials
 from backend.app.core.runtime_config import runtime_config
@@ -20,20 +20,20 @@ router = APIRouter(prefix="/sheets", tags=["Google Sheets"])
 
 
 class SpreadsheetInput(BaseModel):
-    spreadsheet_url_or_id: Optional[str] = ""
+    spreadsheet_url_or_id: Optional[str] = Field(default="", max_length=512)
 
 
 class ParseSheetsInput(SpreadsheetInput):
-    worksheet_name: str
+    worksheet_name: str = Field(min_length=1, max_length=200)
 
 
 class GetPeopleInput(SpreadsheetInput):
-    worksheet_name: str
-    team: str
+    worksheet_name: str = Field(min_length=1, max_length=200)
+    team: str = Field(min_length=1, max_length=200)
 
 
 class RandomMemberPreviewInput(GetPeopleInput):
-    columns: List[str]
+    columns: List[Annotated[str, Field(max_length=200)]] = Field(max_length=50)
 
 
 def resolve_spreadsheet_id(value: Optional[str]) -> str:
@@ -49,8 +49,8 @@ def spreadsheet_metadata(payload: SpreadsheetInput, creds: Credentials = Depends
     try:
         return get_spreadsheet_metadata(creds, target_id)
     except Exception as exc:
-        logger.error("Failed to read spreadsheet metadata: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to read spreadsheet metadata: {str(exc)}") from exc
+        logger.error("Failed to read spreadsheet metadata: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="無法讀取試算表資訊，請稍後再試。") from exc
 
 
 @router.post("/parse-options")
@@ -59,8 +59,8 @@ def parse_sheet_teams(payload: ParseSheetsInput, creds: Credentials = Depends(re
     try:
         return parse_options_from_sheets(creds, target_id, payload.worksheet_name)
     except Exception as exc:
-        logger.error("Failed to parse Google Sheet: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to parse Google Sheet: {str(exc)}") from exc
+        logger.error("Failed to parse Google Sheet: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="無法讀取工作表資料，請稍後再試。") from exc
 
 
 @router.post("/people")
@@ -70,8 +70,8 @@ def get_team_people(payload: GetPeopleInput, creds: Credentials = Depends(requir
         people = get_people_for_team(creds, target_id, payload.worksheet_name, payload.team)
         return {"team": payload.team, "worksheet_name": payload.worksheet_name, "people": people}
     except Exception as exc:
-        logger.error("Failed to read people from sheet: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to read people from sheet: {str(exc)}") from exc
+        logger.error("Failed to read people from sheet: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="無法讀取工作表成員資料，請稍後再試。") from exc
 
 
 @router.post("/random-member-preview")
@@ -80,10 +80,10 @@ def random_member_preview(payload: RandomMemberPreviewInput, creds: Credentials 
     try:
         return get_random_member_preview(creds, target_id, payload.worksheet_name, payload.team, payload.columns)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail="找不到符合條件的工作表成員資料。") from exc
     except Exception as exc:
-        logger.error("Failed to build random member preview: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to build random member preview: {str(exc)}") from exc
+        logger.error("Failed to build random member preview: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="無法建立隨機成員預覽，請稍後再試。") from exc
 
 
 @router.post("/copy-table")
@@ -92,5 +92,5 @@ def copyable_sheet_table(payload: ParseSheetsInput, creds: Credentials = Depends
     try:
         return get_copyable_sheet_table(creds, target_id, payload.worksheet_name)
     except Exception as exc:
-        logger.error("Failed to read copyable Sheet table: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to read Google Sheet: {str(exc)}") from exc
+        logger.error("Failed to read copyable Sheet table: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="無法讀取工作表內容，請稍後再試。") from exc

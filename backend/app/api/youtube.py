@@ -5,9 +5,10 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.params import Depends as DependsMarker
 from google.oauth2.credentials import Credentials
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.app.core.dependencies import require_login_credentials, require_youtube_credentials
+from backend.app.core.request_protection import enforce_workflow_rate_limit
 from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
@@ -31,31 +32,31 @@ router = APIRouter(prefix="/youtube", tags=["YouTube Operations"])
 
 
 class PlaylistItemsInput(BaseModel):
-    playlist_id: Optional[str] = ""
+    playlist_id: Optional[str] = Field(default="", max_length=256)
 
 
 class VideoAssignment(BaseModel):
-    video_id: str
-    person: str
+    video_id: str = Field(min_length=1, max_length=128)
+    person: str = Field(max_length=200)
 
 
 class BatchUpdateInput(BaseModel):
-    spreadsheet_url_or_id: Optional[str] = ""
-    video_type: str = "Video"
-    worksheet_name: str
-    title_column: str
-    description_column: str
-    team: str
-    assignments: List[VideoAssignment]
+    spreadsheet_url_or_id: Optional[str] = Field(default="", max_length=512)
+    video_type: str = Field(default="Video", max_length=32)
+    worksheet_name: str = Field(min_length=1, max_length=200)
+    title_column: str = Field(min_length=1, max_length=200)
+    description_column: str = Field(min_length=1, max_length=200)
+    team: str = Field(min_length=1, max_length=200)
+    assignments: List[VideoAssignment] = Field(min_length=1, max_length=500)
 
 
 class PublishCleanupInput(BaseModel):
-    playlist_id: Optional[str] = ""
+    playlist_id: Optional[str] = Field(default="", max_length=256)
 
 
 class QuotaEstimateInput(BaseModel):
     operation: Literal["youtube.metadata_update", "youtube.publish_cleanup"]
-    item_count: int
+    item_count: int = Field(ge=0, le=500)
 
 
 def _quota_http_exception(exc: YouTubeQuotaUnavailable) -> HTTPException:
@@ -138,7 +139,8 @@ def upload_time_sort_key(video_id: str, details_map, original_positions):
 
 
 @router.get("/quota-usage")
-def get_quota_usage():
+def get_quota_usage(creds: Credentials = Depends(require_login_credentials)):
+    del creds
     try:
         return youtube_quota_tracker.get_usage()
     except YouTubeQuotaUnavailable as exc:
@@ -174,7 +176,7 @@ def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depend
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
     except Exception as exc:
-        logger.error("Failed to fetch YouTube playlist items: %s", exc, exc_info=True)
+        logger.error("Failed to fetch YouTube playlist items: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="讀取 YouTube 播放清單失敗，請稍後再試。") from exc
 
 
@@ -193,12 +195,8 @@ def _youtube_thumbnail(detail: dict, video_id: str) -> str:
 def _safe_workflow_error(exc: Exception) -> str:
     if isinstance(exc, YouTubeQuotaUnavailable):
         return exc.user_message
-    message = str(exc).strip() or type(exc).__name__
-    if len(message) > 240 or any(
-        marker in message.casefold() for marker in ("token", "secret", "authorization", "response body")
-    ):
-        return "YouTube 處理失敗，請檢查設定後重試。"
-    return message
+    del exc
+    return "YouTube 處理失敗，請檢查設定後重試。"
 
 
 def _direct_workflow_response(
@@ -231,6 +229,7 @@ def run_batch_metadata_update(
     payload: BatchUpdateInput,
     creds: Credentials = Depends(require_youtube_credentials),
     sheet_creds: Credentials = Depends(require_login_credentials),
+    _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Validate and update selected videos synchronously, returning one result per video."""
 
@@ -373,12 +372,16 @@ def run_batch_metadata_update(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Batch metadata update failed: %s", type(exc).__name__, exc_info=True)
+        logger.error("Batch metadata update failed: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="執行 YouTube metadata 更新失敗，請稍後再試。") from exc
 
 
 @router.post("/publish-and-cleanup")
-def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = Depends(require_youtube_credentials)):
+def run_publish_and_cleanup(
+    payload: PublishCleanupInput,
+    creds: Credentials = Depends(require_youtube_credentials),
+    _rate_limit: None = Depends(enforce_workflow_rate_limit),
+):
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
 
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
@@ -473,5 +476,5 @@ def run_publish_and_cleanup(payload: PublishCleanupInput, creds: Credentials = D
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Publish cleanup workflow failed: %s", type(exc).__name__, exc_info=True)
+        logger.error("Publish cleanup workflow failed: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="執行 YouTube 公開清理失敗，請稍後再試。") from exc

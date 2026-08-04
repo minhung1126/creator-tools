@@ -503,7 +503,7 @@ class YouTubeQuotaLimiter:
                 )
                 self._save_unlocked(data)
             except _QuotaStorageError as exc:
-                logger.error("YouTube quota storage unavailable during reservation: %s", exc)
+                logger.error("YouTube quota storage unavailable during reservation: %s", type(exc).__name__)
                 raise self._storage_unavailable(method, current_utc) from exc
         return QuotaReservation(uuid4().hex, quota_date, GENERAL_BUCKET, method, cost, reset)
 
@@ -539,7 +539,7 @@ class YouTubeQuotaLimiter:
                 data["updated_at"] = iso_with_offset(current_utc)
                 self._save_unlocked(data)
             except _QuotaStorageError as exc:
-                logger.error("YouTube quota outcome could not be persisted: %s", exc)
+                logger.error("YouTube quota outcome could not be persisted: %s", type(exc).__name__)
                 raise self._storage_unavailable(reservation.method, current_utc) from exc
 
     def record_google_quota_exhausted(self, reservation: QuotaReservation, exc: BaseException) -> None:
@@ -569,7 +569,9 @@ class YouTubeQuotaLimiter:
                 )
                 self._save_unlocked(data)
             except _QuotaStorageError as storage_exc:
-                logger.error("Confirmed YouTube quota exhaustion could not be persisted: %s", storage_exc)
+                logger.error(
+                    "Confirmed YouTube quota exhaustion could not be persisted: %s", type(storage_exc).__name__
+                )
                 raise self._storage_unavailable(reservation.method, now) from storage_exc
 
     def execute(
@@ -603,7 +605,7 @@ class YouTubeQuotaLimiter:
                     error_reason=info.reason or type(exc).__name__,
                 )
             except YouTubeQuotaUnavailable:
-                logger.exception("Unable to persist YouTube quota outcome after request failure")
+                logger.error("Unable to persist YouTube quota outcome after request failure")
             raise
         try:
             self.complete(reservation, outcome="succeeded")
@@ -611,7 +613,7 @@ class YouTubeQuotaLimiter:
             # The reservation itself was durably written before the request.
             # Outcome counters are diagnostic, so avoid making a successful
             # external operation look retryable if only this second write fails.
-            logger.exception("Unable to persist successful YouTube quota outcome")
+            logger.error("Unable to persist successful YouTube quota outcome")
         return response
 
     def record(self, method: str, calls: int = 1) -> dict[str, Any]:
@@ -696,7 +698,7 @@ class YouTubeQuotaLimiter:
                     self._save_unlocked(data)
                 return self._format_usage(data, now=current_utc)
             except _QuotaStorageError as exc:
-                logger.error("YouTube quota storage unavailable while reading usage: %s", exc)
+                logger.error("YouTube quota storage unavailable while reading usage: %s", type(exc).__name__)
                 raise self._storage_unavailable("quota-usage", current_utc) from exc
 
     def assert_can_spend(self, units: int, *, now: datetime | None = None) -> dict[str, Any]:

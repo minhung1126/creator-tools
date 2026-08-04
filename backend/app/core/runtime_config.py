@@ -61,7 +61,7 @@ class RuntimeConfig:
                 shutil.move(str(legacy_root_config), str(self._path))
                 logger.info("Migrated legacy runtime_config.json to %s", self._path)
             except Exception as exc:
-                logger.warning("Failed to migrate legacy runtime config: %s", exc)
+                logger.warning("Failed to migrate legacy runtime config: %s", type(exc).__name__)
 
     def _load(self):
         if not self._path.is_file():
@@ -76,7 +76,7 @@ class RuntimeConfig:
                 self._save()
             logger.info("Loaded runtime config from %s", self._path)
         except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("Failed to load runtime config: %s", exc)
+            logger.warning("Failed to load runtime config: %s", type(exc).__name__)
             self._data = {}
 
     def _save(self):
@@ -88,7 +88,7 @@ class RuntimeConfig:
             tmp_path.replace(self._path)
             logger.info("Saved runtime config to %s", self._path)
         except OSError as exc:
-            logger.error("Failed to save runtime config: %s", exc)
+            logger.error("Failed to save runtime config: %s", type(exc).__name__)
 
     def get(self, key: str, default: Any = "") -> Any:
         with self._lock:

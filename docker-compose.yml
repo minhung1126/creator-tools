@@ -1,10 +1,14 @@
 services:
   creator-tools:
-    image: ghcr.io/minhung1126/creator-tools:latest
-    pull_policy: always
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_COMMIT_SHA: ${APP_COMMIT_SHA:-local}
+    image: creator-tools:local
     container_name: creator_tools
     ports:
-      - "8000:8000"
+      - "127.0.0.1:${HOST_PORT:-8000}:8000"
     env_file:
       - .env
     volumes:

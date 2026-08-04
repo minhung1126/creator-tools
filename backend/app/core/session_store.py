@@ -34,7 +34,10 @@ class SessionStore:
     def __init__(self, path: Path = _DEFAULT_PATH):
         self._path = path
         self._lock = RLock()
-        key_material = settings.CREDENTIAL_ENCRYPTION_KEY or settings.SECRET_KEY
+        # Session payloads and OAuth credentials use the dedicated encryption
+        # key. Production configuration guarantees it is explicit and distinct
+        # from the signing SECRET_KEY.
+        key_material = settings.CREDENTIAL_ENCRYPTION_KEY
         digest = hashlib.sha256(key_material.encode("utf-8")).digest()
         self._fernet = Fernet(base64.urlsafe_b64encode(digest))
         self._data: dict[str, Any] = {"version": 1, "sessions": {}}

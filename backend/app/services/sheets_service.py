@@ -11,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 TEAM_OPTION_SUFFIX = "（全隊）"
 _INVISIBLE_TEXT_CHARS = str.maketrans("", "", "\u200b\u200c\u200d\u2060\ufeff")
+MAX_SHEET_ROWS = 5_000
+MAX_SHEET_COLUMNS = 100
+MAX_CELL_LENGTH = 20_000
+MAX_TOTAL_CELL_CHARS = 2_000_000
+MAX_WORKSHEETS = 100
 
 
 def normalize_text(value: Any) -> Any:
@@ -38,6 +43,28 @@ def quote_sheet_name(sheet_name: str) -> str:
     return "'" + sheet_name.replace("'", "''") + "'"
 
 
+def _validate_sheet_values(values: Any) -> list:
+    if not isinstance(values, list):
+        return []
+    if len(values) > MAX_SHEET_ROWS + 1:
+        raise ValueError("工作表資料列數超過系統上限")
+    max_columns = max((len(row) for row in values if isinstance(row, list)), default=0)
+    if max_columns > MAX_SHEET_COLUMNS:
+        raise ValueError("工作表欄位數超過系統上限")
+    total_cell_chars = 0
+    for row in values:
+        if not isinstance(row, list):
+            continue
+        for cell in row:
+            cell_length = len(str(cell))
+            if cell_length > MAX_CELL_LENGTH:
+                raise ValueError("工作表儲存格內容超過系統上限")
+            total_cell_chars += cell_length
+            if total_cell_chars > MAX_TOTAL_CELL_CHARS:
+                raise ValueError("工作表內容總量超過系統上限")
+    return values
+
+
 def normalize_cell_value(value: Any) -> Any:
     """Normalize string cells so UI options and batch matching use identical values."""
     return normalize_text(value)
@@ -60,7 +87,7 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
     """Read a named range/sheet and return rows as dictionaries keyed by header."""
     try:
         result = service.spreadsheets().values().get(spreadsheetId=spreadsheet_id, range=range_name).execute()
-        rows = result.get("values", [])
+        rows = _validate_sheet_values(result.get("values", []))
         if not rows or len(rows) < 2:
             return []
         header = [normalize_text(col) for col in rows[0]]
@@ -73,15 +100,15 @@ def read_sheet_data(service, spreadsheet_id: str, range_name: str) -> List[Dict[
             parsed_rows.append(row_dict)
         return parsed_rows
     except Exception as exc:
-        logger.error("Error reading sheet range '%s': %s", range_name, exc, exc_info=True)
-        raise RuntimeError(f"無法讀取工作表範圍 {range_name}: {exc}") from exc
+        logger.error("Error reading sheet range: %s", type(exc).__name__)
+        raise RuntimeError("無法讀取工作表資料") from exc
 
 
 def get_sheet_headers(credentials: Credentials, spreadsheet_id_or_url: str, worksheet_name: str) -> List[str]:
     """Return normalized first-row headers for one worksheet."""
     spreadsheet_id = extract_spreadsheet_id(spreadsheet_id_or_url)
     service = get_sheets_service(credentials)
-    values = (
+    values = _validate_sheet_values(
         service.spreadsheets()
         .values()
         .get(
@@ -106,12 +133,15 @@ def get_spreadsheet_metadata(credentials: Credentials, spreadsheet_id_or_url: st
         )
         .execute()
     )
+    raw_sheets = metadata.get("sheets", [])
+    if len(raw_sheets) > MAX_WORKSHEETS:
+        raise ValueError("工作表數量超過系統上限")
     worksheets = []
-    for sheet in metadata.get("sheets", []):
+    for sheet in raw_sheets:
         title = sheet.get("properties", {}).get("title")
         if not title:
             continue
-        values = (
+        values = _validate_sheet_values(
             service.spreadsheets()
             .values()
             .get(
@@ -214,7 +244,7 @@ def get_copyable_sheet_table(
         )
         .execute()
     )
-    values = result.get("values", [])
+    values = _validate_sheet_values(result.get("values", []))
     if not values:
         return {"spreadsheet_id": spreadsheet_id, "worksheet_name": worksheet_name, "columns": [], "rows": []}
 

@@ -8,6 +8,8 @@ from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_quota_service import youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
+MAX_PLAYLIST_ITEMS = 5_000
+MAX_VIDEO_IDS = 5_000
 
 
 def get_youtube_service(credentials: Credentials):
@@ -72,6 +74,8 @@ def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dic
         )
         response = _execute_with_quota(request, "playlistItems.list")
         items.extend(response.get("items", []))
+        if len(items) > MAX_PLAYLIST_ITEMS:
+            raise ValueError("播放清單項目數超過系統上限")
         next_page_token = response.get("nextPageToken")
         if not next_page_token:
             break
@@ -83,6 +87,8 @@ def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[
     video_ids = _deduplicate_video_ids(video_ids)
     if not video_ids:
         return []
+    if len(video_ids) > MAX_VIDEO_IDS:
+        raise ValueError("影片數量超過系統上限")
     service = get_youtube_service(credentials)
     detailed_videos = []
     for i in range(0, len(video_ids), 50):
@@ -243,8 +249,8 @@ def publish_and_remove_playlist_item(
     except YouTubeQuotaUnavailable:
         raise
     except Exception as exc:
-        logger.warning("Failed to delete playlist item %s: %s", playlist_item_id, exc)
-        playlist_cleanup = {"error": str(exc)}
+        logger.warning("Failed to delete playlist item: %s", type(exc).__name__)
+        playlist_cleanup = {"error": "YouTube 播放清單清理失敗"}
     return {
         "video": update_result,
         "playlist_cleanup": playlist_cleanup,
