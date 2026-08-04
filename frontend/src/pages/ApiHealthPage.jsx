@@ -11,15 +11,15 @@ export default function ApiHealthPage() {
   }, []);
 
   return (
-    <div className="section-gap" style={{ maxWidth: 1240 }}>
-      <div className="section-header" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+    <div className="section-gap api-health-page">
+      <div className="page-header-row">
         <div>
-          <h1 style={{ fontSize: '1.8rem' }}>API健康度</h1>
+          <h1>API健康度</h1>
           <p className="section-desc">查看 YouTube API 配額估算與目前的安全上限狀態。</p>
         </div>
-        <button className="btn btn-secondary" type="button" onClick={() => setRefreshKey((key) => key + 1)}>
+        <div className="page-actions"><button className="btn btn-secondary" type="button" onClick={() => setRefreshKey((key) => key + 1)}>
           <RefreshCw size={16} />全部更新
-        </button>
+        </button></div>
       </div>
 
       <YouTubeQuotaBanner refreshKey={refreshKey} />

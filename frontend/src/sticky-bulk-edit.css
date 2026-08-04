@@ -1,13 +1,13 @@
 /* Keep the YouTube bulk assignment controls visible while reviewing video cards. */
 .bulk-edit-panel {
   position: sticky;
-  top: 12px;
+  top: 0.75rem;
   z-index: 20;
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.32);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .bulk-edit-panel {
-    top: 8px;
+    top: calc(var(--mobile-shell-offset) + 0.5rem);
   }
 }

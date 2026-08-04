@@ -94,10 +94,10 @@ export default function LoginPage({ initialError }) {
         </div>
 
         {/* Error Alert */}
-        {errorMsg && (
-          <div className="login-error-alert">
-            <AlertCircle size={18} />
-            <div style={{ display: 'grid', gap: 8 }}>
+          {errorMsg && (
+            <div className="login-error-alert">
+              <AlertCircle size={18} />
+              <div className="login-error-content">
               <span>{errorMsg}</span>
               {!loginReady && !checkingConfig && (
                 <button type="button" className="btn btn-secondary" onClick={checkLoginReadiness}>
