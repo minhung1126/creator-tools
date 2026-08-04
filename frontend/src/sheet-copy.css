@@ -2,6 +2,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+  line-height: 1.2;
 }
 .sheet-copy-display-panel {
   display: grid;
@@ -10,7 +12,7 @@
 
 .sheet-copy-display-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  grid-template-columns: minmax(min(100%, 14rem), 1fr) minmax(0, 2fr);
   gap: 18px;
   align-items: start;
 }
@@ -25,6 +27,7 @@
   gap: 12px;
   margin-bottom: 10px;
   color: #fff;
+  flex-wrap: wrap;
 }
 
 .sheet-copy-columns-head span {
@@ -33,6 +36,8 @@
 }
 
 .sheet-copy-columns-head button {
+  min-height: 36px;
+  padding: 6px 4px;
   border: 0;
   background: none;
   color: var(--primary-light, #a5b4fc);
@@ -108,8 +113,20 @@
 
 .sheet-copy-scroll {
   width: 100%;
+  min-width: 0;
   overflow: auto;
-  max-height: calc(100vh - 260px);
+  max-height: calc(100dvh - 260px);
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.sheet-copy-scroll-hint {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .sheet-copy-scroll table {
@@ -213,7 +230,7 @@
   text-align: center;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .sheet-copy-display-grid,
   .sheet-copy-panel > header {
     grid-template-columns: 1fr;
@@ -227,5 +244,15 @@
 
   .sheet-copy-scroll {
     max-height: none;
+  }
+
+  .sheet-copy-scroll-hint {
+    position: sticky;
+    left: 0;
+  }
+
+  .sheet-copy-cell,
+  .sheet-copy-scroll thead th {
+    min-width: 200px;
   }
 }

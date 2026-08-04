@@ -123,7 +123,7 @@ class ErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) { return { hasError: true, error }; }
   componentDidCatch(error, errorInfo) { console.error('ErrorBoundary caught:', error, errorInfo); }
   render() {
-    if (this.state.hasError) return <div className="loading-center" style={{ flexDirection: 'column', gap: '16px' }}><h2 style={{ color: '#f87171' }}>⚠️ 應用程式發生錯誤</h2><p style={{ color: 'var(--text-muted)', maxWidth: '500px', textAlign: 'center' }}>{this.state.error?.message || '發生未預期的錯誤。'}</p><button className="btn btn-primary" onClick={() => window.location.reload()}>重新載入頁面</button></div>;
+    if (this.state.hasError) return <div className="loading-center error-state"><h2>⚠️ 應用程式發生錯誤</h2><p>{this.state.error?.message || '發生未預期的錯誤。'}</p><button className="btn btn-primary" onClick={() => window.location.reload()}>重新載入頁面</button></div>;
     return this.props.children;
   }
 }

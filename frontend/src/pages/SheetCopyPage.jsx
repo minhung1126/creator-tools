@@ -186,11 +186,11 @@ export default function SheetCopyPage({ sysSettings }) {
   const emptyMessage = sourceStale ? '資料來源已修改，請先按刷新套用。' : selectedTeam && !selectedPeople.length ? '目前未勾選人物，沒有符合資料。' : '目前篩選條件沒有資料。';
 
   return (
-    <div className="section-gap">
-      <div>
+    <div className="section-gap sheet-copy-page">
+      <header className="page-header">
         <h1 className="sheet-copy-title"><FileSpreadsheet size={28} /> Sheet 內容複製</h1>
         <p className="section-desc">先確認資料來源與工作表，再選擇團體、人物及要顯示的內容；所有篩選與顯示選項會即時記住，點擊任一儲存格即可原樣複製，包含換行。</p>
-      </div>
+      </header>
 
       <SheetDataSourcePanel spreadsheetId={spreadsheetId} onSpreadsheetIdChange={handleSpreadsheetChange} worksheets={worksheets} worksheetName={worksheetName} onWorksheetChange={handleWorksheetChange} onRefresh={refresh} loading={loading} sourceReady={sourceReady} stale={sourceStale} error={sourceError} />
 
@@ -209,7 +209,7 @@ export default function SheetCopyPage({ sysSettings }) {
       </section>
 
       <section className="glass-panel sheet-copy-panel"><header><div><strong>{filteredRows.length} 列結果</strong><small>點擊儲存格即複製；不顯示遮住頁面的通知。</small></div><span aria-live="polite">{copyStatus}</span></header>
-        {!visibleColumns.length ? <div className="sheet-copy-empty">請至少勾選一個欄位。</div> : !filteredRows.length ? <div className="sheet-copy-empty">{emptyMessage}</div> : <div className="sheet-copy-scroll"><table><thead><tr><th className="row-number">列</th>{visibleColumns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{filteredRows.map((row) => <tr key={row.row_number}><th className="row-number">{row.row_number}</th>{visibleColumns.map((column) => { const id = `${row.row_number}:${column.key}`; const copied = copiedCell === id; const value = String(row.cells[column.index] ?? ''); return <td key={column.key}><button type="button" className={`sheet-copy-cell ${copied ? 'copied' : ''}`} onClick={() => handleCopy(row, column)}><span>{value || <em>（空白）</em>}</span><small>{copied ? <><Check size={14} /> 已複製</> : <><Clipboard size={14} /> 複製</>}</small></button></td>; })}</tr>)}</tbody></table></div>}
+        {!visibleColumns.length ? <div className="sheet-copy-empty">請至少勾選一個欄位。</div> : !filteredRows.length ? <div className="sheet-copy-empty">{emptyMessage}</div> : <><div className="sheet-copy-scroll-hint" role="note">左右滑動查看完整欄位；列號固定在左側。</div><div className="sheet-copy-scroll"><table><thead><tr><th className="row-number">列</th>{visibleColumns.map((column) => <th key={column.key}>{column.label}</th>)}</tr></thead><tbody>{filteredRows.map((row) => <tr key={row.row_number}><th className="row-number">{row.row_number}</th>{visibleColumns.map((column) => { const id = `${row.row_number}:${column.key}`; const copied = copiedCell === id; const value = String(row.cells[column.index] ?? ''); return <td key={column.key}><button type="button" className={`sheet-copy-cell ${copied ? 'copied' : ''}`} onClick={() => handleCopy(row, column)}><span>{value || <em>（空白）</em>}</span><small>{copied ? <><Check size={14} /> 已複製</> : <><Clipboard size={14} /> 複製</>}</small></button></td>; })}</tr>)}</tbody></table></div></>}
       </section>
     </div>
   );

@@ -99,14 +99,14 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   };
 
   const metadataBlock = (title, description) => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div className="metadata-block">
       <div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '3px' }}>標題</div>
-        <div style={{ fontSize: '0.95rem', color: '#fff', fontWeight: 600 }}>{title || '無標題影片'}</div>
+        <div className="metadata-label">標題</div>
+        <div className="metadata-title">{title || '無標題影片'}</div>
       </div>
       <div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginBottom: '3px' }}>描述</div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.55 }}>
+        <div className="metadata-label">描述</div>
+        <div className="metadata-description">
           {description || '（無描述）'}
         </div>
       </div>
@@ -114,7 +114,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   );
 
   return (
-    <div className="section-gap">
+    <div className="section-gap publish-cleaner-page">
       <ConfirmDialog
         open={confirmOpen}
         title="確認公開並清理清單"
@@ -126,22 +126,22 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
         onCancel={() => setConfirmOpen(false)}
       />
 
-      <div>
+      <header className="page-header">
         <div className="section-header">
           <Send size={24} color="var(--secondary)" />
-          <h1 style={{ fontSize: '1.8rem' }}>YouTube｜公開 To-Post 影片並清理清單</h1>
+          <h1>YouTube｜公開 To-Post 影片並清理清單</h1>
         </div>
         <p className="section-desc">
           讀取待發布影片後，依 YouTube 上傳時間由最早到最晚顯示與處理；執行時才呼叫必要的 YouTube API 完成公開與移出清單。
         </p>
-      </div>
+      </header>
 
-      <div className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-        <div className="form-group" style={{ flex: 1, minWidth: '280px' }}>
+      <div className="glass-panel card-padding toolbar publish-source-panel">
+        <div className="form-group publish-source-field">
           <label className="form-label"><PlaySquare size={14} /> To-Post 播放清單 ID</label>
           <SourceLinkInput type="text" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID" />
         </div>
-        <button className="btn btn-primary" onClick={handleLoadPlaylist} disabled={loading} style={{ marginTop: 'auto', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+        <button className="btn btn-primary publish-action-button" onClick={handleLoadPlaylist} disabled={loading}>
           <RefreshCw size={16} className={loading ? 'spin' : ''} />
           {loading ? '讀取中...' : '讀取 To-Post 播放清單'}
         </button>
@@ -160,42 +160,42 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       {errorMsg && <div className="glass-panel error-alert"><AlertTriangle size={20} /><span>{errorMsg}</span></div>}
 
       {videos.length > 0 && (
-        <div className="section-gap" style={{ gap: '20px' }}>
-          <div className="glass-panel" style={{ padding: '24px', borderLeft: '4px solid var(--secondary)' }}>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '8px' }}>確認公開並移除 {videos.length} 支影片</h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6 }}>
+        <div className="section-gap publish-workflow">
+          <div className="glass-panel card-padding publish-summary-panel">
+            <h2>確認公開並移除 {videos.length} 支影片</h2>
+            <p>
               系統會依下方上傳時間順序逐支設為<strong>「公開（Public）」</strong>，成功後再從 To-Post 播放清單移除。移出播放清單不會刪除影片。
             </p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <h3 style={{ fontSize: '1.1rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div className="publish-list">
+            <h3 className="publish-list-heading">
               <ListOrdered size={18} /> 待處理影片清單（上傳時間：最早 → 最晚）：
             </h3>
             {videos.map((video, index) => (
-              <div key={video.video_id} className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--secondary)', minWidth: '40px', paddingTop: '4px' }}>#{index + 1}</span>
+              <div key={video.video_id} className="glass-panel publish-item">
+                <span className="publish-item-index">#{index + 1}</span>
                 {video.thumbnail_url && <img className="publish-cleaner-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} />}
-                <div style={{ flex: 1, minWidth: '260px' }}>
+                <div className="publish-item-content">
                   {metadataBlock(video.title, video.description)}
-                  <div style={{ marginTop: '8px' }}>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>ID: {video.video_id}</span>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-dim)', marginLeft: '12px' }}>
+                  <div className="publish-item-meta">
+                    <span>ID: {video.video_id}</span>
+                    <span>
                       上傳時間：{video.published_at ? new Date(video.published_at).toLocaleString() : '未提供（排在最後）'}
                     </span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px' }}>
+                <div className="publish-item-status">
                   <span className="badge badge-info"><Globe size={12} /> 將設為公開</span>
-                  <span className="badge badge-info" style={{ background: 'rgba(236, 72, 153, 0.15)', color: '#f472b6', borderColor: 'rgba(236, 72, 153, 0.3)' }}><Trash2 size={12} /> 移出清單</span>
+                  <span className="badge badge-info publish-remove-badge"><Trash2 size={12} /> 移出清單</span>
                 </div>
               </div>
             ))}
           </div>
 
           <div className="glass-panel execution-bar">
-            <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>確認上傳時間、標題與描述無誤後，啟動發布流程：</span>
-            <button className="btn btn-primary" onClick={requestPublish} disabled={executing || estimateLoading} style={{ padding: '12px 32px', fontSize: '1.05rem', background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)' }}>
+            <span>確認上傳時間、標題與描述無誤後，啟動發布流程：</span>
+            <button className="btn btn-primary publish-action-button" onClick={requestPublish} disabled={executing || estimateLoading}>
               <Send size={18} /> {executing ? '逐支發布並清理中...' : '確認公開並移出 To-Post'}
             </button>
           </div>
@@ -203,18 +203,18 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       )}
 
       {result && (
-        <div className="glass-panel" style={{ padding: '24px', border: '1px solid rgba(236, 72, 153, 0.4)', background: 'rgba(15, 23, 42, 0.95)' }}>
-          <h3 style={{ fontSize: '1.3rem', color: result.completed ? '#f472b6' : '#fbbf24', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><CheckCircle2 size={22} /> {result.completed ? '公開與清理已執行完成' : '公開與清理部分完成'}</h3>
-          <p style={{ color: 'var(--text-muted)' }}>共 {result.total_count || 0} 支：成功 {result.succeeded_count || 0}、警告 {result.warning_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。</p>
-          {result.quota_blocked && <div className="info-banner" style={{ marginTop: 12 }}><AlertTriangle size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新讀取播放清單並送出。</span></div>}
-          {result.results && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 16 }}>
+        <div className="glass-panel card-padding publish-result-panel card-stack">
+          <h3 className={result.completed ? 'result-heading result-heading-publish-success' : 'result-heading result-heading-warning'}><CheckCircle2 size={22} /> {result.completed ? '公開與清理已執行完成' : '公開與清理部分完成'}</h3>
+          <p className="section-desc">共 {result.total_count || 0} 支：成功 {result.succeeded_count || 0}、警告 {result.warning_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。</p>
+          {result.quota_blocked && <div className="info-banner"><AlertTriangle size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新讀取播放清單並送出。</span></div>}
+          {result.results && <div className="publish-result-list">
             {result.results.map((item, index) => (
-              <div key={`${item.video_id}-${index}`} className="result-item" style={{ alignItems: 'flex-start', background: item.status === 'failed' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(236, 72, 153, 0.1)' }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <strong style={{ color: '#fff' }}>#{index + 1}</strong>
-                  <div style={{ marginTop: '6px' }}>{metadataBlock(item.title, item.description)}</div>
-                  <div style={{ color: 'var(--text-dim)', fontSize: '0.78rem', marginTop: '8px' }}>ID: {item.video_id}</div>
-                  {item.reason && <div style={{ color: item.status === 'failed' ? '#f87171' : '#fbbf24', fontSize: '0.8rem', marginTop: '4px' }}>說明：{item.reason}</div>}
+              <div key={`${item.video_id}-${index}`} className={`result-item result-row publish-result-item ${item.status === 'failed' ? 'publish-result-item-failed' : 'publish-result-item-success'}`}>
+                <div>
+                  <strong>#{index + 1}</strong>
+                  <div className="publish-result-metadata">{metadataBlock(item.title, item.description)}</div>
+                  <div className="result-meta">ID: {item.video_id}</div>
+                  {item.reason && <div className={item.status === 'failed' ? 'result-reason result-reason-failed' : 'result-reason'}>說明：{item.reason}</div>}
                 </div>
                 <span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>{item.status === 'succeeded' ? '完成' : item.status === 'succeeded_with_warnings' ? '完成但有警告' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}</span>
               </div>

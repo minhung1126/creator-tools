@@ -22,7 +22,7 @@ function ToastItem({ toast, onRemove }) {
   };
 
   return (
-    <div className={`toast-item toast-${toast.type} ${exiting ? 'toast-exit' : ''}`}>
+    <div className={`toast-item toast-${toast.type} ${exiting ? 'toast-exit' : ''}`} role={toast.type === 'error' ? 'alert' : 'status'}>
       <Icon size={18} />
       <span className="toast-message">{toast.message}</span>
       <button type="button" className="toast-close" aria-label="關閉通知" onClick={close}>
@@ -61,7 +61,7 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={toast}>
       {children}
-      <div className="toast-container">
+      <div className="toast-container" aria-live="polite" aria-atomic="false">
         {toasts.map((item) => <ToastItem key={item.id} toast={item} onRemove={removeToast} />)}
       </div>
     </ToastContext.Provider>
