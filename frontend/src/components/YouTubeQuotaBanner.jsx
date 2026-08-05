@@ -3,10 +3,10 @@ import { Activity, AlertTriangle, Clock3, Database, RefreshCw, ShieldAlert } fro
 import { api } from '../services/api';
 
 const STATE_STYLE = {
-  normal: { color: '#818cf8', background: 'rgba(99, 102, 241, 0.14)', border: 'rgba(99, 102, 241, 0.35)', label: '正常' },
-  warning: { color: '#fbbf24', background: 'rgba(245, 158, 11, 0.14)', border: 'rgba(245, 158, 11, 0.38)', label: '接近安全上限' },
-  safety_blocked: { color: '#fb923c', background: 'rgba(249, 115, 22, 0.16)', border: 'rgba(249, 115, 22, 0.42)', label: '已達安全上限' },
-  confirmed_exhausted: { color: '#f87171', background: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.45)', label: 'Google 已確認用完' },
+  normal: { color: '#aeb9e7', background: '#292d44', border: '#4e5b86', label: '正常' },
+  warning: { color: '#d6b377', background: '#352d20', border: '#685333', label: '接近安全上限' },
+  safety_blocked: { color: '#d8ae83', background: '#362b23', border: '#6a503b', label: '已達安全上限' },
+  confirmed_exhausted: { color: '#d49393', background: '#332426', border: '#624044', label: 'Google 已確認用完' },
 };
 
 function formatPacificReset(value) {
@@ -56,7 +56,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
   }
 
   if (error && !usage) {
-    return <div className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}><span style={{ color: '#f87171', fontSize: '0.86rem' }}>YouTube quota 估算讀取失敗：{error}</span><button type="button" className="btn" onClick={loadUsage} style={{ padding: '6px 10px' }}><RefreshCw size={14} />重試</button></div>;
+    return <div className="glass-panel" style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}><span style={{ color: '#d49393', fontSize: '0.86rem' }}>YouTube quota 估算讀取失敗：{error}</span><button type="button" className="btn" onClick={loadUsage} style={{ padding: '6px 10px' }}><RefreshCw size={14} />重試</button></div>;
   }
 
   const style = STATE_STYLE[usage?.state] || STATE_STYLE.normal;
@@ -68,7 +68,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
   const confirmed = usage?.state === 'confirmed_exhausted' || usage?.confirmed_by_google;
 
   return (
-    <div className="glass-panel" style={{ padding: compact ? '12px 15px' : '18px 20px', border: `1px solid ${style.border}`, background: `linear-gradient(135deg, ${style.background}, rgba(15, 23, 42, 0.92))` }}>
+    <div className="glass-panel" style={{ padding: compact ? '12px 15px' : '18px 20px', border: `1px solid ${style.border}`, background: style.background }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
           <div style={{ padding: '9px', borderRadius: '10px', background: style.background, display: 'flex' }}>
@@ -76,10 +76,10 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
-              <strong style={{ color: '#fff', fontSize: '1rem' }}>YouTube API 今日估算用量</strong>
+              <strong style={{ color: 'var(--text-main)', fontSize: '1rem' }}>YouTube API 今日估算用量</strong>
               <span className="badge" style={{ color: style.color, borderColor: style.border, background: style.background }}>{style.label}</span>
             </div>
-            <div style={{ marginTop: '5px', color: '#fff', fontSize: '1.35rem', fontWeight: 700 }}>
+            <div style={{ marginTop: '5px', color: 'var(--text-main)', fontSize: '1.35rem', fontWeight: 700 }}>
               {units(used)} / {units(limit)}
               <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 500, marginLeft: '7px' }}>units（Creator Tools 估算）</span>
             </div>
@@ -88,7 +88,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
         <button type="button" className="btn" onClick={loadUsage} disabled={loading} style={{ padding: '7px 11px' }}><RefreshCw size={14} className={loading ? 'spin' : ''} />更新</button>
       </div>
 
-      {!compact && <div style={{ height: '8px', borderRadius: '999px', background: 'rgba(148, 163, 184, 0.16)', overflow: 'hidden', marginTop: '14px' }}><div style={{ height: '100%', width: `${percent}%`, background: `linear-gradient(90deg, ${style.color}, #ec4899)`, transition: 'width 180ms ease' }} /></div>}
+      {!compact && <div style={{ height: '8px', borderRadius: '999px', background: '#303940', overflow: 'hidden', marginTop: '14px' }}><div style={{ height: '100%', width: `${percent}%`, background: style.color, transition: 'width 180ms ease' }} /></div>}
 
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginTop: compact ? '8px' : '12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Database size={14} />系統可用 {units(effective)} units（安全 cap {units(policyCap)}）</span>
@@ -96,8 +96,8 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Clock3 size={14} />官方重設：{formatPacificReset(usage?.reset_at)} PT；本地時間：{formatLocalReset(usage?.reset_at)}</span>
       </div>
 
-      {confirmed && <div style={{ marginTop: '12px', color: '#fecaca', fontSize: '0.85rem', display: 'flex', gap: '7px', alignItems: 'flex-start' }}><AlertTriangle size={16} /><span>Google 已確認 `quotaExceeded`；系統已停止新的 YouTube request，直到官方重設。Google Cloud project 的其他應用程式也可能消耗額度。</span></div>}
-      {!confirmed && usage?.state === 'safety_blocked' && <div style={{ marginTop: '12px', color: '#fed7aa', fontSize: '0.85rem' }}>Creator Tools 已達自訂安全上限，等待官方重設後自動恢復。</div>}
+      {confirmed && <div style={{ marginTop: '12px', color: '#dca3a3', fontSize: '0.85rem', display: 'flex', gap: '7px', alignItems: 'flex-start' }}><AlertTriangle size={16} /><span>Google 已確認 `quotaExceeded`；系統已停止新的 YouTube request，直到官方重設。Google Cloud project 的其他應用程式也可能消耗額度。</span></div>}
+      {!confirmed && usage?.state === 'safety_blocked' && <div style={{ marginTop: '12px', color: '#d8ae83', fontSize: '0.85rem' }}>Creator Tools 已達自訂安全上限，等待官方重設後自動恢復。</div>}
 
       {!compact && usage?.methods?.length > 0 && <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>{usage.methods.map((item) => <span key={`${item.method}-${item.cost_per_call}`} className="badge badge-info" style={{ fontSize: '0.72rem' }}>{item.method}: {item.calls} 次 × {item.cost_per_call} = {units(item.units)} units</span>)}</div>}
       {!compact && <p style={{ marginTop: '10px', color: 'var(--text-dim)', fontSize: '0.72rem', lineHeight: 1.5 }}>{usage?.note || '本數字只統計 Creator Tools，屬於估算，不是 Google 官方即時 project usage。'}{usage?.quota_rules_verified_at ? ` 官方規則核對日期：${usage.quota_rules_verified_at}。` : ''}</p>}

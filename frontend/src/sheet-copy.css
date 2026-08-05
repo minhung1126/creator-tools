@@ -26,7 +26,7 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
-  color: #fff;
+  color: var(--text-main);
   flex-wrap: wrap;
 }
 
@@ -40,7 +40,7 @@
   padding: 6px 4px;
   border: 0;
   background: none;
-  color: var(--primary-light, #a5b4fc);
+  color: var(--primary-light, #aeb9e7);
   cursor: pointer;
   font: inherit;
   font-size: 0.8rem;
@@ -65,16 +65,16 @@
   padding: 10px 12px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.025);
+  background: #20272e;
   color: var(--text-muted);
   cursor: pointer;
   overflow-wrap: anywhere;
 }
 
 .sheet-copy-column-grid label.selected {
-  border-color: rgba(99, 102, 241, 0.55);
-  background: rgba(99, 102, 241, 0.1);
-  color: #fff;
+  border-color: #59658e;
+  background: #272d43;
+  color: var(--text-main);
 }
 
 .sheet-copy-panel {
@@ -97,7 +97,7 @@
 }
 
 .sheet-copy-panel > header strong {
-  color: #fff;
+  color: var(--text-main);
 }
 
 .sheet-copy-panel > header small {
@@ -123,7 +123,7 @@
 .sheet-copy-scroll-hint {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(99, 102, 241, 0.08);
+  background: #242b38;
   color: var(--text-muted);
   font-size: 0.78rem;
   line-height: 1.5;
@@ -150,8 +150,8 @@
   min-width: 220px;
   max-width: 420px;
   padding: 12px 14px;
-  background: rgba(18, 24, 36, 0.98);
-  color: #fff;
+  background: #20272e;
+  color: var(--text-main);
   text-align: left;
 }
 
@@ -162,7 +162,7 @@
   min-width: 58px;
   width: 58px;
   padding: 12px 10px;
-  background: rgba(18, 24, 36, 0.98);
+  background: #20272e;
   color: var(--text-dim);
   text-align: center;
 }
@@ -191,13 +191,13 @@
 .sheet-copy-cell:hover,
 .sheet-copy-cell:focus-visible {
   outline: none;
-  background: rgba(99, 102, 241, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.45);
+  background: #272d43;
+  box-shadow: inset 0 0 0 1px #59658e;
 }
 
 .sheet-copy-cell.copied {
-  background: rgba(16, 185, 129, 0.09);
-  box-shadow: inset 0 0 0 1px rgba(16, 185, 129, 0.5);
+  background: #1d302a;
+  box-shadow: inset 0 0 0 1px #3f695a;
 }
 
 .sheet-copy-cell > span {

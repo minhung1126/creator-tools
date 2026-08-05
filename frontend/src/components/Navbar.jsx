@@ -70,7 +70,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
   const item = (value, child = false) => {
     const Icon = value.icon;
     const active = activeTab === value.id;
-    return <button key={value.id} type="button" className={`nav-item${child ? ' nav-item-child' : ''}${active ? ' active' : ''}`} onClick={() => setActiveTab(value.id)} title={value.label} aria-current={active ? 'page' : undefined}>
+    return <button key={value.id} type="button" className={`nav-item${child ? ' nav-item-child' : ''}${active ? ' active' : ''}`} data-nav-id={value.id} onClick={() => setActiveTab(value.id)} title={value.label} aria-current={active ? 'page' : undefined}>
       <Icon size={child ? 16 : 18} aria-hidden="true" /><span>{value.label}</span>
     </button>;
   };
@@ -78,7 +78,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
   const group = (id, label, Icon, open, setOpen, items) => {
     const groupActive = items.some((i) => i.id === activeTab);
     return <div className="nav-group">
-      <button type="button" className={`nav-item nav-group-toggle${groupActive ? ' active' : ''}`} onClick={() => setOpen(!open)} title={label} aria-expanded={open} aria-controls={`${id}-submenu`}>
+      <button type="button" className={`nav-item nav-group-toggle${groupActive ? ' active' : ''}`} data-nav-id={id} onClick={() => setOpen(!open)} title={label} aria-expanded={open} aria-controls={`${id}-submenu`}>
         <Icon size={18} aria-hidden="true" /><span>{label}</span><ChevronDown className="nav-group-chevron" size={16} aria-hidden="true" />
       </button>
       {open && <div id={`${id}-submenu`} className="nav-submenu">{items.map((i) => item(i, true))}</div>}

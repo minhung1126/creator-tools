@@ -61,7 +61,7 @@ export default function LoginPage({ initialError }) {
         {/* Header Branding */}
         <div className="login-header">
           <div className="login-logo-box">
-            <Video size={36} color="#ffffff" />
+            <Video size={36} color="var(--text-main)" />
           </div>
           <h1 className="login-title">Creator Tools</h1>
           <p className="login-subtitle">創作者自動化控制台系統</p>
