@@ -27,6 +27,7 @@ _PERSISTABLE_FIELDS = {
     "youtube_quota_safety_buffer_units",
     "youtube_draft_video_config",
     "youtube_draft_shorts_config",
+    "shared_team_person_filter",
 }
 
 # These values are intentionally configured only from the authenticated UI.

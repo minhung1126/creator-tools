@@ -215,17 +215,17 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
       <section className="glass-panel card-padding settings-card card-stack">
         <div>
           <h2 className="settings-heading">YouTube 草稿工作流設定</h2>
-          <p className="section-desc">Video 與 Shorts 的工作表、欄位、團體、人物篩選與工作流資源，會在各自功能頁編輯並自動保存。</p>
+          <p className="section-desc">Video 與 Shorts 的工作表、欄位與工作流資源會分別保存；Sheet 內容複製、Video、Shorts 共用團體與人物篩選。</p>
         </div>
         <div className="responsive-grid youtube-workflow-grid">
           <div className="glass-panel youtube-workflow-card card-stack">
             <h3 className="youtube-workflow-heading"><Clapperboard size={18} /> Video 草稿</h3>
-            <p className="section-desc">管理 Video 專屬工作表、欄位與人物選項。</p>
+            <p className="section-desc">管理 Video 專屬工作表與欄位，人物篩選會與其他流程共用。</p>
             <button className="btn btn-secondary settings-inline-button" type="button" onClick={() => setActiveTab('youtube_video_drafts')}>前往 Video 設定 <ArrowRight size={16} /></button>
           </div>
           <div className="glass-panel youtube-workflow-card card-stack">
             <h3 className="youtube-workflow-heading"><Smartphone size={18} /> Shorts 草稿</h3>
-            <p className="section-desc">管理 Shorts 專屬工作表、欄位與人物選項。</p>
+            <p className="section-desc">管理 Shorts 專屬工作表與欄位，人物篩選會與其他流程共用。</p>
             <button className="btn btn-secondary settings-inline-button" type="button" onClick={() => setActiveTab('youtube_shorts_drafts')}>前往 Shorts 設定 <ArrowRight size={16} /></button>
           </div>
         </div>

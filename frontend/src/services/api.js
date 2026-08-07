@@ -70,6 +70,11 @@ export const api = {
   updateSharedSettings: (payload) => request('/settings/shared', { method: 'PUT', body: JSON.stringify(payload) }),
   getYoutubeSettings: () => request('/settings/youtube'),
   updateYoutubeSettings: (payload) => request('/settings/youtube', { method: 'PUT', body: JSON.stringify(payload) }),
+  getTeamPersonFilter: () => request('/settings/team-person-filter'),
+  updateTeamPersonFilter: ({ team = '', selectedPeople = [] }) => request('/settings/team-person-filter', {
+    method: 'PUT',
+    body: JSON.stringify({ team, selected_people: selectedPeople }),
+  }),
   getYoutubeDraftSettings: () => request('/settings/youtube-drafts'),
   updateYoutubeDraftSettings: (videoType, config) => request('/settings/youtube-drafts', { method: 'PUT', body: JSON.stringify({ video_type: videoType, config }) }),
   getSpreadsheetMetadata: (spreadsheetUrlOrId) => request('/sheets/metadata', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId }) }),

@@ -4,7 +4,9 @@ import { api } from '../services/api';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
 import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
 import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
+import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFilterPersistence';
 import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
+import { readSharedTeamPersonFilter, stripTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 
 const STORAGE_KEY = 'creator-tools.sheet-copy.v1';
 
@@ -30,7 +32,10 @@ async function copyText(text) {
 
 export default function SheetCopyPage({ sysSettings }) {
   const saved = useMemo(loadSaved, []);
-  const savedSelectedPeople = migrateSelectedPeople(saved);
+  const sharedFilter = useMemo(
+    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter),
+    [sysSettings.shared_team_person_filter],
+  );
   const initialSpreadsheetId = saved.spreadsheetId || sysSettings.default_spreadsheet_id || '';
   const [spreadsheetId, setSpreadsheetId] = useState(initialSpreadsheetId);
   const [appliedSpreadsheetId, setAppliedSpreadsheetId] = useState(initialSpreadsheetId);
@@ -44,6 +49,7 @@ export default function SheetCopyPage({ sysSettings }) {
   const [query, setQuery] = useState(saved.query || '');
   const [loading, setLoading] = useState(false);
   const [sourceError, setSourceError] = useState('');
+  const [sharedFilterSaveError, setSharedFilterSaveError] = useState('');
   const [copiedCell, setCopiedCell] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
   const initialLoadRequestedRef = useRef(false);
@@ -54,8 +60,8 @@ export default function SheetCopyPage({ sysSettings }) {
     source: appliedSpreadsheetId,
     worksheetName,
     enabled: sourceReady,
-    initialTeam: saved.team || '',
-    initialSelectedPeople: savedSelectedPeople,
+    initialTeam: sharedFilter.exists ? sharedFilter.team : (saved.team || ''),
+    initialSelectedPeople: sharedFilter.exists ? sharedFilter.selectedPeople : migrateSelectedPeople(saved),
     defaultTeam: 'none',
     refreshKey: sourceRevision,
   });
@@ -72,21 +78,25 @@ export default function SheetCopyPage({ sysSettings }) {
     error: teamPersonError,
   } = teamPersonFilter;
 
+  const filterPersistenceReady = sourceReady && (!worksheetName || (teamPersonReady && !loadingPeople));
+
+  useSharedTeamPersonFilterPersistence({
+    team: selectedTeam,
+    selectedPeople,
+    ready: filterPersistenceReady,
+    onError: setSharedFilterSaveError,
+  });
+
   useEffect(() => {
     const savedState = loadSaved();
-    const selectionsReady = sourceReady && (!worksheetName || (teamPersonReady && !loadingPeople));
     writePersistentJson(STORAGE_KEY, {
-      ...savedState,
+      ...(filterPersistenceReady ? stripTeamPersonFilter(savedState) : savedState),
       spreadsheetId,
       worksheetName,
       visibleKeys,
-      team: selectionsReady ? selectedTeam : (savedState.team ?? selectedTeam),
-      selectedPeople: selectionsReady
-        ? selectedPeople
-        : (Array.isArray(savedState.selectedPeople) ? savedState.selectedPeople : selectedPeople),
       query,
     });
-  }, [loadingPeople, query, selectedPeople, selectedTeam, sourceReady, spreadsheetId, teamPersonReady, visibleKeys, worksheetName]);
+  }, [filterPersistenceReady, query, spreadsheetId, visibleKeys, worksheetName]);
 
   useEffect(() => {
     if (!copiedCell) return undefined;
@@ -195,6 +205,7 @@ export default function SheetCopyPage({ sysSettings }) {
       <SheetDataSourcePanel spreadsheetId={spreadsheetId} onSpreadsheetIdChange={handleSpreadsheetChange} worksheets={worksheets} worksheetName={worksheetName} onWorksheetChange={handleWorksheetChange} onRefresh={refresh} loading={loading} sourceReady={sourceReady} stale={sourceStale} error={sourceError} />
 
       <TeamPersonFilterPanel teams={sourceStale ? [] : teams} selectedTeam={sourceStale ? '' : selectedTeam} onTeamChange={setSelectedTeam} people={sourceStale ? [] : people} selectedPeople={sourceStale ? [] : selectedPeople} onSelectedPeopleChange={setSelectedPeople} loadingTeams={loadingTeams} loadingPeople={loadingPeople} error={teamPersonError} disabled={sourceStale || !sourceReady} teamEmptyLabel="全部團體" peopleDisabledMessage="未選定團體時顯示全部團體；請選擇團體後再篩選人物。" description="未選定團體時顯示全部團體；選定團體後只顯示已勾選的人物。" />
+      {sharedFilterSaveError && <div className="filter-panel-status filter-panel-status-error" role="alert">{sharedFilterSaveError}；本機快取仍已保留。</div>}
 
       <section className="glass-panel card-padding sheet-copy-display-panel">
         <div className="filter-panel-header"><div><strong><Search size={17} aria-hidden="true" />顯示內容</strong><p>搜尋目前顯示欄位，並選擇要保留在資料表中的欄位。</p></div></div>

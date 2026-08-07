@@ -48,8 +48,17 @@ class YouTubeDraftConfigModel(BaseModel):
     worksheet_name: str = Field(default="", max_length=200)
     title_column: str = Field(default="", max_length=200)
     description_column: str = Field(default="", max_length=200)
+
+
+class TeamPersonFilterModel(BaseModel):
     team: str = Field(default="", max_length=200)
-    enabled_people: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=200)
+    selected_people: List[Annotated[str, Field(max_length=200)]] = Field(default_factory=list, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_values(self):
+        self.team = self.team.strip()
+        self.selected_people = list(dict.fromkeys(person.strip() for person in self.selected_people if person.strip()))
+        return self
 
 
 class YouTubeDraftConfigUpdateModel(BaseModel):
@@ -73,6 +82,34 @@ def _read_draft_config(video_type: str) -> Dict:
     except (TypeError, json.JSONDecodeError):
         logger.warning("Ignoring invalid persisted %s draft config", video_type)
         return {}
+
+
+def _clean_draft_config(config: Dict) -> Dict:
+    cleaned = dict(config)
+    cleaned.pop("team", None)
+    cleaned.pop("enabled_people", None)
+    return cleaned
+
+
+def _read_legacy_team_person_filter() -> tuple[Dict, bool]:
+    for video_type in ("Video", "Shorts"):
+        config = _read_draft_config(video_type)
+        team = config.get("team")
+        people = config.get("enabled_people")
+        if team or people:
+            value = TeamPersonFilterModel(team=team or "", selected_people=people or [])
+            return value.model_dump(), True
+    return TeamPersonFilterModel().model_dump(), False
+
+
+def _read_team_person_filter() -> tuple[Dict, bool]:
+    raw = runtime_config.get("shared_team_person_filter", None)
+    if isinstance(raw, dict):
+        try:
+            return TeamPersonFilterModel.model_validate(raw).model_dump(), True
+        except ValueError:
+            logger.warning("Ignoring invalid persisted shared team/person filter")
+    return _read_legacy_team_person_filter()
 
 
 @router.get("/shared")
@@ -145,7 +182,10 @@ def update_youtube_settings(
 @router.get("/youtube-drafts")
 def get_youtube_draft_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
-    return {"video": _read_draft_config("Video"), "shorts": _read_draft_config("Shorts")}
+    return {
+        "video": _clean_draft_config(_read_draft_config("Video")),
+        "shorts": _clean_draft_config(_read_draft_config("Shorts")),
+    }
 
 
 @router.put("/youtube-drafts")
@@ -158,3 +198,19 @@ def update_youtube_draft_settings(
     runtime_config.set(key, value)
     logger.info("YouTube %s draft settings updated", payload.video_type)
     return {"status": "success", "video_type": payload.video_type, "config": value}
+
+
+@router.get("/team-person-filter")
+def get_team_person_filter(creds: Credentials = Depends(require_login_credentials)):
+    del creds
+    value, configured = _read_team_person_filter()
+    return {"configured": configured, **value}
+
+
+@router.put("/team-person-filter")
+def update_team_person_filter(payload: TeamPersonFilterModel, creds: Credentials = Depends(require_login_credentials)):
+    del creds
+    value = payload.model_dump()
+    runtime_config.set("shared_team_person_filter", value)
+    logger.info("Shared team/person filter updated")
+    return {"configured": True, **value}

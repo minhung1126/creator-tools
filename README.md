@@ -14,7 +14,7 @@
    - 工作流程設定會持久化儲存；敏感 token / secret 不會由設定 API 回傳前端。
 
 2. **📝 YouTube Video / Shorts 草稿管理**
-   - Video 與 Shorts 使用獨立頁面，各自記住工作表、欄位、團體與人物篩選。
+   - Video 與 Shorts 使用獨立頁面，各自記住工作表與欄位；Sheet 內容複製、Video、Shorts 共用同一組團體與人物篩選。
    - 人物與全隊選項依 Google Sheet 原始列順序顯示。
    - 支援逐片選人、批量勾選套用、隨機人物欄位抽查與縮圖放大預覽。
    - 安全保留 YouTube 既有 categoryId、tags 等 metadata。

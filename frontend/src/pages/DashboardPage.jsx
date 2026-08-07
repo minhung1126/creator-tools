@@ -17,7 +17,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
       <header className="glass-panel dashboard-hero page-header">
         <div className="badge badge-info dashboard-eyebrow"><Sparkles size={14} /> 創作者自動化工作流系統</div>
         <h1>Creator Tools 控制台</h1>
-        <p className="section-desc dashboard-hero-description">Video 與 Shorts 草稿分開管理，可各自選擇工作表、標題欄位、描述欄位與人物選項。</p>
+        <p className="section-desc dashboard-hero-description">Video 與 Shorts 草稿分開管理，可各自選擇工作表、標題欄位與描述欄位；團體與人物篩選會在三個流程間共用。</p>
       </header>
 
       <div className="status-grid">
@@ -44,13 +44,13 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
       <div className="feature-grid">
           <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-primary"><Clapperboard size={28} /></div>
-          <div className="feature-card-copy"><h3>Video 草稿</h3><p>使用 Video 專屬工作表、欄位與人物篩選設定。</p></div>
+          <div className="feature-card-copy"><h3>Video 草稿</h3><p>使用 Video 專屬工作表與欄位，沿用共用團體與人物篩選。</p></div>
           <button className="btn btn-primary feature-card-action" onClick={() => setActiveTab('youtube_video_drafts')}>進入 Video 草稿 <ArrowRight size={16} /></button>
         </div>
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-primary"><Smartphone size={28} /></div>
-          <div className="feature-card-copy"><h3>Shorts 草稿</h3><p>使用 Shorts 專屬工作表、欄位與人物篩選設定。</p></div>
+          <div className="feature-card-copy"><h3>Shorts 草稿</h3><p>使用 Shorts 專屬工作表與欄位，沿用共用團體與人物篩選。</p></div>
           <button className="btn btn-primary feature-card-action" onClick={() => setActiveTab('youtube_shorts_drafts')}>進入 Shorts 草稿 <ArrowRight size={16} /></button>
         </div>
 

@@ -52,12 +52,16 @@ function AppContent() {
 
   const fetchSettings = async () => {
     try {
-      const [system, shared, youtube] = await Promise.all([
+      const [system, shared, youtube, teamPersonFilter] = await Promise.all([
         api.getSystemInfo(),
         api.getSharedSettings(),
         api.getYoutubeSettings(),
+        api.getTeamPersonFilter().catch((err) => {
+          console.error('Failed to fetch shared team/person filter:', err);
+          return { configured: false, team: '', selected_people: [] };
+        }),
       ]);
-      setSysSettings({ ...(system || {}), ...(shared || {}), ...(youtube || {}) });
+      setSysSettings({ ...(system || {}), ...(shared || {}), ...(youtube || {}), shared_team_person_filter: teamPersonFilter });
     }
     catch (err) { console.error('Failed to fetch system settings:', err); }
   };
