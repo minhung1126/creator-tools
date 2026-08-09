@@ -17,6 +17,7 @@ const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
 
 function AppContent() {
   const [activeTab, setActiveTab] = useState(() => readPersistentJson(NAVIGATION_STORAGE_KEY, {}).activeTab || 'dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readPersistentJson(NAVIGATION_STORAGE_KEY, {}).sidebarCollapsed ?? false);
   const [authUser, setAuthUser] = useState(null);
   const [sysSettings, setSysSettings] = useState({});
   const [loading, setLoading] = useState(true);
@@ -24,8 +25,8 @@ function AppContent() {
   const toast = useToast();
 
   useEffect(() => {
-    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab });
-  }, [activeTab]);
+    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab, sidebarCollapsed });
+  }, [activeTab, sidebarCollapsed]);
 
   const fetchUser = async () => {
     try {
@@ -102,7 +103,7 @@ function AppContent() {
   if (loading) return <div className="loading-center">系統初始化中...</div>;
   if (!authUser) return <LoginPage initialError={authError} />;
 
-  return <div className="app-container"><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} /><main className="main-content">
+  return <div className={`app-container${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} /><main className="main-content">
     {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
     {activeTab === 'api_health' && <ApiHealthPage />}
     {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}

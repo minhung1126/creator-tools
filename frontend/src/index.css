@@ -1162,6 +1162,7 @@ h1, h2, h3, h4, h5, h6 {
   gap: 1.5rem;
   overflow: hidden;
   z-index: 100;
+  transition: width 0.25s ease;
 }
 
 .sidebar-brand,
@@ -1201,6 +1202,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .drawer-close,
+.sidebar-toggle,
 .mobile-app-bar,
 .drawer-backdrop {
   display: none;
@@ -1309,6 +1311,7 @@ h1, h2, h3, h4, h5, h6 {
   margin-left: var(--sidebar-width);
   padding: var(--page-padding);
   padding-bottom: calc(var(--page-padding) + env(safe-area-inset-bottom));
+  transition: margin-left 0.25s ease;
 }
 
 .main-content > * {
@@ -1622,47 +1625,72 @@ h1, h2, h3, h4, h5, h6 {
   overflow-wrap: anywhere;
 }
 
-@media (min-width: 768px) and (max-width: 1199px) {
-  .sidebar {
+@media (min-width: 768px) {
+  .sidebar-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin-left: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+
+  .sidebar-toggle:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--text-main);
+  }
+
+  .sidebar.is-collapsed {
     width: var(--sidebar-collapsed-width);
     padding-inline: 0.5rem;
   }
 
-  .sidebar-brand {
+  .sidebar.is-collapsed .sidebar-brand {
     justify-content: center;
+    flex-direction: column;
   }
 
-  .sidebar-brand-copy,
-  .nav-item span,
-  .nav-group-chevron,
-  .account-title,
-  .account-email,
-  .account-youtube-status,
-  .logout-button {
+  .sidebar.is-collapsed .sidebar-brand-copy,
+  .sidebar.is-collapsed .nav-item span,
+  .sidebar.is-collapsed .nav-group-chevron,
+  .sidebar.is-collapsed .account-title,
+  .sidebar.is-collapsed .account-email,
+  .sidebar.is-collapsed .account-youtube-status,
+  .sidebar.is-collapsed .logout-button {
     display: none;
   }
 
-  .nav-item {
+  .sidebar.is-collapsed .sidebar-toggle {
+    margin-left: 0;
+  }
+
+  .sidebar.is-collapsed .nav-item {
     justify-content: center;
     padding-inline: 0.5rem;
   }
 
-  .nav-item-child {
+  .sidebar.is-collapsed .nav-item-child {
     padding-inline: 0.25rem;
   }
 
-  .nav-submenu {
+  .sidebar.is-collapsed .nav-submenu {
     margin-left: 0;
     padding-left: 0;
     border-left: 0;
   }
 
-  .account-card {
+  .sidebar.is-collapsed .account-card {
     align-items: center;
     padding: 0.5rem;
   }
 
-  .account-status {
+  .sidebar.is-collapsed .account-status {
     min-width: 32px;
     min-height: 32px;
     justify-content: center;
@@ -1670,7 +1698,7 @@ h1, h2, h3, h4, h5, h6 {
     font-size: 0;
   }
 
-  .main-content {
+  .app-container.sidebar-is-collapsed .main-content {
     margin-left: var(--sidebar-collapsed-width);
   }
 }
@@ -1717,12 +1745,17 @@ h1, h2, h3, h4, h5, h6 {
     z-index: 110;
   }
 
+  .sidebar-toggle {
+    display: none;
+  }
+
   .sidebar.is-open {
     transform: translateX(0);
   }
 
   .sidebar-brand {
     justify-content: flex-start;
+    flex-direction: row;
   }
 
   .sidebar-brand-copy {

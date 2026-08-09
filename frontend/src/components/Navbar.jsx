@@ -1,12 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, Send, Settings, Smartphone, Video, X, Youtube } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Video, X, Youtube } from 'lucide-react';
 import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 
 const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
 const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
 
-export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) {
+export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, sidebarCollapsed, setSidebarCollapsed }) {
   const savedNavigation = readPersistentJson(NAVIGATION_STORAGE_KEY, {});
   const [youtubeOpen, setYoutubeOpen] = useState(savedNavigation.youtubeOpen ?? youtubeItems.some((i) => i.id === activeTab));
   const [sheetOpen, setSheetOpen] = useState(savedNavigation.sheetOpen ?? sheetItems.some((i) => i.id === activeTab));
@@ -85,6 +85,10 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
     </div>;
   };
 
+  const toggleSidebar = () => setSidebarCollapsed((collapsed) => !collapsed);
+  const SidebarToggleIcon = sidebarCollapsed ? PanelLeftOpen : PanelLeftClose;
+  const sidebarToggleLabel = sidebarCollapsed ? '展開側邊選單' : '收起側邊選單';
+
   return <>
     <header className="mobile-app-bar">
       <div className="mobile-app-brand"><span className="brand-mark"><Video size={22} aria-hidden="true" /></span><strong>Creator Tools</strong></div>
@@ -93,8 +97,8 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout }) 
       </button>
     </header>
     {drawerOpen && <button type="button" className="drawer-backdrop" aria-label="關閉導覽選單" onClick={closeDrawer} />}
-    <aside ref={drawerRef} id="primary-navigation" className={`sidebar${drawerOpen ? ' is-open' : ''}`} aria-label="主要導覽">
-      <div className="sidebar-brand"><div className="brand-mark"><Video size={24} aria-hidden="true" /></div><div className="sidebar-brand-copy"><h2>Creator Tools</h2><p>創作者自動化控制台</p></div><button ref={closeButtonRef} type="button" className="drawer-close" onClick={closeDrawer} aria-label="關閉導覽選單"><X size={22} aria-hidden="true" /></button></div>
+    <aside ref={drawerRef} id="primary-navigation" className={`sidebar${drawerOpen ? ' is-open' : ''}${sidebarCollapsed ? ' is-collapsed' : ''}`} aria-label="主要導覽">
+      <div className="sidebar-brand"><div className="brand-mark"><Video size={24} aria-hidden="true" /></div><div className="sidebar-brand-copy"><h2>Creator Tools</h2><p>創作者自動化控制台</p></div><button type="button" className="sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarToggleLabel} title={sidebarToggleLabel} aria-expanded={!sidebarCollapsed} aria-controls="primary-navigation"><SidebarToggleIcon size={20} aria-hidden="true" /></button><button ref={closeButtonRef} type="button" className="drawer-close" onClick={closeDrawer} aria-label="關閉導覽選單"><X size={22} aria-hidden="true" /></button></div>
       <nav className="sidebar-nav">
         {item({ id: 'dashboard', label: '儀表板總覽', icon: LayoutDashboard })}
         {item({ id: 'api_health', label: 'API健康度', icon: Activity })}
