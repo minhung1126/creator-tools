@@ -3,7 +3,6 @@ import math
 from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.params import Depends as DependsMarker
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 
@@ -232,12 +231,6 @@ def run_batch_metadata_update(
     _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Validate and update selected videos synchronously, returning one result per video."""
-
-    # Direct callers in the existing workflow tests pass one credential object;
-    # FastAPI supplies the second dependency in real requests. Keeping this
-    # fallback makes the workflow function easy to exercise without HTTP.
-    if isinstance(sheet_creds, DependsMarker):
-        sheet_creds = creds
 
     spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
     if not spreadsheet_id:

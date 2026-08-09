@@ -72,8 +72,3 @@ def require_youtube_credentials(request: Request) -> Credentials:
             },
         )
     return creds
-
-
-# Keep the original dependency name for routes and integrations that still
-# import it; it now explicitly means the control-panel login connection.
-require_credentials = require_login_credentials

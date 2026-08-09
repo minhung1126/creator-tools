@@ -31,18 +31,13 @@ function AppContent() {
     try {
       const res = await api.getUserStatus();
       if (res.authenticated) {
-        const youtube = res.youtube || {
-          authenticated: Boolean(res.youtube_authenticated),
-          user: res.youtube_user || null,
-        };
         const user = {
           ...res.user,
           token_expires_at: res.token_expires_at,
           token_status: res.token_status,
           last_refreshed_at: res.last_refreshed_at,
           last_refresh_error: res.last_refresh_error,
-          youtube,
-          youtube_authenticated: Boolean(res.youtube_authenticated || youtube.authenticated),
+          youtube: res.youtube,
         };
         setAuthUser(user); return user;
       }
@@ -56,10 +51,7 @@ function AppContent() {
         api.getSystemInfo(),
         api.getSharedSettings(),
         api.getYoutubeSettings(),
-        api.getTeamPersonFilter().catch((err) => {
-          console.error('Failed to fetch shared team/person filter:', err);
-          return { configured: false, team: '', selected_people: [] };
-        }),
+        api.getTeamPersonFilter(),
       ]);
       setSysSettings({ ...(system || {}), ...(shared || {}), ...(youtube || {}), shared_team_person_filter: teamPersonFilter });
     }

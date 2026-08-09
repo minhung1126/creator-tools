@@ -123,8 +123,6 @@ def get_auth_config():
         "has_client_secret": bool(settings.GOOGLE_CLIENT_SECRET),
         "login_scopes": list(LOGIN_SCOPES),
         "youtube_scopes": list(YOUTUBE_SCOPES),
-        # ``scopes`` remains as a compatibility field for older clients.
-        "scopes": list(LOGIN_SCOPES),
     }
 
 
@@ -299,7 +297,6 @@ def get_user_status(request: Request):
         return {
             "authenticated": False,
             "user": None,
-            "youtube_authenticated": False,
             "youtube": {"authenticated": False, "user": None},
         }
 
@@ -326,7 +323,6 @@ def get_user_status(request: Request):
         "token_status": token_status.get("status", "active"),
         "last_refreshed_at": token_status.get("last_refreshed_at"),
         "last_refresh_error": token_status.get("last_refresh_error"),
-        "youtube_authenticated": youtube_authenticated,
         "youtube": youtube_connection,
     }
 

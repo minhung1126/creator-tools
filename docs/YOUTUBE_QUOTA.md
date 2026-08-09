@@ -41,13 +41,6 @@ Quota usage lives in `data/youtube_quota_usage.json`. Writes use an in-process
 lock and atomic file replacement. Keep the data directory in the deployment
 volume.
 
-Older releases used `data/creator_tools.db` for tasks, history, notifications,
-and quota events. When the JSON ledger does not exist, the new release opens
-that database read-only once, imports the current Pacific day's quota aggregate
-and method counts, then writes a migration marker to the JSON file. Subsequent
-starts use only JSON. The application never deletes the old database; archive
-it together with its `-wal` and `-shm` files until the migration is verified.
-
 References:
 
 - [YouTube quota costs](https://developers.google.com/youtube/v3/determine_quota_cost)

@@ -57,7 +57,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
   const saveVersionRef = useRef(0);
   const dirtyRef = useRef(false);
   const youtube = authUser?.youtube || {};
-  const youtubeConnected = Boolean(authUser?.youtube_authenticated || youtube.authenticated);
+  const youtubeConnected = Boolean(youtube.authenticated);
   const youtubeUser = youtube.user || {};
 
   useEffect(() => {

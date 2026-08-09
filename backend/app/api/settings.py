@@ -1,4 +1,3 @@
-import json
 import logging
 from typing import Annotated, Dict, List, Literal
 
@@ -21,7 +20,7 @@ class SharedResourceSettingsModel(BaseModel):
 
 
 class YouTubeResourceSettingsModel(BaseModel):
-    """YouTube-only fallback resources."""
+    """YouTube-only resource settings."""
 
     default_playlist_id: str = Field(default="", max_length=256)
     youtube_general_quota_limit: int | None = None
@@ -72,34 +71,13 @@ def _draft_config_key(video_type: str) -> str:
 
 def _read_draft_config(video_type: str) -> Dict:
     raw = runtime_config.get(_draft_config_key(video_type), "")
-    if not raw:
+    if not isinstance(raw, dict) or not raw:
         return {}
-    if isinstance(raw, dict):
-        return raw
     try:
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, dict) else {}
-    except (TypeError, json.JSONDecodeError):
+        return YouTubeDraftConfigModel.model_validate(raw).model_dump()
+    except ValueError:
         logger.warning("Ignoring invalid persisted %s draft config", video_type)
         return {}
-
-
-def _clean_draft_config(config: Dict) -> Dict:
-    cleaned = dict(config)
-    cleaned.pop("team", None)
-    cleaned.pop("enabled_people", None)
-    return cleaned
-
-
-def _read_legacy_team_person_filter() -> tuple[Dict, bool]:
-    for video_type in ("Video", "Shorts"):
-        config = _read_draft_config(video_type)
-        team = config.get("team")
-        people = config.get("enabled_people")
-        if team or people:
-            value = TeamPersonFilterModel(team=team or "", selected_people=people or [])
-            return value.model_dump(), True
-    return TeamPersonFilterModel().model_dump(), False
 
 
 def _read_team_person_filter() -> tuple[Dict, bool]:
@@ -109,7 +87,7 @@ def _read_team_person_filter() -> tuple[Dict, bool]:
             return TeamPersonFilterModel.model_validate(raw).model_dump(), True
         except ValueError:
             logger.warning("Ignoring invalid persisted shared team/person filter")
-    return _read_legacy_team_person_filter()
+    return TeamPersonFilterModel().model_dump(), False
 
 
 @router.get("/shared")
@@ -124,7 +102,6 @@ def get_shared_settings(creds: Credentials = Depends(require_login_credentials))
 def get_system_info(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {
-        "host": settings.base_url,
         "public_base_url": settings.base_url,
         "bind_host": settings.BIND_HOST,
         "frontend_url": settings.frontend_url,
@@ -183,8 +160,8 @@ def update_youtube_settings(
 def get_youtube_draft_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
     return {
-        "video": _clean_draft_config(_read_draft_config("Video")),
-        "shorts": _clean_draft_config(_read_draft_config("Shorts")),
+        "video": _read_draft_config("Video"),
+        "shorts": _read_draft_config("Shorts"),
     }
 
 

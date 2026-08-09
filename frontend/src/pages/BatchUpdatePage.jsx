@@ -9,7 +9,7 @@ import SourceLinkInput from '../components/SourceLinkInput';
 import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
 import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
 import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFilterPersistence';
-import { normalizeTeamPersonFilter, readSharedTeamPersonFilter, stripTeamPersonFilter } from '../utils/teamPersonFilterStorage';
+import { normalizeTeamPersonFilter, readSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import {
   AlertCircle,
@@ -42,7 +42,6 @@ export function resolveDraftConfig(serverConfig, cached) {
 }
 
 function normalizeConfig(raw, defaults, sysSettings, sharedFilter) {
-  const enabledPeople = raw?.enabledPeople ?? raw?.enabled_people;
   const normalizedSharedFilter = sharedFilter?.exists ? normalizeTeamPersonFilter(sharedFilter) : null;
   return {
     spreadsheetId: raw?.spreadsheetId || raw?.spreadsheet_id || sysSettings.default_spreadsheet_id || '',
@@ -50,8 +49,8 @@ function normalizeConfig(raw, defaults, sysSettings, sharedFilter) {
     worksheetName: raw?.worksheetName || raw?.worksheet_name || defaults.worksheet,
     titleColumn: raw?.titleColumn || raw?.title_column || defaults.title,
     descriptionColumn: raw?.descriptionColumn || raw?.description_column || defaults.description,
-    selectedTeam: normalizedSharedFilter?.team ?? raw?.selectedTeam ?? raw?.team ?? '',
-    enabledPeople: normalizedSharedFilter?.selectedPeople ?? (Array.isArray(enabledPeople) ? enabledPeople : []),
+    selectedTeam: normalizedSharedFilter?.team || '',
+    selectedPeople: normalizedSharedFilter?.selectedPeople || [],
   };
 }
 
@@ -69,7 +68,7 @@ function PreviewField({ label, value }) {
 
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
-  const youtubeConnected = Boolean(authUser?.youtube_authenticated || authUser?.youtube?.authenticated);
+  const youtubeConnected = Boolean(authUser?.youtube?.authenticated);
   const defaults = DEFAULT_COLUMNS[videoType];
   const remembered = useMemo(() => readRemembered(videoType), [videoType]);
   const sharedFilter = useMemo(
@@ -125,7 +124,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     worksheetName,
     enabled: Boolean(authUser && hydrated && sourceReady),
     initialTeam: initial.selectedTeam,
-    initialSelectedPeople: initial.enabledPeople,
+    initialSelectedPeople: initial.selectedPeople,
     defaultTeam: 'first',
     refreshKey: sourceRevision,
   });
@@ -134,8 +133,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     selectedTeam,
     setSelectedTeam,
     people: teamPeople,
-    selectedPeople: enabledPeople,
-    setSelectedPeople: setEnabledPeople,
+    selectedPeople,
+    setSelectedPeople,
     loadingTeams,
     loadingPeople,
     ready: teamPersonReady,
@@ -147,7 +146,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
   useSharedTeamPersonFilterPersistence({
     team: selectedTeam,
-    selectedPeople: enabledPeople,
+    selectedPeople,
     ready: filterPersistenceReady,
     onError: setConfigSaveError,
   });
@@ -160,7 +159,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setWorksheetName(config.worksheetName);
     setTitleColumn(config.titleColumn);
     setDescriptionColumn(config.descriptionColumn);
-    resetSelection({ team: config.selectedTeam, selectedPeople: config.enabledPeople });
+    resetSelection({ team: config.selectedTeam, selectedPeople: config.selectedPeople });
   }, [resetSelection]);
 
   useEffect(() => {
@@ -202,10 +201,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
   useEffect(() => {
     if (!hydrated) return undefined;
-    const saved = readRemembered(videoType);
-    const selectionsReady = filterPersistenceReady;
     const cache = {
-      ...(selectionsReady ? stripTeamPersonFilter(saved) : saved),
       spreadsheetId,
       playlistId,
       worksheetName,
@@ -217,7 +213,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     };
     writePersistentJson(storageKey(videoType), cache);
     return undefined;
-  }, [assignments, bulkPerson, descriptionColumn, filterPersistenceReady, hydrated, playlistId, selectedVideoIds, spreadsheetId, titleColumn, videoType, worksheetName]);
+  }, [assignments, bulkPerson, descriptionColumn, hydrated, playlistId, selectedVideoIds, spreadsheetId, titleColumn, videoType, worksheetName]);
 
   useEffect(() => {
     if (!hydrated || !authUser || !sourceReady || (worksheetName && (!teamPersonReady || loadingPeople))) return undefined;
@@ -246,7 +242,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     }
   }, [worksheets, worksheetName, titleColumn, descriptionColumn, defaults.title, defaults.description]);
 
-  const availablePeople = useMemo(() => sourceStale ? [] : teamPeople.filter((person) => enabledPeople.includes(person)), [sourceStale, teamPeople, enabledPeople]);
+  const availablePeople = useMemo(() => sourceStale ? [] : teamPeople.filter((person) => selectedPeople.includes(person)), [sourceStale, teamPeople, selectedPeople]);
 
   useEffect(() => {
     if (!sourceStale && !loadingPeople && teamPersonReady && bulkPerson && bulkPerson !== '不編輯' && !availablePeople.includes(bulkPerson)) setBulkPerson('');
@@ -344,7 +340,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const handleWorksheetChange = (nextWorksheet) => {
     setWorksheetName(nextWorksheet);
     setSelectedTeam('');
-    setEnabledPeople([]);
+    setSelectedPeople([]);
     setRandomPreview(null);
     setPreviewError('');
     setSelectedVideoIds([]);
@@ -491,8 +487,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         selectedTeam={sourceStale ? '' : selectedTeam}
         onTeamChange={setSelectedTeam}
         people={sourceStale ? [] : teamPeople}
-        selectedPeople={sourceStale ? [] : enabledPeople}
-        onSelectedPeopleChange={setEnabledPeople}
+        selectedPeople={sourceStale ? [] : selectedPeople}
+        onSelectedPeopleChange={setSelectedPeople}
         loadingTeams={loadingTeams}
         loadingPeople={loadingPeople}
         error={teamPeopleError}

@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, Clock3, Database, RefreshCw, ShieldAlert } fro
 import { api } from '../services/api';
 
 const STATE_STYLE = {
-  normal: { color: '#aeb9e7', background: '#292d44', border: '#4e5b86', label: '正常' },
+  normal: { color: '#b9b9b0', background: '#2b2b29', border: '#50504a', label: '正常' },
   warning: { color: '#d6b377', background: '#352d20', border: '#685333', label: '接近安全上限' },
   safety_blocked: { color: '#d8ae83', background: '#362b23', border: '#6a503b', label: '已達安全上限' },
   confirmed_exhausted: { color: '#d49393', background: '#332426', border: '#624044', label: 'Google 已確認用完' },
@@ -60,9 +60,9 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
   }
 
   const style = STATE_STYLE[usage?.state] || STATE_STYLE.normal;
-  const used = Number(usage?.estimated_used_units ?? usage?.used_units ?? 0);
-  const limit = Number(usage?.configured_project_limit ?? usage?.daily_limit ?? 10000);
-  const effective = Number(usage?.effective_available_units ?? usage?.remaining_units ?? 0);
+  const used = Number(usage?.estimated_used_units ?? 0);
+  const limit = Number(usage?.configured_project_limit ?? 10000);
+  const effective = Number(usage?.effective_available_units ?? 0);
   const policyCap = Number(usage?.policy_cap_units ?? Math.max(limit - Number(usage?.safety_buffer_units || 0), 0));
   const percent = Math.min(Math.max((used / Math.max(limit, 1)) * 100, 0), 100);
   const confirmed = usage?.state === 'confirmed_exhausted' || usage?.confirmed_by_google;
@@ -88,7 +88,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
         <button type="button" className="btn" onClick={loadUsage} disabled={loading} style={{ padding: '7px 11px' }}><RefreshCw size={14} className={loading ? 'spin' : ''} />更新</button>
       </div>
 
-      {!compact && <div style={{ height: '8px', borderRadius: '999px', background: '#303940', overflow: 'hidden', marginTop: '14px' }}><div style={{ height: '100%', width: `${percent}%`, background: style.color, transition: 'width 180ms ease' }} /></div>}
+      {!compact && <div style={{ height: '8px', borderRadius: '999px', background: 'var(--surface-raised)', overflow: 'hidden', marginTop: '14px' }}><div style={{ height: '100%', width: `${percent}%`, background: style.color, transition: 'width 180ms ease' }} /></div>}
 
       <div style={{ display: 'flex', gap: '18px', flexWrap: 'wrap', marginTop: compact ? '8px' : '12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><Database size={14} />系統可用 {units(effective)} units（安全 cap {units(policyCap)}）</span>

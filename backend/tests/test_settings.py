@@ -50,32 +50,43 @@ def test_team_person_filter_normalizes_and_persists_as_one_shared_record(monkeyp
     assert result == {"configured": True, "team": "團體", "selected_people": ["甲"]}
 
 
-def test_team_person_filter_reads_legacy_video_config_when_shared_record_is_missing(monkeypatch):
+def test_team_person_filter_requires_the_shared_record(monkeypatch):
     def read_config(key, default=""):
-        return {"youtube_draft_video_config": {"team": "Video 團體", "enabled_people": ["甲"]}}.get(key, default)
+        return {}.get(key, default)
 
     monkeypatch.setattr(settings_api.runtime_config, "get", read_config)
 
     assert settings_api.get_team_person_filter(SimpleNamespace()) == {
-        "configured": True,
-        "team": "Video 團體",
-        "selected_people": ["甲"],
+        "configured": False,
+        "team": "",
+        "selected_people": [],
     }
 
 
-def test_youtube_draft_response_hides_legacy_filter_fields(monkeypatch):
+def test_youtube_draft_response_uses_the_current_config_shape(monkeypatch):
     monkeypatch.setattr(
         settings_api.runtime_config,
         "get",
         lambda key, default="": {
             "youtube_draft_video_config": {
                 "spreadsheet_id": "sheet",
-                "team": "團體",
-                "enabled_people": ["甲"],
+                "playlist_id": "playlist",
+                "worksheet_name": "工作表",
+                "title_column": "標題",
+                "description_column": "描述",
             }
         }.get(key, default),
     )
 
     result = settings_api.get_youtube_draft_settings(SimpleNamespace())
 
-    assert result == {"video": {"spreadsheet_id": "sheet"}, "shorts": {}}
+    assert result == {
+        "video": {
+            "spreadsheet_id": "sheet",
+            "playlist_id": "playlist",
+            "worksheet_name": "工作表",
+            "title_column": "標題",
+            "description_column": "描述",
+        },
+        "shorts": {},
+    }

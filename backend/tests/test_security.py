@@ -28,37 +28,46 @@ def test_oauth_state_is_tamper_expiry_and_salt_bound():
 
 def test_sessions_are_isolated_and_cookie_has_no_token(tmp_path: Path):
     store = SessionStore(tmp_path / "sessions.json")
-    first = store.create({"token": "google-token-a", "client_secret": "secret-a"})
-    second = store.create({"token": "google-token-b"})
+    first = store.create({"credential_provider": "google_login", "user": {"sub": "subject-a"}})
+    second = store.create({"credential_provider": "google_login", "user": {"sub": "subject-b"}})
     assert first != second
-    assert store.get(first)["token"] == "google-token-a"
+    assert store.get(first)["user"]["sub"] == "subject-a"
     store.delete(first)
     assert store.get(first) is None
-    assert store.get(second)["token"] == "google-token-b"
-    assert "google-token-a" not in first and "secret-a" not in first
+    assert store.get(second)["user"]["sub"] == "subject-b"
+    assert "subject-a" not in first and "subject-b" not in second
 
 
-def test_no_cookie_never_falls_back_to_global_credentials():
+def test_no_cookie_is_rejected():
     request = Request(
         {"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b"", "server": ("testserver", 80)}
     )
     with pytest.raises(HTTPException) as error:
-        dependencies.require_credentials(request)
+        dependencies.require_login_credentials(request)
     assert error.value.status_code == 401
 
 
-def test_google_refresh_updates_only_the_current_server_session(monkeypatch, tmp_path: Path):
+def test_google_refresh_updates_the_current_persistent_credential(monkeypatch, tmp_path: Path):
+    credentials_store = CredentialStore(tmp_path / "credentials.json")
     store = SessionStore(tmp_path / "sessions.json")
-    session_id = store.create(
+    credentials_store.save_google_connection(
         {
             "token": "old-token",
             "refresh_token": "refresh-token",
             "client_id": "client",
             "client_secret": "secret",
             "expiry": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
-            "user": {"email": "admin@example.test"},
+            "user": {"sub": "subject-a", "email": "admin@example.test"},
+        },
+        owner_sub="subject-a",
+    )
+    session_id = store.create(
+        {
+            "credential_provider": "google_login",
+            "user": {"sub": "subject-a", "email": "admin@example.test"},
         }
     )
+    monkeypatch.setattr(google_auth, "credential_store", credentials_store)
     monkeypatch.setattr(google_auth, "session_store", store)
 
     def refresh(self, request):
@@ -66,9 +75,10 @@ def test_google_refresh_updates_only_the_current_server_session(monkeypatch, tmp
         self.expiry = datetime.now(timezone.utc) + timedelta(hours=1)
 
     monkeypatch.setattr(google_auth.Credentials, "refresh", refresh)
-    credentials = google_auth.get_current_credentials(session_id)
+    credentials = google_auth.get_login_credentials(session_id)
     assert credentials.token == "new-token"
-    assert store.get(session_id)["token"] == "new-token"
+    assert "token" not in store.get(session_id)
+    assert credentials_store.get_google_credentials("subject-a")["token"] == "new-token"
 
 
 def test_credential_store_encrypts_and_rejects_wrong_key(tmp_path: Path, monkeypatch):
@@ -79,12 +89,13 @@ def test_credential_store_encrypts_and_rejects_wrong_key(tmp_path: Path, monkeyp
             "token": "google-token",
             "refresh_token": "google-refresh-token",
             "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-            "user": {"email": "admin@example.test"},
-        }
+            "user": {"sub": "subject-a", "email": "admin@example.test"},
+        },
+        owner_sub="subject-a",
     )
     raw = (tmp_path / "credentials.json").read_text(encoding="utf-8")
     assert "google-token" not in raw
     assert "google-refresh-token" not in raw
     store._fernet = Fernet(Fernet.generate_key())
     with pytest.raises(RuntimeError):
-        store.get_google_credentials()
+        store.get_google_credentials("subject-a")

@@ -3,15 +3,14 @@ import {
   TEAM_PERSON_FILTER_STORAGE_KEY,
   normalizeTeamPersonFilter,
   readSharedTeamPersonFilter,
-  stripTeamPersonFilter,
   writeSharedTeamPersonFilter,
 } from './teamPersonFilterStorage';
 
 describe('teamPersonFilterStorage', () => {
   beforeEach(() => window.localStorage.clear());
 
-  it('normalizes aliases, whitespace and duplicate people', () => {
-    expect(normalizeTeamPersonFilter({ selectedTeam: ' 團體 ', enabled_people: [' 甲 ', '甲', ''] })).toEqual({
+  it('normalizes the browser and server field names', () => {
+    expect(normalizeTeamPersonFilter({ team: ' 團體 ', selected_people: [' 甲 ', '甲', ''] })).toEqual({
       team: '團體',
       selectedPeople: ['甲'],
     });
@@ -27,24 +26,24 @@ describe('teamPersonFilterStorage', () => {
     });
   });
 
-  it('uses the server filter when there is no pending local update', () => {
-    writeSharedTeamPersonFilter({ team: '舊本機團體', selectedPeople: ['甲'] });
+  it('uses the current local record when the server has no configured filter', () => {
+    writeSharedTeamPersonFilter({ team: '本機團體', selectedPeople: ['甲'] });
 
-    expect(readSharedTeamPersonFilter({ configured: true, team: '伺服器團體', selected_people: ['乙'] })).toMatchObject({
-      team: '伺服器團體',
-      selectedPeople: ['乙'],
-      source: 'server',
+    expect(readSharedTeamPersonFilter({ configured: false, team: '', selected_people: [] })).toMatchObject({
+      team: '本機團體',
+      selectedPeople: ['甲'],
+      source: 'local',
     });
   });
 
-  it('migrates the first available legacy filter and strips old fields from page caches', () => {
-    window.localStorage.setItem('youtube-draft-config-video', JSON.stringify({ team: 'Video 團體', enabledPeople: ['甲'] }));
-    expect(readSharedTeamPersonFilter()).toMatchObject({
-      team: 'Video 團體',
-      selectedPeople: ['甲'],
-      source: 'legacy',
+  it('uses an empty default without a server or local record', () => {
+    expect(readSharedTeamPersonFilter()).toEqual({
+      team: '',
+      selectedPeople: [],
+      exists: false,
+      pending: false,
+      source: 'default',
     });
-    expect(stripTeamPersonFilter({ team: '團體', selectedPeople: ['甲'], playlistId: 'playlist' })).toEqual({ playlistId: 'playlist' });
   });
 
   it('writes one versioned shared record', () => {

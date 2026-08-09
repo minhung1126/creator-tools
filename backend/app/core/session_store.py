@@ -121,16 +121,6 @@ class SessionStore:
                 return None
             return data if isinstance(data, dict) else None
 
-    def update(self, session_id: str, data: dict[str, Any]) -> bool:
-        with self._lock:
-            self._purge_expired()
-            record = self._data["sessions"].get(session_id)
-            if not isinstance(record, dict):
-                return False
-            record["data"] = self._fernet.encrypt(json.dumps(data, ensure_ascii=False).encode("utf-8")).decode("ascii")
-            self._save()
-            return True
-
     def delete(self, session_id: str) -> None:
         if not session_id:
             return

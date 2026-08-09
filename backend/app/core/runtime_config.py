@@ -30,18 +30,6 @@ _PERSISTABLE_FIELDS = {
     "shared_team_person_filter",
 }
 
-# These values are intentionally configured only from the authenticated UI.
-# Keeping them out of Settings also prevents old environment variables from
-# silently becoming a second source of truth.
-_WEB_ONLY_FIELDS = {
-    "default_spreadsheet_id",
-    "default_playlist_id",
-}
-
-# Removed legacy secrets are discarded during load instead of being copied forward.
-_LEGACY_SECRET_FIELDS = {"meta_app_secret", "meta_access_token", "instagram_access_token", "r2_secret_access_key"}
-
-
 class RuntimeConfig:
     """Thread-safe persistent configuration store backed by a JSON file."""
 
@@ -49,20 +37,7 @@ class RuntimeConfig:
         self._path = config_path
         self._lock = Lock()
         self._data: Dict[str, Any] = {}
-        self._migrate_legacy_config()
         self._load()
-
-    def _migrate_legacy_config(self):
-        legacy_root_config = _PROJECT_ROOT / "runtime_config.json"
-        if not self._path.exists() and legacy_root_config.is_file():
-            try:
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                import shutil
-
-                shutil.move(str(legacy_root_config), str(self._path))
-                logger.info("Migrated legacy runtime_config.json to %s", self._path)
-            except Exception as exc:
-                logger.warning("Failed to migrate legacy runtime config: %s", type(exc).__name__)
 
     def _load(self):
         if not self._path.is_file():
@@ -71,12 +46,11 @@ class RuntimeConfig:
         try:
             with self._path.open("r", encoding="utf-8") as handle:
                 saved = json.load(handle)
+            if not isinstance(saved, dict):
+                raise ValueError("runtime config root must be an object")
             self._data = {key: value for key, value in saved.items() if key in _PERSISTABLE_FIELDS}
-            if any(key in saved for key in _LEGACY_SECRET_FIELDS):
-                logger.warning("Discarded legacy plaintext secret fields from runtime_config.json")
-                self._save()
             logger.info("Loaded runtime config from %s", self._path)
-        except (json.JSONDecodeError, OSError) as exc:
+        except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
             logger.warning("Failed to load runtime config: %s", type(exc).__name__)
             self._data = {}
 
@@ -95,8 +69,6 @@ class RuntimeConfig:
         with self._lock:
             if key in self._data and self._data[key] not in (None, ""):
                 return self._data[key]
-        if key in _WEB_ONLY_FIELDS:
-            return default
         env_value = getattr(settings, key.upper(), "")
         return env_value if env_value not in (None, "") else default
 

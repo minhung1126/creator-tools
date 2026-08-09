@@ -6,16 +6,12 @@ import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
 import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
 import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFilterPersistence';
 import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
-import { readSharedTeamPersonFilter, stripTeamPersonFilter } from '../utils/teamPersonFilterStorage';
+import { readSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 
 const STORAGE_KEY = 'creator-tools.sheet-copy.v1';
 
 function loadSaved() {
   return readPersistentJson(STORAGE_KEY, {});
-}
-
-export function migrateSelectedPeople(saved) {
-  return Array.isArray(saved?.selectedPeople) ? saved.selectedPeople : saved?.person ? [saved.person] : [];
 }
 
 async function copyText(text) {
@@ -60,8 +56,8 @@ export default function SheetCopyPage({ sysSettings }) {
     source: appliedSpreadsheetId,
     worksheetName,
     enabled: sourceReady,
-    initialTeam: sharedFilter.exists ? sharedFilter.team : (saved.team || ''),
-    initialSelectedPeople: sharedFilter.exists ? sharedFilter.selectedPeople : migrateSelectedPeople(saved),
+    initialTeam: sharedFilter.team,
+    initialSelectedPeople: sharedFilter.selectedPeople,
     defaultTeam: 'none',
     refreshKey: sourceRevision,
   });
@@ -88,15 +84,13 @@ export default function SheetCopyPage({ sysSettings }) {
   });
 
   useEffect(() => {
-    const savedState = loadSaved();
     writePersistentJson(STORAGE_KEY, {
-      ...(filterPersistenceReady ? stripTeamPersonFilter(savedState) : savedState),
       spreadsheetId,
       worksheetName,
       visibleKeys,
       query,
     });
-  }, [filterPersistenceReady, query, spreadsheetId, visibleKeys, worksheetName]);
+  }, [query, spreadsheetId, visibleKeys, worksheetName]);
 
   useEffect(() => {
     if (!copiedCell) return undefined;

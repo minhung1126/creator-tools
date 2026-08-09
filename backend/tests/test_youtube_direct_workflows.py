@@ -80,7 +80,7 @@ def test_metadata_direct_flow_continues_after_one_video_fails(monkeypatch):
 
     monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
 
-    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object())
+    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object(), sheet_creds=object())
 
     assert [item["status"] for item in response["results"]] == ["succeeded", "failed", "succeeded"]
     assert response["completed"] is True
@@ -103,7 +103,7 @@ def test_metadata_quota_block_keeps_partial_results_and_stops_writes(monkeypatch
 
     monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
 
-    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object())
+    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object(), sheet_creds=object())
 
     assert [item["status"] for item in response["results"]] == ["succeeded", "not_attempted", "not_attempted"]
     assert calls == ["video-1", "video-2"]

@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -32,8 +31,6 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "data"
 QUOTA_FILE = DATA_DIR / "youtube_quota_usage.json"
-LEGACY_QUOTA_FILE = QUOTA_FILE
-LEGACY_SQLITE_FILE = DATA_DIR / "creator_tools.db"
 JSON_SCHEMA_VERSION = 2
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -53,8 +50,6 @@ YOUTUBE_QUOTA_METHODS: dict[str, dict[str, Any]] = {
 }
 
 QUOTA_COSTS = {method: int(meta["cost"]) for method, meta in YOUTUBE_QUOTA_METHODS.items()}
-DEFAULT_DAILY_LIMIT = OFFICIAL_DEFAULT_LIMIT
-QUOTA_COSTS_VERIFIED_AT = QUOTA_RULES_VERIFIED_AT
 
 _PATH_LOCKS: dict[str, RLock] = {}
 _PATH_LOCKS_GUARD = Lock()
@@ -126,14 +121,11 @@ class YouTubeQuotaLimiter:
         self,
         path: str | Path = QUOTA_FILE,
         *,
-        sqlite_path: str | Path = LEGACY_SQLITE_FILE,
         configured_limit: int | None = None,
         safety_buffer_units: int | None = None,
-        daily_limit: int | None = None,
     ) -> None:
         self.path = Path(path)
-        self.sqlite_path = Path(sqlite_path)
-        self._configured_limit_override = configured_limit if configured_limit is not None else daily_limit
+        self._configured_limit_override = configured_limit
         self._safety_buffer_override = safety_buffer_units
         self._lock = _path_lock(self.path)
 
@@ -193,8 +185,6 @@ class YouTubeQuotaLimiter:
         self,
         quota_date: str,
         now: datetime,
-        *,
-        migration: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         limit, _buffer = self.configured_values()
         data: dict[str, Any] = {
@@ -213,22 +203,13 @@ class YouTubeQuotaLimiter:
             "methods": {},
             "updated_at": iso_with_offset(_as_utc(now)),
         }
-        if migration:
-            data["migration"] = dict(migration)
         return data
 
     @staticmethod
     def _normalize_methods(value: Any) -> dict[str, dict[str, int]]:
-        if isinstance(value, list):
-            source = {
-                str(item.get("method")): item
-                for item in value
-                if isinstance(item, dict) and str(item.get("method") or "")
-            }
-        elif isinstance(value, dict):
-            source = value
-        else:
-            raise _QuotaStorageError("methods must be an object or list")
+        if not isinstance(value, dict):
+            raise _QuotaStorageError("methods must be an object")
+        source = value
 
         methods: dict[str, dict[str, int]] = {}
         for method, raw in source.items():
@@ -236,7 +217,7 @@ class YouTubeQuotaLimiter:
                 raise _QuotaStorageError("method statistics must be objects")
             name = str(method)
             configured_cost = int(YOUTUBE_QUOTA_METHODS.get(name, {}).get("cost", 0))
-            cost = _stored_int(raw.get("cost_per_call", raw.get("documented_cost")), f"{name}.cost", configured_cost)
+            cost = _stored_int(raw.get("cost_per_call"), f"{name}.cost", configured_cost)
             calls = _stored_int(raw.get("calls"), f"{name}.calls")
             units = _stored_int(raw.get("units"), f"{name}.units", cost * calls)
             methods[name] = {
@@ -251,6 +232,8 @@ class YouTubeQuotaLimiter:
     def _normalize_data(self, raw: Any, quota_date: str, now: datetime) -> tuple[dict[str, Any], bool]:
         if not isinstance(raw, dict):
             raise _QuotaStorageError("quota JSON root must be an object")
+        if raw.get("schema_version") != JSON_SCHEMA_VERSION:
+            raise _QuotaStorageError("unsupported quota JSON schema version")
         saved_date = str(raw.get("quota_date") or "")
         if not saved_date:
             raise _QuotaStorageError("quota_date is missing")
@@ -261,7 +244,7 @@ class YouTubeQuotaLimiter:
         state = str(raw.get("state") or "normal")
         if state not in {"normal", "warning", "safety_blocked", "confirmed_exhausted"}:
             raise _QuotaStorageError("invalid quota state")
-        used = _stored_int(raw.get("estimated_used_units", raw.get("used_units")), "estimated_used_units")
+        used = _stored_int(raw.get("estimated_used_units"), "estimated_used_units")
         methods = self._normalize_methods(raw.get("methods", {}))
         data = {
             "schema_version": JSON_SCHEMA_VERSION,
@@ -279,84 +262,8 @@ class YouTubeQuotaLimiter:
             "methods": methods,
             "updated_at": raw.get("updated_at") or iso_with_offset(_as_utc(now)),
         }
-        if isinstance(raw.get("migration"), dict):
-            data["migration"] = dict(raw["migration"])
         changed = data != raw
         return data, changed
-
-    def _sqlite_tables(self, connection: sqlite3.Connection) -> set[str]:
-        return {
-            str(row[0]) for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
-
-    def _import_sqlite_unlocked(self, quota_date: str, now: datetime) -> dict[str, Any] | None:
-        if not self.sqlite_path.is_file():
-            return None
-        try:
-            uri = f"{self.sqlite_path.resolve().as_uri()}?mode=ro"
-            connection = sqlite3.connect(uri, uri=True)
-            connection.row_factory = sqlite3.Row
-            try:
-                tables = self._sqlite_tables(connection)
-                if "youtube_quota_daily" not in tables:
-                    return None
-                row = connection.execute(
-                    "SELECT * FROM youtube_quota_daily WHERE quota_date=? AND bucket=?",
-                    (quota_date, GENERAL_BUCKET),
-                ).fetchone()
-                schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-                if row is None:
-                    return None
-
-                methods: dict[str, dict[str, int]] = {}
-                if "youtube_quota_events" in tables:
-                    event_rows = connection.execute(
-                        """
-                        SELECT method, documented_cost, COUNT(*) AS calls,
-                               SUM(documented_cost) AS units,
-                               SUM(CASE WHEN outcome='succeeded' THEN 1 ELSE 0 END) AS succeeded_calls,
-                               SUM(CASE WHEN outcome='failed' THEN 1 ELSE 0 END) AS failed_calls
-                        FROM youtube_quota_events
-                        WHERE quota_date=? AND bucket=? AND outcome IN ('attempted','succeeded','failed')
-                        GROUP BY method, documented_cost ORDER BY method
-                        """,
-                        (quota_date, GENERAL_BUCKET),
-                    ).fetchall()
-                    methods = {
-                        str(event["method"]): {
-                            "cost_per_call": int(event["documented_cost"] or 0),
-                            "calls": int(event["calls"] or 0),
-                            "units": int(event["units"] or 0),
-                            "succeeded_calls": int(event["succeeded_calls"] or 0),
-                            "failed_calls": int(event["failed_calls"] or 0),
-                        }
-                        for event in event_rows
-                    }
-                limit, _buffer = self.configured_values()
-                return {
-                    "schema_version": JSON_SCHEMA_VERSION,
-                    "quota_date": quota_date,
-                    "bucket": str(row["bucket"] or GENERAL_BUCKET),
-                    "configured_limit": limit,
-                    "estimated_used_units": max(int(row["estimated_used_units"] or 0), 0),
-                    "state": str(row["state"] or "normal"),
-                    "blocked_reason": row["blocked_reason"],
-                    "blocked_until": row["blocked_until"],
-                    "confirmed_exhausted_at": row["confirmed_exhausted_at"],
-                    "last_http_status": row["last_http_status"],
-                    "last_error_reason": row["last_error_reason"],
-                    "last_error_method": row["last_error_method"],
-                    "methods": methods,
-                    "updated_at": row["updated_at"] or iso_with_offset(_as_utc(now)),
-                    "migration": {
-                        "sqlite_imported_at": iso_with_offset(_as_utc(now)),
-                        "sqlite_schema_version": schema_version,
-                    },
-                }
-            finally:
-                connection.close()
-        except (OSError, sqlite3.Error, TypeError, ValueError) as exc:
-            raise _QuotaStorageError(f"unable to import legacy SQLite quota: {type(exc).__name__}") from exc
 
     def _save_unlocked(self, data: Mapping[str, Any]) -> None:
         temp_path = self.path.with_name(f".{self.path.name}.{os.getpid()}.{uuid4().hex}.tmp")
@@ -377,7 +284,7 @@ class YouTubeQuotaLimiter:
     def _load_current_unlocked(self, now: datetime) -> dict[str, Any]:
         quota_date = quota_date_for(now)
         if not self.path.is_file():
-            data = self._import_sqlite_unlocked(quota_date, now) or self._empty_data(quota_date, now)
+            data = self._empty_data(quota_date, now)
             self._save_unlocked(data)
             return data
         try:
@@ -385,14 +292,6 @@ class YouTubeQuotaLimiter:
                 raw = json.load(handle)
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise _QuotaStorageError(f"unable to read quota JSON: {type(exc).__name__}") from exc
-        # Pre-SQLite releases may have left this legacy JSON beside a newer
-        # SQLite ledger.  Only a current-schema JSON file is authoritative;
-        # otherwise prefer today's SQLite aggregate without adding the two.
-        if raw.get("schema_version") != JSON_SCHEMA_VERSION:
-            imported = self._import_sqlite_unlocked(quota_date, now)
-            if imported is not None:
-                self._save_unlocked(imported)
-                return imported
         data, changed = self._normalize_data(raw, quota_date, now)
         if changed:
             self._save_unlocked(data)
@@ -668,10 +567,6 @@ class YouTubeQuotaLimiter:
             "quota_source_url": QUOTA_SOURCE_URL,
             "quota_rules_last_updated_at": QUOTA_RULES_LAST_UPDATED_AT,
             "quota_rules_verified_at": QUOTA_RULES_VERIFIED_AT,
-            "daily_limit": limit,
-            "used_units": used,
-            "remaining_units": max(limit - used, 0),
-            "quota_costs_verified_at": QUOTA_RULES_VERIFIED_AT,
             "note": (
                 "本數字只統計 Creator Tools 送出的 YouTube request，屬於本地估算；"
                 "同一 Google Cloud project 的其他應用程式可能也會消耗官方額度。"
@@ -720,15 +615,11 @@ class YouTubeQuotaLimiter:
 
 
 __all__ = [
-    "DEFAULT_DAILY_LIMIT",
     "DEFAULT_SAFETY_BUFFER_UNITS",
     "GENERAL_BUCKET",
     "JSON_SCHEMA_VERSION",
-    "LEGACY_QUOTA_FILE",
-    "LEGACY_SQLITE_FILE",
     "OFFICIAL_DEFAULT_LIMIT",
     "QUOTA_COSTS",
-    "QUOTA_COSTS_VERIFIED_AT",
     "QUOTA_FILE",
     "QUOTA_RULES_LAST_UPDATED_AT",
     "QUOTA_RULES_VERIFIED_AT",

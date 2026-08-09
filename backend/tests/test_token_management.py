@@ -15,15 +15,17 @@ def google_token_payload(expiry: datetime, token: str = "access-token"):
         "client_secret": "client-secret",
         "scopes": ["scope-a"],
         "expiry": expiry.isoformat(),
-        "user": {"email": "admin@example.test"},
+        "user": {"sub": "subject-a", "email": "admin@example.test"},
     }
 
 
 def test_google_credentials_are_persistent_and_proactively_refreshed(monkeypatch, tmp_path: Path):
     credentials_store = CredentialStore(tmp_path / "credentials.json")
     sessions = SessionStore(tmp_path / "sessions.json")
-    credentials_store.save_google_connection(google_token_payload(datetime.now(timezone.utc) + timedelta(minutes=1)))
-    session_id = sessions.create({"credential_provider": "google", "user": {"email": "admin@example.test"}})
+    credentials_store.save_google_connection(
+        google_token_payload(datetime.now(timezone.utc) + timedelta(minutes=1)), owner_sub="subject-a"
+    )
+    session_id = sessions.create({"credential_provider": "google_login", "user": {"sub": "subject-a", "email": "admin@example.test"}})
     monkeypatch.setattr(google_auth, "credential_store", credentials_store)
     monkeypatch.setattr(google_auth, "session_store", sessions)
 
@@ -32,20 +34,20 @@ def test_google_credentials_are_persistent_and_proactively_refreshed(monkeypatch
         self.expiry = datetime.now(timezone.utc) + timedelta(hours=1)
 
     monkeypatch.setattr(google_auth.Credentials, "refresh", refresh)
-    credentials = google_auth.get_current_credentials(session_id)
+    credentials = google_auth.get_login_credentials(session_id)
 
     assert credentials.token == "refreshed-access-token"
-    assert sessions.get(session_id)["credential_provider"] == "google"
+    assert sessions.get(session_id)["credential_provider"] == "google_login"
     assert "token" not in sessions.get(session_id)
-    assert credentials_store.get_google_credentials()["token"] == "refreshed-access-token"
+    assert credentials_store.get_google_credentials("subject-a")["token"] == "refreshed-access-token"
     assert "refreshed-access-token" not in (tmp_path / "credentials.json").read_text(encoding="utf-8")
 
 
 def test_google_reconnect_without_refresh_token_preserves_previous_refresh_token(tmp_path: Path):
     store = CredentialStore(tmp_path / "credentials.json")
-    store.save_google_connection(google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1)))
+    store.save_google_connection(google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1)), owner_sub="subject-a")
     replacement = google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1), token="replacement-token")
     replacement["refresh_token"] = None
-    store.save_google_connection(replacement)
+    store.save_google_connection(replacement, owner_sub="subject-a")
 
-    assert store.get_google_credentials()["refresh_token"] == "refresh-token"
+    assert store.get_google_credentials("subject-a")["refresh_token"] == "refresh-token"

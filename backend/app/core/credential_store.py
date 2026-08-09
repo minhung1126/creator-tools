@@ -36,6 +36,13 @@ def _normalise_subject(value: Any) -> Optional[str]:
     return subject
 
 
+def _require_subject(value: str) -> str:
+    subject = _normalise_subject(value)
+    if not subject:
+        raise ValueError("owner_sub is required for credential storage")
+    return subject
+
+
 def _user_from_token(token_dict: Dict[str, Any]) -> Dict[str, Any]:
     user = token_dict.get("user")
     return dict(user) if isinstance(user, dict) else {}
@@ -52,13 +59,7 @@ def _safe_public_user(user: Dict[str, Any]) -> Dict[str, str]:
 
 
 class CredentialStore:
-    """Persist credentials under an authenticated user's OIDC subject.
-
-    Version 4 stored one global ``google`` and one global ``youtube`` record.
-    Those records are retained in ``legacy`` during migration but are never
-    returned by a subject-scoped lookup. A user must reconnect before a legacy
-    credential can be used by the new session model.
-    """
+    """Persist credentials under an authenticated user's OIDC subject."""
 
     def __init__(self, path: Path = _DEFAULT_PATH):
         self._path = path
@@ -69,7 +70,6 @@ class CredentialStore:
         self._data: Dict[str, Any] = {
             "version": _STORE_VERSION,
             "users": {},
-            "legacy": {"google": None, "youtube": None},
         }
         self._load()
 
@@ -93,19 +93,6 @@ class CredentialStore:
                     self._data = {
                         "version": _STORE_VERSION,
                         "users": users,
-                        "legacy": loaded.get("legacy")
-                        if isinstance(loaded.get("legacy"), dict)
-                        else {"google": None, "youtube": None},
-                    }
-                else:
-                    # Keep pre-v5 records isolated from the new subject lookup.
-                    self._data = {
-                        "version": _STORE_VERSION,
-                        "users": {},
-                        "legacy": {
-                            "google": loaded.get("google"),
-                            "youtube": loaded.get("youtube"),
-                        },
                     }
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", type(exc).__name__)
@@ -163,39 +150,11 @@ class CredentialStore:
                 return None
         return None
 
-    def _record_location(self, key: str, owner_sub: Optional[str]) -> tuple[Dict[str, Any], str]:
-        subject = _normalise_subject(owner_sub)
-        if subject:
-            users = self._data.setdefault("users", {})
-            if not isinstance(users, dict):
-                users = {}
-                self._data["users"] = users
-            user_records = users.get(subject)
-            if not isinstance(user_records, dict):
-                user_records = {}
-                users[subject] = user_records
-            return user_records, key
-        return self._data.setdefault("legacy", {"google": None, "youtube": None}), key
-
-    def _find_record(self, key: str, owner_sub: Optional[str]) -> Optional[Dict[str, Any]]:
-        subject = _normalise_subject(owner_sub)
-        if subject:
-            user_records = self._data.get("users", {}).get(subject)
-            record = user_records.get(key) if isinstance(user_records, dict) else None
-            return record if isinstance(record, dict) else None
-
-        # Compatibility only: callers without an owner are not used by API
-        # authentication. Return a legacy record, or a sole user record for
-        # older scripts/tests that predate the subject-scoped API.
-        legacy = self._data.get("legacy", {})
-        record = legacy.get(key) if isinstance(legacy, dict) else None
-        if isinstance(record, dict):
-            return record
-        matches = []
-        for user_records in (self._data.get("users") or {}).values():
-            if isinstance(user_records, dict) and isinstance(user_records.get(key), dict):
-                matches.append(user_records[key])
-        return matches[0] if len(matches) == 1 else None
+    def _find_record(self, key: str, owner_sub: str) -> Optional[Dict[str, Any]]:
+        subject = _require_subject(owner_sub)
+        user_records = self._data.get("users", {}).get(subject)
+        record = user_records.get(key) if isinstance(user_records, dict) else None
+        return record if isinstance(record, dict) else None
 
     @staticmethod
     def _same_account(first: Dict[str, Any], second: Dict[str, Any]) -> bool:
@@ -207,16 +166,17 @@ class CredentialStore:
         second_email = str(_user_from_token(second).get("email") or "").casefold()
         return bool(first_email and second_email and first_email == second_email)
 
-    def _save_connection(self, key: str, token_dict: Dict[str, Any], owner_sub: Optional[str] = None) -> Dict[str, Any]:
+    def _save_connection(self, key: str, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
         """Persist one OAuth connection separately from browser login sessions."""
         if not isinstance(token_dict, dict) or not token_dict.get("token"):
             raise ValueError("Google OAuth response did not contain an access token")
 
-        subject = _normalise_subject(owner_sub) or _subject_from_token(token_dict)
+        subject = _require_subject(owner_sub)
         now = utc_now()
         with self._lock:
-            container, record_key = self._record_location(key, subject)
-            previous = container.get(record_key)
+            users = self._data.setdefault("users", {})
+            user_records = users.setdefault(subject, {})
+            previous = user_records.get(key)
             previous_credentials = (
                 self._decrypt_json(previous.get("credentials_encrypted")) if isinstance(previous, dict) else None
             )
@@ -233,7 +193,7 @@ class CredentialStore:
                 credentials["refresh_token"] = previous_credentials.get("refresh_token")
 
             scopes = credentials.get("scopes") if isinstance(credentials.get("scopes"), list) else []
-            container[record_key] = {
+            user_records[key] = {
                 "owner_sub": subject,
                 "credential_sub": _subject_from_token(credentials),
                 "credentials_encrypted": self._encrypt(json.dumps(credentials, ensure_ascii=False)),
@@ -252,27 +212,27 @@ class CredentialStore:
             self._save()
             return self._get_public(key, subject) or {}
 
-    def save_google_connection(self, token_dict: Dict[str, Any], owner_sub: Optional[str] = None) -> Dict[str, Any]:
+    def save_google_connection(self, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
         """Persist the control-panel login/Sheets connection for one OIDC subject."""
         return self._save_connection("google", token_dict, owner_sub)
 
-    def save_youtube_connection(self, token_dict: Dict[str, Any], owner_sub: Optional[str] = None) -> Dict[str, Any]:
+    def save_youtube_connection(self, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
         """Persist a YouTube connection under the logged-in user's OIDC subject."""
         return self._save_connection("youtube", token_dict, owner_sub)
 
-    def _get_credentials(self, key: str, owner_sub: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _get_credentials(self, key: str, owner_sub: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             record = self._find_record(key, owner_sub)
             encrypted = record.get("credentials_encrypted") if isinstance(record, dict) else None
         return self._decrypt_json(encrypted)
 
-    def get_google_credentials(self, owner_sub: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_google_credentials(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_credentials("google", owner_sub)
 
-    def get_youtube_credentials(self, owner_sub: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_youtube_credentials(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_credentials("youtube", owner_sub)
 
-    def _get_public(self, key: str, owner_sub: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _get_public(self, key: str, owner_sub: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             record = self._find_record(key, owner_sub)
             if not isinstance(record, dict):
@@ -286,18 +246,19 @@ class CredentialStore:
                 public["last_refresh_error"] = "OAuth token refresh failed."
             return public
 
-    def get_google_public(self, owner_sub: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_google_public(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_public("google", owner_sub)
 
-    def get_youtube_public(self, owner_sub: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_youtube_public(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_public("youtube", owner_sub)
 
     def _mark_refresh_failed(
         self,
         key: str,
         message: str,
+        *,
+        owner_sub: str,
         requires_reauthorization: bool = False,
-        owner_sub: Optional[str] = None,
     ) -> None:
         with self._lock:
             record = self._find_record(key, owner_sub)
@@ -313,32 +274,33 @@ class CredentialStore:
             self._save()
 
     def mark_google_refresh_failed(
-        self, message: str, requires_reauthorization: bool = False, owner_sub: Optional[str] = None
+        self, message: str, *, owner_sub: str, requires_reauthorization: bool = False
     ) -> None:
-        self._mark_refresh_failed("google", message, requires_reauthorization, owner_sub)
+        self._mark_refresh_failed(
+            "google", message, owner_sub=owner_sub, requires_reauthorization=requires_reauthorization
+        )
 
     def mark_youtube_refresh_failed(
-        self, message: str, requires_reauthorization: bool = False, owner_sub: Optional[str] = None
+        self, message: str, *, owner_sub: str, requires_reauthorization: bool = False
     ) -> None:
-        self._mark_refresh_failed("youtube", message, requires_reauthorization, owner_sub)
+        self._mark_refresh_failed(
+            "youtube", message, owner_sub=owner_sub, requires_reauthorization=requires_reauthorization
+        )
 
-    def _clear(self, key: str, owner_sub: Optional[str] = None) -> None:
+    def _clear(self, key: str, owner_sub: str) -> None:
         with self._lock:
-            subject = _normalise_subject(owner_sub)
-            if subject:
-                user_records = self._data.get("users", {}).get(subject)
-                if isinstance(user_records, dict):
-                    user_records[key] = None
-                    if not any(value for value in user_records.values()):
-                        self._data["users"].pop(subject, None)
-            else:
-                self._data.setdefault("legacy", {"google": None, "youtube": None})[key] = None
+            subject = _require_subject(owner_sub)
+            user_records = self._data.get("users", {}).get(subject)
+            if isinstance(user_records, dict):
+                user_records[key] = None
+                if not any(value for value in user_records.values()):
+                    self._data["users"].pop(subject, None)
             self._save()
 
-    def clear_google(self, owner_sub: Optional[str] = None) -> None:
+    def clear_google(self, owner_sub: str) -> None:
         self._clear("google", owner_sub)
 
-    def clear_youtube(self, owner_sub: Optional[str] = None) -> None:
+    def clear_youtube(self, owner_sub: str) -> None:
         self._clear("youtube", owner_sub)
 
 

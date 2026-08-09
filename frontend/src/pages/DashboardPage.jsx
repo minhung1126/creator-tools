@@ -26,7 +26,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           <h3>{authUser ? authUser.email : '尚未登入控制台'}</h3>
         </div>
         <div className="glass-panel dashboard-status-card">
-          <div className="dashboard-status-head"><span>YouTube 頻道授權</span>{authUser?.youtube_authenticated ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未連結</span>}</div>
+          <div className="dashboard-status-head"><span>YouTube 頻道授權</span>{authUser?.youtube?.authenticated ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未連結</span>}</div>
           <h3>{authUser?.youtube?.user?.email || '請在設定中連結品牌帳號'}</h3>
         </div>
         <div className="glass-panel dashboard-status-card">
