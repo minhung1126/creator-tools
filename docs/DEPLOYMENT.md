@@ -36,7 +36,7 @@ docker compose ps
 docker compose logs -f creator-tools
 ```
 
-更新同樣先 `build --pull` 再 `up -d`。GHCR image 只發布不可變的 commit SHA tag；若使用 GHCR，請在受控部署流程中指定並驗證該 SHA，不要使用 `latest`。
+更新同樣先 `build --pull` 再 `up -d`。GitHub Actions 會同時發布不可變的 commit SHA tag，以及預設分支的 `latest` tag。使用 GHCR 時可拉取 `latest` 取得主線最新版本；正式回滾或需要可重現部署時，請改用完整 commit SHA tag。
 
 ## 3. 持久化與驗證
 
