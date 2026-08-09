@@ -4,6 +4,7 @@ import App from './App.jsx'
 import './index.css'
 import './sticky-bulk-edit.css'
 import './sheet-copy.css'
+import './flat-theme.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
