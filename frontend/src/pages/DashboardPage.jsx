@@ -12,6 +12,9 @@ import {
 import { SourceLinkButton } from '../components/SourceLinkInput';
 
 export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
+  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const activeYoutube = authUser?.youtube?.slots?.[activeSlot] || {};
+
   return (
     <div className="section-gap">
       <header className="glass-panel dashboard-hero page-header">
@@ -26,8 +29,8 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           <h3>{authUser ? authUser.email : '尚未登入控制台'}</h3>
         </div>
         <div className="glass-panel dashboard-status-card">
-          <div className="dashboard-status-head"><span>YouTube 頻道授權</span>{authUser?.youtube?.authenticated ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未連結</span>}</div>
-          <h3>{authUser?.youtube?.user?.email || '請在設定中連結品牌帳號'}</h3>
+          <div className="dashboard-status-head"><span>YouTube 頻道授權</span>{activeYoutube.authenticated ? <span className="badge badge-connected"><CheckCircle2 size={12} /> 已授權</span> : <span className="badge badge-disconnected"><AlertTriangle size={12} /> 未連結</span>}</div>
+          <h3>{activeYoutube.user?.email || '請在設定中連結品牌帳號'}</h3>
         </div>
         <div className="glass-panel dashboard-status-card">
           <div className="dashboard-status-head"><span>主要設定試算表</span><SourceLinkButton value={sysSettings.default_spreadsheet_id} sourceType="spreadsheet" label="開啟主要設定試算表" /></div>

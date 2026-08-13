@@ -29,7 +29,7 @@ function tokenStatusLabel(status) {
   }[status] || '未取得狀態';
 }
 
-function normalizeSlotRecord(slot, record, fallback) {
+function normalizeSlotRecord(slot, record) {
   return {
     slot,
     label: record?.label || (slot === 'primary' ? 'Primary' : 'Secondary'),
@@ -37,7 +37,7 @@ function normalizeSlotRecord(slot, record, fallback) {
     enabled: Boolean(record?.enabled),
     authenticated: Boolean(record?.authenticated),
     can_be_active: Boolean(record?.can_be_active || record?.authenticated),
-    user: record?.user || fallback?.user || null,
+    user: record?.user || null,
     channel_id: record?.channel_id || null,
     channel_title: record?.channel_title || null,
     token_status: record?.token_status || 'not_connected',
@@ -45,9 +45,8 @@ function normalizeSlotRecord(slot, record, fallback) {
     last_refreshed_at: record?.last_refreshed_at,
     last_refresh_error: record?.last_refresh_error,
     client_fingerprint: record?.client_fingerprint,
-    uses_legacy_google_credentials: Boolean(record?.uses_legacy_google_credentials),
-    quota_limit: Number(record?.quota_limit ?? fallback?.quota_limit ?? (slot === 'primary' ? 10000 : 10000)),
-    safety_buffer_units: Number(record?.safety_buffer_units ?? fallback?.safety_buffer_units ?? (slot === 'primary' ? 1000 : 1000)),
+    quota_limit: Number(record?.quota_limit ?? 10000),
+    safety_buffer_units: Number(record?.safety_buffer_units ?? 1000),
   };
 }
 
@@ -55,12 +54,11 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
   const toast = useToast();
   const youtube = useMemo(() => authUser?.youtube || {}, [authUser?.youtube]);
   const initial = useMemo(
-    () => initialSettings(sysSettings.default_playlist_id, sysSettings.youtube_general_quota_limit, sysSettings.youtube_quota_safety_buffer_units),
-    [sysSettings.default_playlist_id, sysSettings.youtube_general_quota_limit, sysSettings.youtube_quota_safety_buffer_units],
+    () => initialSettings(sysSettings.default_playlist_id, sysSettings.quota_limit, sysSettings.safety_buffer_units),
+    [sysSettings.default_playlist_id, sysSettings.quota_limit, sysSettings.safety_buffer_units],
   );
   const slotRecords = useMemo(() => SLOT_ORDER.reduce((all, slot) => {
-    const fallback = slot === 'primary' ? youtube : null;
-    all[slot] = normalizeSlotRecord(slot, youtube.slots?.[slot], fallback);
+    all[slot] = normalizeSlotRecord(slot, youtube.slots?.[slot]);
     return all;
   }, {}), [youtube]);
   const [playlistId, setPlaylistId] = useState(initial.playlistId);
@@ -103,8 +101,8 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
       await api.updateYoutubeSettings({
         slot,
         default_playlist_id: playlistId.trim(),
-        youtube_general_quota_limit: limit,
-        youtube_quota_safety_buffer_units: buffer,
+        quota_limit: limit,
+        safety_buffer_units: buffer,
       });
       await refreshSettings();
       if (refreshAuthUser) await refreshAuthUser();
@@ -123,9 +121,10 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
     setSavingResources(true);
     try {
       await api.updateYoutubeSettings({
+        slot: 'primary',
         default_playlist_id: playlistId.trim(),
-        youtube_general_quota_limit: Number(slotDrafts.primary.quotaLimit),
-        youtube_quota_safety_buffer_units: Number(slotDrafts.primary.quotaBuffer),
+        quota_limit: Number(slotDrafts.primary.quotaLimit),
+        safety_buffer_units: Number(slotDrafts.primary.quotaBuffer),
       });
       await refreshSettings();
       setMsg({ type: 'success', text: '預設播放清單已儲存。' });
@@ -208,7 +207,6 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
               </div>
 
               {!record.configured && <div className="info-banner"><XCircle size={16} /><span>此 slot 尚未由伺服器配置 OAuth Client；前端不會接觸 client secret。</span></div>}
-              {record.uses_legacy_google_credentials && <div className="info-banner"><XCircle size={16} /><span>Primary 目前使用舊版 GOOGLE_CLIENT_* fallback，建議完成 YOUTUBE_OAUTH_PRIMARY_* migration。</span></div>}
               {record.channel_mismatch && <div className="info-banner"><XCircle size={16} /><span>此 slot 的 Channel ID 與另一個 slot 不一致，因此不能設為作用中；請重新授權同一頻道。</span></div>}
 
               <div className="settings-grid">

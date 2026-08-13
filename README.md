@@ -10,6 +10,7 @@
 
 1. **🔑 Google OAuth 2.0 與平台分頁設定**
    - 整合 Google Sheets readonly 與 YouTube Data API v3 權限；YouTube 支援 primary / optional secondary OAuth slot。
+   - Google OAuth 與 YouTube primary slot 可共用同一組 client ID／client secret；環境變數仍需分別填入兩組欄位。
    - Google 與 YouTube 使用各自的設定頁。
    - 工作流程設定與工作進度會依登入的 Google 帳號（OIDC `sub`）保存於伺服器；瀏覽器不再是主要儲存來源。敏感 token / secret 不會由設定 API 回傳前端。
 

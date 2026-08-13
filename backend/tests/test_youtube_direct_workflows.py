@@ -1,6 +1,18 @@
+from types import SimpleNamespace
+
 from backend.app.api import youtube as youtube_api
 from backend.app.api.youtube import BatchUpdateInput, PublishCleanupInput, VideoAssignment
+from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
+
+
+def youtube_context():
+    return YouTubeRequestContext(
+        slot="primary",
+        credentials=object(),
+        quota_limiter=SimpleNamespace(),
+        owner_sub="test-user",
+    )
 
 
 def quota_error():
@@ -80,7 +92,9 @@ def test_metadata_direct_flow_continues_after_one_video_fails(monkeypatch):
 
     monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
 
-    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object(), sheet_creds=object())
+    response = youtube_api.run_batch_metadata_update(
+        metadata_payload(*people), creds=youtube_context(), sheet_creds=object()
+    )
 
     assert [item["status"] for item in response["results"]] == ["succeeded", "failed", "succeeded"]
     assert response["completed"] is True
@@ -103,7 +117,9 @@ def test_metadata_quota_block_keeps_partial_results_and_stops_writes(monkeypatch
 
     monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
 
-    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=object(), sheet_creds=object())
+    response = youtube_api.run_batch_metadata_update(
+        metadata_payload(*people), creds=youtube_context(), sheet_creds=object()
+    )
 
     assert [item["status"] for item in response["results"]] == ["succeeded", "not_attempted", "not_attempted"]
     assert calls == ["video-1", "video-2"]
@@ -152,7 +168,9 @@ def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(
     monkeypatch.setattr(youtube_api, "set_video_public", set_public)
     monkeypatch.setattr(youtube_api, "remove_playlist_item", cleanup)
 
-    response = youtube_api.run_publish_and_cleanup(PublishCleanupInput(playlist_id="playlist"), creds=object())
+    response = youtube_api.run_publish_and_cleanup(
+        PublishCleanupInput(playlist_id="playlist"), creds=youtube_context()
+    )
 
     assert [item["video_id"] for item in response["results"]] == ["video-1", "video-2", "video-3"]
     assert [item["status"] for item in response["results"]] == [
@@ -187,7 +205,9 @@ def test_publish_quota_after_public_keeps_completed_item_and_partial_results(mon
     )
     monkeypatch.setattr(youtube_api, "remove_playlist_item", lambda *_args: (_ for _ in ()).throw(quota_error()))
 
-    response = youtube_api.run_publish_and_cleanup(PublishCleanupInput(playlist_id="playlist"), creds=object())
+    response = youtube_api.run_publish_and_cleanup(
+        PublishCleanupInput(playlist_id="playlist"), creds=youtube_context()
+    )
 
     assert [item["status"] for item in response["results"]] == ["succeeded_with_warnings", "not_attempted"]
     assert public_calls == ["video-1"]

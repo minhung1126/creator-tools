@@ -51,9 +51,8 @@ YOUTUBE_QUOTA_METHODS: dict[str, dict[str, Any]] = {
 }
 
 # ``channels.list`` is used only during OAuth channel verification. Keep it in
-# a separate registry so older integrations that enumerate the original
-# workflow methods remain compatible while the verification request is still
-# charged to the selected slot's ledger.
+# a separate registry so the verification request is charged to the selected
+# slot's ledger without changing the workflow method registry.
 YOUTUBE_AUXILIARY_QUOTA_METHODS: dict[str, dict[str, Any]] = {
     "channels.list": {"bucket": GENERAL_BUCKET, "cost": 1},
 }

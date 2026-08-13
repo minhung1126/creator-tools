@@ -197,8 +197,14 @@ def test_cost_estimates_match_direct_metadata_and_publish_formulas(monkeypatch):
     from backend.app.api.youtube import _quota_estimate
 
     monkeypatch.setattr(
-        "backend.app.api.youtube.youtube_quota_tracker.get_usage",
-        lambda: {"effective_available_units": 1500, "reset_at": "reset", "reset_timezone": "America/Los_Angeles"},
+        "backend.app.api.youtube.get_youtube_quota_tracker",
+        lambda _slot="primary": SimpleNamespace(
+            get_usage=lambda: {
+                "effective_available_units": 1500,
+                "reset_at": "reset",
+                "reset_timezone": "America/Los_Angeles",
+            }
+        ),
     )
     metadata = _quota_estimate("youtube.metadata_update", 51)
     publish = _quota_estimate("youtube.publish_cleanup", 20)

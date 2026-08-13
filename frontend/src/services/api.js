@@ -61,10 +61,8 @@ async function request(endpoint, options = {}) {
 export const api = {
   getAuthConfig: () => request('/auth/config'),
   getAuthUrl: () => request('/auth/url'),
-  getYoutubeAuthUrl: (slot = 'primary') => request(slot === 'primary' ? '/auth/youtube/url' : `/auth/youtube/${encodeURIComponent(slot)}/url`),
-  disconnectYoutube: (slot = 'primary', { confirm = false } = {}) => request(slot === 'primary'
-    ? `/auth/youtube/disconnect${confirm ? '?confirm=true' : ''}`
-    : `/auth/youtube/${encodeURIComponent(slot)}/disconnect${confirm ? '?confirm=true' : ''}`, { method: 'POST' }),
+  getYoutubeAuthUrl: (slot = 'primary') => request(`/auth/youtube/${encodeURIComponent(slot)}/url`),
+  disconnectYoutube: (slot = 'primary', { confirm = false } = {}) => request(`/auth/youtube/${encodeURIComponent(slot)}/disconnect${confirm ? '?confirm=true' : ''}`, { method: 'POST' }),
   activateYoutubeSlot: (slot) => request(`/auth/youtube/${encodeURIComponent(slot)}/activate`, { method: 'POST' }),
   getUserStatus: () => request('/auth/user'),
   logout: () => request('/auth/logout', { method: 'POST' }),

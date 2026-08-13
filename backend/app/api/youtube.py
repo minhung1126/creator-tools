@@ -11,11 +11,10 @@ from backend.app.core.config import normalize_youtube_slot
 from backend.app.core.dependencies import (
     require_account_subject,
     require_login_credentials,
-    require_youtube_credentials,
+    require_youtube_context,
 )
 from backend.app.core.request_protection import enforce_workflow_rate_limit
-from backend.app.core.runtime_config import runtime_config
-from backend.app.core.youtube_context import YouTubeRequestContext, coerce_youtube_context
+from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
@@ -23,7 +22,7 @@ from backend.app.services.sheets_service import (
     normalize_text,
 )
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
-from backend.app.services.youtube_quota_service import get_youtube_quota_tracker, youtube_quota_tracker
+from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_items,
     fetch_playlist_preview,
@@ -90,7 +89,7 @@ def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = No
 
     projected = sum(int(item["units"]) for item in breakdown)
     if slot is None:
-        tracker = youtube_quota_tracker
+        tracker = get_youtube_quota_tracker("primary")
         slot_name = "primary"
     else:
         try:
@@ -195,14 +194,10 @@ def estimate_quota(
 @router.post("/playlist-items")
 def get_playlist_videos(
     payload: PlaylistItemsInput,
-    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
+    creds: YouTubeRequestContext = Depends(require_youtube_context),
 ):
-    youtube_context = coerce_youtube_context(creds)
-    playlist_id = payload.playlist_id or get_account_setting(
-        youtube_context.owner_sub,
-        "default_playlist_id",
-        runtime_config.get("default_playlist_id") if not youtube_context.owner_sub else "",
-    )
+    youtube_context = creds
+    playlist_id = payload.playlist_id or get_account_setting(youtube_context.owner_sub, "default_playlist_id", "")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:
@@ -273,17 +268,15 @@ def _direct_workflow_response(
 @router.post("/batch-update")
 def run_batch_metadata_update(
     payload: BatchUpdateInput,
-    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
+    creds: YouTubeRequestContext = Depends(require_youtube_context),
     sheet_creds: Credentials = Depends(require_login_credentials),
     _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Validate and update selected videos synchronously, returning one result per video."""
-    youtube_context = coerce_youtube_context(creds)
+    youtube_context = creds
 
     spreadsheet_id = payload.spreadsheet_url_or_id or get_account_setting(
-        youtube_context.owner_sub,
-        "default_spreadsheet_id",
-        runtime_config.get("default_spreadsheet_id") if not youtube_context.owner_sub else "",
+        youtube_context.owner_sub, "default_spreadsheet_id", ""
     )
     if not spreadsheet_id:
         raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
@@ -430,17 +423,13 @@ def run_batch_metadata_update(
 @router.post("/publish-and-cleanup")
 def run_publish_and_cleanup(
     payload: PublishCleanupInput,
-    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
+    creds: YouTubeRequestContext = Depends(require_youtube_context),
     _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
-    youtube_context = coerce_youtube_context(creds)
+    youtube_context = creds
 
-    playlist_id = payload.playlist_id or get_account_setting(
-        youtube_context.owner_sub,
-        "default_playlist_id",
-        runtime_config.get("default_playlist_id") if not youtube_context.owner_sub else "",
-    )
+    playlist_id = payload.playlist_id or get_account_setting(youtube_context.owner_sub, "default_playlist_id", "")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:

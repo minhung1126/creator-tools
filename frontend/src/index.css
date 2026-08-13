@@ -2916,7 +2916,7 @@ h1, h2, h3, h4, h5, h6,
   }
 }
 
-/* Neutralize legacy decorative gradients that predate the flat visual system. */
+/* Keep the dashboard hero aligned with the flat visual system. */
 .dashboard-hero {
   background: #20201e;
   border-color: #3b3b36;

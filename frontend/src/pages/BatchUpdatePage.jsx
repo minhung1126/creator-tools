@@ -62,13 +62,17 @@ function PreviewField({ label, value }) {
 
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
-  const youtubeConnected = Boolean(authUser?.youtube?.authenticated);
+  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const youtubeConnected = Boolean(authUser?.youtube?.slots?.[activeSlot]?.authenticated);
   const defaults = DEFAULT_COLUMNS[videoType];
   const draftStateKey = videoType === 'Shorts' ? 'youtube_draft_shorts' : 'youtube_draft_video';
   const { value: rememberedState, error: workStateError, save: saveWorkState } = useAccountWorkState(draftStateKey, {});
-  const remembered = rememberedState && typeof rememberedState === 'object' ? rememberedState : {};
+  const remembered = useMemo(
+    () => (rememberedState && typeof rememberedState === 'object' ? rememberedState : {}),
+    [rememberedState],
+  );
   const sharedFilter = useMemo(
-    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter, { allowBrowserFallback: false }),
+    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter),
     [sysSettings.shared_team_person_filter],
   );
   const persistedDefaults = useMemo(() => ({
@@ -193,7 +197,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       });
 
     return () => { cancelled = true; };
-  }, [videoType, authUser, defaults, persistedDefaults, sharedFilter, applyConfig]);
+  }, [videoType, authUser, defaults, persistedDefaults, sharedFilter, applyConfig, remembered]);
 
   useEffect(() => {
     if (!hydrated) return undefined;

@@ -5,7 +5,7 @@ Creator Tools 需要 Google Sheets 與 YouTube Data API v3 的 OAuth 2.0 授權�
 ## 1. Google Cloud 設定
 
 1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立登入/Sheets 用的 `Creator-Tools` 專案，並啟用 Google Sheets API。
-2. 建立一個或兩個 YouTube Data API v3 專案／Web Client，分別填入 primary 與 optional secondary slot。兩個 client 可共用 callback，但 quota ledger 與授權 token 在 Creator Tools 中分開保存。
+2. 建立一個或兩個 YouTube Data API v3 專案／Web Client，分別填入 primary 與 optional secondary slot。Google OAuth 登入與 YouTube primary slot 可以共用同一組 client ID 與 client secret；secondary 若啟用則使用另一組 client。所有 client 可共用 callback，但 quota ledger 與授權 token 在 Creator Tools 中分開保存。
 3. 在 OAuth consent screen 加入 userinfo email/profile、Sheets readonly 與 YouTube scopes；本專案不需要 Google Drive scope。
 4. Development Mode 請把測試管理者加入 Test users。
 5. 建立 Web application OAuth client，設定 callback：
@@ -29,8 +29,8 @@ CREDENTIAL_ENCRYPTION_KEY=generate-a-stable-encryption-key
 ALLOWED_GOOGLE_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=your-login-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-login-client-secret
-YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=your-youtube-primary-client-id.apps.googleusercontent.com
-YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=your-youtube-primary-client-secret
+YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=your-login-client-id.apps.googleusercontent.com
+YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=your-login-client-secret
 YOUTUBE_OAUTH_PRIMARY_LABEL=Primary
 YOUTUBE_OAUTH_SECONDARY_ENABLED=false
 YOUTUBE_OAUTH_SECONDARY_CLIENT_ID=
@@ -51,4 +51,4 @@ YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS=1000
 
 登入後，系統會把 Google token 加密存於 server-side credential store；瀏覽器 cookie 只有 opaque session ID。YouTube token 會保存為 `youtube_primary`／`youtube_secondary`，client secret 永不持久化。OAuth callback 會用簽名 cookie 中的 slot 驗證流程，不能以 callback URL 參數改寫 slot。修改 `.env` 後請重新啟動服務。
 
-Primary 會暫時 fallback 到既有 `GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET`，Health Check 會顯示 migration warning。OAuth slot 的兩個授權若回傳不同 Channel ID，第二個 slot 不會被啟用；控制台也只會在有效授權與頻道驗證完成後允許設為 active。
+若 Google OAuth 與 YouTube primary 共用 client，請仍然同時設定 `GOOGLE_CLIENT_*` 與 `YOUTUBE_OAUTH_PRIMARY_CLIENT_*`，兩組值填相同即可；系統會以 YouTube slot 的設定建立 YouTube OAuth flow。OAuth slot 的兩個授權若回傳不同 Channel ID，第二個 slot 不會被啟用；控制台也只會在有效授權與頻道驗證完成後允許設為 active。

@@ -81,10 +81,6 @@ def health_check():
         warnings.append("ALLOWED_GOOGLE_EMAILS is required for HTTPS/production deployments")
     if google_oauth_ready and not youtube_primary_ready:
         warnings.append("YouTube primary OAuth credentials are not configured")
-    if youtube_primary.uses_legacy_google_credentials:
-        warnings.append(
-            "YouTube primary OAuth is using the legacy Google login client; configure YOUTUBE_OAUTH_PRIMARY_* to complete migration"
-        )
     return {
         "status": "healthy",
         "ready": google_oauth_ready and youtube_primary_ready and access_allowlist_ready,

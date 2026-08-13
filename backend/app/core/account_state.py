@@ -11,7 +11,6 @@ from backend.app.core.account_state_store import (
     account_state_store,
 )
 from backend.app.core.config import normalize_youtube_slot, settings
-from backend.app.core.runtime_config import runtime_config
 
 
 def _owner(value: Any) -> str | None:
@@ -21,53 +20,39 @@ def _owner(value: Any) -> str | None:
     return normalized or None
 
 
-def _legacy_settings() -> dict[str, Any]:
-    return {key: runtime_config.get(key, None) for key in ACCOUNT_SETTING_KEYS}
-
-
-def ensure_account(owner_sub: Any) -> str | None:
+def ensure_account(owner_sub: str) -> str:
     subject = _owner(owner_sub)
-    if subject:
-        account_state_store.ensure_account(subject, _legacy_settings())
+    if not subject:
+        raise ValueError("account subject is required")
+    account_state_store.ensure_account(subject)
     return subject
 
 
-def get_account_setting(owner_sub: Any, key: str, default: Any = "") -> Any:
+def get_account_setting(owner_sub: str, key: str, default: Any = "") -> Any:
     if key not in ACCOUNT_SETTING_KEYS:
         raise ValueError(f"Unsupported account setting: {key}")
     subject = ensure_account(owner_sub)
-    if not subject:
-        return runtime_config.get(key, default)
     value = account_state_store.get_setting(subject, key, MISSING)
     return default if value is MISSING else value
 
 
-def set_account_setting(owner_sub: Any, key: str, value: Any) -> None:
+def set_account_setting(owner_sub: str, key: str, value: Any) -> None:
     if key not in ACCOUNT_SETTING_KEYS:
         raise ValueError(f"Unsupported account setting: {key}")
-    subject = _owner(owner_sub)
-    if subject:
-        ensure_account(subject)
-        account_state_store.set_setting(subject, key, value)
-    else:
-        runtime_config.set(key, value)
+    subject = ensure_account(owner_sub)
+    account_state_store.set_setting(subject, key, value)
 
 
-def update_account_settings(owner_sub: Any, values: dict[str, Any]) -> None:
-    subject = _owner(owner_sub)
-    if not subject:
-        runtime_config.update(values)
-        return
-    ensure_account(subject)
+def update_account_settings(owner_sub: str, values: dict[str, Any]) -> None:
+    subject = ensure_account(owner_sub)
     for key, value in values.items():
         if key in ACCOUNT_SETTING_KEYS and value is not None:
             account_state_store.set_setting(subject, key, value)
 
 
-def get_account_active_slot(owner_sub: Any) -> str:
-    subject = _owner(owner_sub)
-    fallback = runtime_config.get_youtube_active_slot() if not subject else settings.youtube_default_slot
-    value = get_account_setting(subject, "youtube_active_slot", fallback)
+def get_account_active_slot(owner_sub: str) -> str:
+    subject = ensure_account(owner_sub)
+    value = get_account_setting(subject, "youtube_active_slot", settings.youtube_default_slot)
     try:
         slot = normalize_youtube_slot(value)
     except ValueError:
@@ -79,25 +64,21 @@ def get_account_active_slot(owner_sub: Any) -> str:
     return slot
 
 
-def set_account_active_slot(owner_sub: Any, slot: str) -> str:
+def set_account_active_slot(owner_sub: str, slot: str) -> str:
     normalized = normalize_youtube_slot(slot)
     set_account_setting(owner_sub, "youtube_active_slot", normalized)
     return normalized
 
 
-def get_account_work_state(owner_sub: Any) -> dict[str, Any]:
+def get_account_work_state(owner_sub: str) -> dict[str, Any]:
     subject = ensure_account(owner_sub)
-    if not subject:
-        return {}
     return account_state_store.get_work_state(subject)
 
 
-def update_account_work_state(owner_sub: Any, key: str, value: dict[str, Any]) -> dict[str, Any]:
+def update_account_work_state(owner_sub: str, key: str, value: dict[str, Any]) -> dict[str, Any]:
     if key not in WORK_STATE_KEYS:
         raise ValueError(f"Unsupported work state: {key}")
     subject = ensure_account(owner_sub)
-    if not subject:
-        return {}
     return account_state_store.set_work_state(subject, key, value)
 
 

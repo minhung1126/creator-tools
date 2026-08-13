@@ -139,7 +139,6 @@ def get_auth_config():
             "configured": slot_config.configured,
             "enabled": slot_config.enabled,
             "client_fingerprint": slot_config.client_fingerprint,
-            "uses_legacy_google_credentials": slot_config.uses_legacy_google_credentials,
             "quota_limit": slot_config.quota_limit,
             "safety_buffer_units": slot_config.safety_buffer_units,
         }
@@ -178,12 +177,6 @@ def get_google_auth_url(response: Response):
     except Exception as exc:
         logger.error("Failed to generate login auth URL: %s", type(exc).__name__)
         raise HTTPException(status_code=500, detail="無法建立 Google 登入授權網址，請稍後再試。") from exc
-
-
-@router.get("/youtube/url")
-def get_youtube_auth_url(request: Request, response: Response):
-    """Legacy alias for the primary YouTube OAuth slot."""
-    return get_youtube_slot_auth_url("primary", request, response)
 
 
 @router.get("/youtube/{slot}/url")
@@ -355,7 +348,7 @@ def get_user_status(request: Request):
         return {
             "authenticated": False,
             "user": None,
-            "youtube": {"authenticated": False, "user": None},
+            "youtube": {"slots": {}},
         }
 
     user_info = session_data.get("user") or {"email": "Authenticated User"}
@@ -388,7 +381,6 @@ def get_user_status(request: Request):
             "last_refresh_error": youtube_public.get("last_refresh_error"),
             "client_fingerprint": youtube_public.get("client_fingerprint"),
             "can_be_active": authenticated,
-            "uses_legacy_google_credentials": slot_config.uses_legacy_google_credentials,
             "quota_limit": quota_limit,
             "safety_buffer_units": quota_buffer,
         }
@@ -404,11 +396,8 @@ def get_user_status(request: Request):
             slot["channel_mismatch"] = False
     active_slot = get_account_active_slot(session_sub)
     youtube_connection = {
-        **youtube_slots.get(active_slot, {}),
         "active_slot": active_slot,
         "slots": youtube_slots,
-        # Preserve the old top-level contract for existing frontend clients.
-        "authenticated": bool(youtube_slots.get(active_slot, {}).get("authenticated")),
     }
     return {
         "authenticated": True,
@@ -420,12 +409,6 @@ def get_user_status(request: Request):
         "last_refresh_error": token_status.get("last_refresh_error"),
         "youtube": youtube_connection,
     }
-
-
-@router.post("/youtube/disconnect")
-def disconnect_youtube(request: Request, confirm: bool = Query(False)):
-    """Legacy primary disconnect endpoint."""
-    return disconnect_youtube_slot("primary", request, confirm)
 
 
 @router.post("/youtube/{slot}/disconnect")

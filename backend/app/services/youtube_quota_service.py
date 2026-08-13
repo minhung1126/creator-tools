@@ -21,11 +21,6 @@ _youtube_quota_trackers: dict[str, YouTubeQuotaLimiter] = {
     "secondary": YouTubeQuotaLimiter(QUOTA_FILE_SECONDARY, slot="secondary"),
 }
 
-# Backwards-compatible primary alias. New code should resolve the tracker from
-# the request context so a token and its ledger can never be mixed.
-youtube_quota_tracker = _youtube_quota_trackers["primary"]
-
-
 def get_youtube_quota_tracker(slot: str = "primary") -> YouTubeQuotaLimiter:
     slot_name = str(slot or "").strip().casefold()
     if slot_name not in _youtube_quota_trackers:
@@ -46,5 +41,4 @@ __all__ = [
     "YOUTUBE_AUXILIARY_QUOTA_METHODS",
     "YouTubeQuotaLimiter",
     "get_youtube_quota_tracker",
-    "youtube_quota_tracker",
 ]

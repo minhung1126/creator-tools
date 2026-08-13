@@ -90,45 +90,10 @@ class CredentialStore:
                         for subject, records in users.items()
                         if isinstance(records, dict) and _normalise_subject(subject)
                     }
-                    migrated = False
-                    for records in users.values():
-                        if "youtube" in records:
-                            legacy = records.pop("youtube")
-                            if "youtube_primary" not in records:
-                                if isinstance(legacy, dict):
-                                    legacy = dict(legacy)
-                                    legacy.setdefault("slot", "primary")
-                                records["youtube_primary"] = legacy
-                            migrated = True
-                        for slot in ("primary", "secondary"):
-                            key = f"youtube_{slot}"
-                            record = records.get(key)
-                            if isinstance(record, dict) and record.get("slot") != slot:
-                                record["slot"] = slot
-                                migrated = True
-                            if isinstance(record, dict):
-                                encrypted = record.get("credentials_encrypted")
-                                try:
-                                    credentials = self._decrypt_json(encrypted)
-                                except RuntimeError:
-                                    credentials = None
-                                if isinstance(credentials, dict) and "client_secret" in credentials:
-                                    credentials.pop("client_secret", None)
-                                    record["credentials_encrypted"] = self._encrypt(
-                                        json.dumps(credentials, ensure_ascii=False)
-                                    )
-                                    migrated = True
-                                if isinstance(credentials, dict) and not record.get("client_fingerprint"):
-                                    client_id = str(credentials.get("client_id") or "").strip()
-                                    if client_id:
-                                        record["client_fingerprint"] = hashlib.sha256(client_id.encode("utf-8")).hexdigest()[:16]
-                                        migrated = True
                     self._data = {
                         "version": _STORE_VERSION,
                         "users": users,
                     }
-                    if migrated:
-                        self._save()
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", type(exc).__name__)
 

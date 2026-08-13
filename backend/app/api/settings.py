@@ -30,22 +30,18 @@ class YouTubeResourceSettingsModel(BaseModel):
     """YouTube-only resource settings."""
 
     default_playlist_id: str = Field(default="", max_length=256)
-    slot: Literal["primary", "secondary"] | None = None
-    youtube_general_quota_limit: int | None = None
-    youtube_quota_safety_buffer_units: int | None = None
+    slot: Literal["primary", "secondary"]
+    quota_limit: int
+    safety_buffer_units: int
 
     @model_validator(mode="after")
     def validate_quota_policy(self):
-        if self.youtube_general_quota_limit is not None and self.youtube_general_quota_limit <= 0:
-            raise ValueError("youtube_general_quota_limit 必須大於 0")
-        if self.youtube_quota_safety_buffer_units is not None and self.youtube_quota_safety_buffer_units < 0:
-            raise ValueError("youtube_quota_safety_buffer_units 必須大於等於 0")
-        if (
-            self.youtube_general_quota_limit is not None
-            and self.youtube_quota_safety_buffer_units is not None
-            and self.youtube_quota_safety_buffer_units >= self.youtube_general_quota_limit
-        ):
-            raise ValueError("youtube_quota_safety_buffer_units 必須小於 youtube_general_quota_limit")
+        if self.quota_limit <= 0:
+            raise ValueError("quota_limit 必須大於 0")
+        if self.safety_buffer_units < 0:
+            raise ValueError("safety_buffer_units 必須大於等於 0")
+        if self.safety_buffer_units >= self.quota_limit:
+            raise ValueError("safety_buffer_units 必須小於 quota_limit")
         return self
 
 
@@ -88,14 +84,7 @@ def _draft_config_key(video_type: str) -> str:
     return f"youtube_draft_{video_type.lower()}_config"
 
 
-def _resolve_owner(owner_sub: Any) -> str | None:
-    if not isinstance(owner_sub, str):
-        return None
-    value = owner_sub.strip()
-    return value or None
-
-
-def _read_draft_config(video_type: str, owner_sub: str | None = None) -> Dict:
+def _read_draft_config(video_type: str, owner_sub: str) -> Dict:
     raw = get_account_setting(owner_sub, _draft_config_key(video_type), "")
     if not isinstance(raw, dict) or not raw:
         return {}
@@ -106,7 +95,7 @@ def _read_draft_config(video_type: str, owner_sub: str | None = None) -> Dict:
         return {}
 
 
-def _read_team_person_filter(owner_sub: str | None = None) -> tuple[Dict, bool]:
+def _read_team_person_filter(owner_sub: str) -> tuple[Dict, bool]:
     raw = get_account_setting(owner_sub, "shared_team_person_filter", None)
     if isinstance(raw, dict):
         try:
@@ -122,9 +111,8 @@ def get_shared_settings(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    owner = _resolve_owner(owner_sub)
     return {
-        "default_spreadsheet_id": get_account_setting(owner, "default_spreadsheet_id", ""),
+        "default_spreadsheet_id": get_account_setting(owner_sub, "default_spreadsheet_id", ""),
     }
 
 
@@ -146,15 +134,10 @@ def update_shared_settings(
     creds: Credentials = Depends(require_login_credentials),
     owner_sub: str = Depends(require_account_subject),
 ):
-    owner = _resolve_owner(owner_sub)
     value = payload.default_spreadsheet_id.strip()
-    if owner:
-        set_account_setting(owner, "default_spreadsheet_id", value)
-    else:
-        # Keep direct/unit-test callers and legacy integrations functional.
-        runtime_config.update({"default_spreadsheet_id": value})
+    set_account_setting(owner_sub, "default_spreadsheet_id", value)
     logger.info("Account-scoped resource settings updated: default_spreadsheet_id")
-    return {"status": "success", "settings": get_shared_settings(creds, owner)}
+    return {"status": "success", "settings": get_shared_settings(creds, owner_sub)}
 
 
 @router.get("/youtube")
@@ -163,12 +146,12 @@ def get_youtube_settings(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    owner = _resolve_owner(owner_sub)
     primary_limit, primary_buffer = runtime_config.get_youtube_quota_settings("primary")
     return {
-        "default_playlist_id": get_account_setting(owner, "default_playlist_id", ""),
-        "youtube_general_quota_limit": primary_limit,
-        "youtube_quota_safety_buffer_units": primary_buffer,
+        "default_playlist_id": get_account_setting(owner_sub, "default_playlist_id", ""),
+        "slot": "primary",
+        "quota_limit": primary_limit,
+        "safety_buffer_units": primary_buffer,
     }
 
 
@@ -188,11 +171,10 @@ def get_youtube_slot_settings(
             "configured": slot_config.configured,
             "enabled": slot_config.enabled,
             "client_fingerprint": slot_config.client_fingerprint,
-            "uses_legacy_google_credentials": slot_config.uses_legacy_google_credentials,
             "quota_limit": limit,
             "safety_buffer_units": buffer,
         }
-    return {"active_slot": get_account_active_slot(_resolve_owner(owner_sub)), "slots": slots}
+    return {"active_slot": get_account_active_slot(owner_sub), "slots": slots}
 
 
 @router.put("/youtube")
@@ -201,47 +183,30 @@ def update_youtube_settings(
     creds: Credentials = Depends(require_login_credentials),
     owner_sub: str = Depends(require_account_subject),
 ):
-    owner = _resolve_owner(owner_sub)
-    slot = payload.slot or "primary"
-    current_limit, current_buffer = runtime_config.get_youtube_quota_settings(slot)
-    limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit
-    buffer = (
-        payload.youtube_quota_safety_buffer_units
-        if payload.youtube_quota_safety_buffer_units is not None
-        else current_buffer
-    )
+    slot = payload.slot
+    limit = payload.quota_limit
+    buffer = payload.safety_buffer_units
     if limit <= 0:
-        raise HTTPException(status_code=422, detail="youtube_general_quota_limit 必須大於 0")
+        raise HTTPException(status_code=422, detail="quota_limit 必須大於 0")
     if buffer < 0 or buffer >= limit:
-        raise HTTPException(status_code=422, detail="youtube_quota_safety_buffer_units 必須大於等於 0 且小於 limit")
-    updates = {"default_playlist_id": payload.default_playlist_id.strip()}
-    if payload.slot is None:
-        # Preserve the old API's primary keys for clients that have not yet
-        # learned the slot-specific settings contract.
-        updates.update(
-            {
-                "youtube_general_quota_limit": limit,
-                "youtube_quota_safety_buffer_units": buffer,
-            }
-        )
-    else:
-        updates.update(
-            {
-                f"youtube_{slot}_general_quota_limit": limit,
-                f"youtube_{slot}_quota_safety_buffer_units": buffer,
-            }
-        )
-    if owner:
-        set_account_setting(owner, "default_playlist_id", updates["default_playlist_id"])
-        quota_updates = {key: value for key, value in updates.items() if key != "default_playlist_id"}
-        if quota_updates:
-            # Quota is tied to the deployed OAuth project and shared ledger;
-            # keep its policy server-global while scoping the working playlist.
-            runtime_config.update(quota_updates)
-    else:
-        runtime_config.update(updates)
+        raise HTTPException(status_code=422, detail="safety_buffer_units 必須大於等於 0 且小於 limit")
+    set_account_setting(owner_sub, "default_playlist_id", payload.default_playlist_id.strip())
+    runtime_config.update(
+        {
+            f"youtube_{slot}_general_quota_limit": limit,
+            f"youtube_{slot}_quota_safety_buffer_units": buffer,
+        }
+    )
     logger.info("YouTube resource settings updated: account playlist, slot=%s quota policy", slot)
-    return {"status": "success", "settings": get_youtube_settings(creds, owner)}
+    return {
+        "status": "success",
+        "settings": {
+            "default_playlist_id": payload.default_playlist_id.strip(),
+            "slot": slot,
+            "quota_limit": limit,
+            "safety_buffer_units": buffer,
+        },
+    }
 
 
 @router.get("/youtube-drafts")
@@ -250,10 +215,9 @@ def get_youtube_draft_settings(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    owner = _resolve_owner(owner_sub)
     return {
-        "video": _read_draft_config("Video", owner),
-        "shorts": _read_draft_config("Shorts", owner),
+        "video": _read_draft_config("Video", owner_sub),
+        "shorts": _read_draft_config("Shorts", owner_sub),
     }
 
 
@@ -264,13 +228,9 @@ def update_youtube_draft_settings(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    owner = _resolve_owner(owner_sub)
     key = _draft_config_key(payload.video_type)
     value = payload.config.model_dump()
-    if owner:
-        set_account_setting(owner, key, value)
-    else:
-        runtime_config.set(key, value)
+    set_account_setting(owner_sub, key, value)
     logger.info("Account-scoped YouTube %s draft settings updated", payload.video_type)
     return {"status": "success", "video_type": payload.video_type, "config": value}
 
@@ -281,7 +241,7 @@ def get_team_person_filter(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    value, configured = _read_team_person_filter(_resolve_owner(owner_sub))
+    value, configured = _read_team_person_filter(owner_sub)
     return {"configured": configured, **value}
 
 
@@ -293,11 +253,7 @@ def update_team_person_filter(
 ):
     del creds
     value = payload.model_dump()
-    owner = _resolve_owner(owner_sub)
-    if owner:
-        set_account_setting(owner, "shared_team_person_filter", value)
-    else:
-        runtime_config.set("shared_team_person_filter", value)
+    set_account_setting(owner_sub, "shared_team_person_filter", value)
     logger.info("Account-scoped team/person filter updated")
     return {"configured": True, **value}
 
@@ -308,7 +264,7 @@ def get_work_state(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    return {"version": 1, "state": get_account_work_state(_resolve_owner(owner_sub))}
+    return {"version": 1, "state": get_account_work_state(owner_sub)}
 
 
 @router.put("/work-state")
@@ -318,9 +274,8 @@ def update_work_state(
     owner_sub: str = Depends(require_account_subject),
 ):
     del creds
-    owner = _resolve_owner(owner_sub)
     try:
-        state = update_account_work_state(owner, payload.key, payload.value)
+        state = update_account_work_state(owner_sub, payload.key, payload.value)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"version": 1, "state": state}

@@ -6,7 +6,7 @@ Creator Tools 的 production image 可由 GitHub Actions 發布至 GHCR；本機
 
 1. 安裝 Docker Engine/Docker Compose v2。
 2. 建立 `.env`，參考根目錄 `.env.example`。
-3. 正式環境至少設定 `ENVIRONMENT=production`、`BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS`、登入 Google OAuth 憑證與 YouTube primary OAuth 憑證。secondary 是 optional，但啟用時 client ID/secret 必須成對存在。
+3. 正式環境至少設定 `ENVIRONMENT=production`、`BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS`、登入 Google OAuth 憑證與 YouTube primary OAuth 憑證。Google OAuth 與 YouTube primary slot 可以填相同的 client ID／client secret；secondary 是 optional，但啟用時 client ID/secret 必須成對存在。
 
 `PUBLIC_BASE_URL` 是 Google callback 的唯一來源；`BIND_HOST` 只控制容器內 bind address。若 reverse proxy 位於 homelab 的另一台設備，Creator Tools 主機必須讓該設備可以連到 `8000`，建議設定成：
 
@@ -23,8 +23,8 @@ CREDENTIAL_ENCRYPTION_KEY=請固定保存的加密金鑰
 ALLOWED_GOOGLE_EMAILS=admin@example.com
 GOOGLE_CLIENT_ID=你的登入 Google OAuth Client ID
 GOOGLE_CLIENT_SECRET=你的登入 Google OAuth Client Secret
-YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=你的 YouTube primary OAuth Client ID
-YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=你的 YouTube primary OAuth Client Secret
+YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=可與上方 GOOGLE_CLIENT_ID 相同
+YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=可與上方 GOOGLE_CLIENT_SECRET 相同
 YOUTUBE_OAUTH_SECONDARY_ENABLED=false
 YOUTUBE_OAUTH_SECONDARY_CLIENT_ID=
 YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET=
@@ -59,7 +59,6 @@ docker compose logs -f creator-tools
   ```
 
   實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。YouTube metadata 與發布清理會在 API request 內直接執行，不再建立背景任務、通知或歷史資料。
-- 從舊版升級時，先停止舊服務並備份 `creator_tools.db`、`creator_tools.db-wal`、`creator_tools.db-shm`、`instagram_publish_jobs.json` 與 `instagram_api_usage.json`。若 `youtube_quota_usage.json` 尚不存在，新版首次啟動會以唯讀方式從舊 DB 匯入當日 YouTube quota aggregate，寫入 JSON 後便不再開啟 DB。確認 JSON 已產生且不需回復舊版後，再由操作者手動清理舊檔；程式不會自動刪除它們。
 - 不要把 `.env`、`data/credential_store.json`、`data/sessions.json` 或 `data/account_state.json` 提交到 Git。
 - Health check：`https://creator-tools.ymin.io/api/v1/health`。除了 HTTP 200，也要確認 JSON 的 `ready: true`；`configuration` 與 `warnings` 只揭露設定是否齊全，不會回傳任何金鑰。
 - Google Authorized Redirect URI：`https://creator-tools.ymin.io/api/v1/auth/callback`。
@@ -67,4 +66,4 @@ docker compose logs -f creator-tools
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時，Google login 會被拒絕；目前產品模式是單一管理者。
 
-登入後的 Google Sheet、YouTube playlist、Video/Shorts 草稿、Sheet 顯示選項、發布清單輸入與導覽狀態，會依 Google 帳號保存到 `data/account_state.json`，不需要放進 `.env`。修改網頁設定後不必重啟服務；修改 `.env` 則需要重新啟動。舊版 `data/runtime_config.json` 的工作設定會在升級後首次登入時遷移給第一個使用帳號，之後新帳號不會讀取該全域值。
+登入後的 Google Sheet、YouTube playlist、Video/Shorts 草稿、Sheet 顯示選項、發布清單輸入與導覽狀態，會依 Google 帳號保存到 `data/account_state.json`，不需要放進 `.env`。修改網頁設定後不必重啟服務；修改 `.env` 則需要重新啟動。

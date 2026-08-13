@@ -69,17 +69,20 @@ export function AccountWorkStateProvider({ initialState = {}, children }) {
 
 export default function useAccountWorkState(key, fallback = {}) {
   const context = useContext(AccountWorkStateContext);
+  const save = useCallback(
+    (value, options) => (context ? context.save(key, value, options) : Promise.resolve(null)),
+    [context, key],
+  );
   if (!context) {
     return {
       ready: false,
       value: fallback,
       saving: false,
       error: '',
-      save: () => Promise.resolve(null),
+      save,
     };
   }
 
-  const save = useCallback((value, options) => context.save(key, value, options), [context.save, key]);
   return {
     ready: context.ready,
     value: context.state[key] === undefined ? fallback : context.state[key],

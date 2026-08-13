@@ -65,7 +65,6 @@ class AccountStateStore:
         self._lock = RLock()
         self._data: dict[str, Any] = {
             "version": 1,
-            "legacy_migrated": False,
             "accounts": {},
         }
         self._load()
@@ -97,7 +96,6 @@ class AccountStateStore:
                     }
             self._data = {
                 "version": 1,
-                "legacy_migrated": bool(loaded.get("legacy_migrated")),
                 "accounts": normalized_accounts,
             }
             logger.info("Loaded account state from %s", self._path)
@@ -134,22 +132,10 @@ class AccountStateStore:
             changed = True
         return account, changed
 
-    def ensure_account(self, owner_sub: str, legacy_settings: dict[str, Any] | None = None) -> None:
+    def ensure_account(self, owner_sub: str) -> None:
         subject = _subject(owner_sub)
         with self._lock:
             account, changed = self._ensure_account_unlocked(subject)
-            # runtime_config.json was historically global. Migrate it once to
-            # the first authenticated account that opens the new store, then
-            # keep all subsequent reads account-scoped.
-            if not self._data.get("legacy_migrated") and legacy_settings is not None:
-                settings = account["settings"]
-                for key in ACCOUNT_SETTING_KEYS:
-                    value = legacy_settings.get(key, MISSING)
-                    if value is not MISSING and value not in (None, "") and key not in settings:
-                        settings[key] = _copy(value)
-                        changed = True
-                self._data["legacy_migrated"] = True
-                changed = True
             if changed:
                 self._save()
 

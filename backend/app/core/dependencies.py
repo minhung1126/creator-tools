@@ -86,7 +86,15 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
         )
 
     session_data = session_store.get(session_id) or {}
-    owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip() or None
+    owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip()
+    if not owner_sub:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "login_required",
+                "message": "登入資料缺少 Google OIDC subject，請重新登入。",
+            },
+        )
     slot = get_account_active_slot(owner_sub)
     slot_config = settings.youtube_oauth_slot(slot)
     if not slot_config.configured:
@@ -111,9 +119,9 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
                 "slot": slot,
             },
         )
-    public = credential_store.get_youtube_public(owner_sub, slot=slot) if owner_sub else None
+    public = credential_store.get_youtube_public(owner_sub, slot=slot)
     other_slot = "secondary" if slot == "primary" else "primary"
-    other_public = credential_store.get_youtube_public(owner_sub, slot=other_slot) if owner_sub else None
+    other_public = credential_store.get_youtube_public(owner_sub, slot=other_slot)
     channel_id = str((public or {}).get("channel_id") or "").strip()
     other_channel_id = str((other_public or {}).get("channel_id") or "").strip()
     if channel_id and other_channel_id and channel_id != other_channel_id:
@@ -132,8 +140,3 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
         channel_id=(public or {}).get("channel_id"),
         owner_sub=owner_sub,
     )
-
-
-def require_youtube_credentials(request: Request) -> YouTubeRequestContext:
-    """Compatibility alias for routes and integrations using the old name."""
-    return require_youtube_context(request)

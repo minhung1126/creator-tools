@@ -24,7 +24,7 @@ export default function SheetCopyPage({ sysSettings }) {
   const { value: savedState, error: workStateError, save: saveWorkState } = useAccountWorkState('sheet_copy', {});
   const saved = savedState && typeof savedState === 'object' ? savedState : {};
   const sharedFilter = useMemo(
-    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter, { allowBrowserFallback: false }),
+    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter),
     [sysSettings.shared_team_person_filter],
   );
   const initialSpreadsheetId = saved.spreadsheetId || sysSettings.default_spreadsheet_id || '';

@@ -28,7 +28,6 @@ class YouTubeOAuthSlot:
     enabled: bool
     quota_limit: int
     safety_buffer_units: int
-    uses_legacy_google_credentials: bool = False
 
     @property
     def configured(self) -> bool:
@@ -60,9 +59,8 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
-    # YouTube uses separate OAuth Web Clients from the control-panel login.
-    # Primary intentionally supports a temporary fallback to the old Google
-    # client so existing installations can migrate without losing tokens.
+    # YouTube OAuth clients are configured explicitly. The primary slot may
+    # use the same client as the control-panel login when desired.
     YOUTUBE_OAUTH_PRIMARY_CLIENT_ID: str = ""
     YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET: str = ""
     YOUTUBE_OAUTH_PRIMARY_LABEL: str = "Primary"
@@ -77,11 +75,9 @@ class Settings(BaseSettings):
 
     # YouTube quota policy values are persisted from the authenticated
     # settings page; these environment defaults are only the first-run
-    # fallback and never contain secrets.
-    YOUTUBE_GENERAL_QUOTA_LIMIT: int = 10_000
-    YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
-    YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT: int | None = None
-    YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS: int | None = None
+    # values and never contain secrets.
+    YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT: int = 10_000
+    YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
     YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT: int = 10_000
     YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
 
@@ -129,12 +125,8 @@ class Settings(BaseSettings):
         for name, limit, buffer in (
             (
                 "YOUTUBE_PRIMARY",
-                self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT
-                if self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT is not None
-                else self.YOUTUBE_GENERAL_QUOTA_LIMIT,
-                self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS
-                if self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS is not None
-                else self.YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS,
+                self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT,
+                self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS,
             ),
             (
                 "YOUTUBE_SECONDARY",
@@ -258,36 +250,17 @@ class Settings(BaseSettings):
         if bool(str(first_value or "").strip()) != bool(str(second_value or "").strip()):
             raise ValueError(f"{first_name} and {second_name} must be configured together")
 
-    @property
-    def youtube_primary_uses_legacy_credentials(self) -> bool:
-        return not self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID and bool(
-            self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET
-        )
-
     def youtube_oauth_slot(self, slot: str) -> YouTubeOAuthSlot:
         slot_name = normalize_youtube_slot(slot)
         if slot_name == "primary":
-            client_id = self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID or self.GOOGLE_CLIENT_ID
-            client_secret = self.YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET or self.GOOGLE_CLIENT_SECRET
-            limit = (
-                self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT
-                if self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT is not None
-                else self.YOUTUBE_GENERAL_QUOTA_LIMIT
-            )
-            buffer = (
-                self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS
-                if self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS is not None
-                else self.YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS
-            )
             return YouTubeOAuthSlot(
                 name="primary",
                 label=(self.YOUTUBE_OAUTH_PRIMARY_LABEL or "Primary").strip() or "Primary",
-                client_id=client_id.strip(),
-                client_secret=client_secret,
+                client_id=self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID.strip(),
+                client_secret=self.YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET,
                 enabled=True,
-                quota_limit=int(limit),
-                safety_buffer_units=int(buffer),
-                uses_legacy_google_credentials=self.youtube_primary_uses_legacy_credentials,
+                quota_limit=int(self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT),
+                safety_buffer_units=int(self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS),
             )
 
         return YouTubeOAuthSlot(
@@ -310,11 +283,6 @@ class Settings(BaseSettings):
 
     def youtube_oauth_warnings(self) -> list[str]:
         warnings_list: list[str] = []
-        if self.youtube_primary_uses_legacy_credentials:
-            warnings_list.append(
-                "YouTube primary OAuth is using the legacy GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET fallback; "
-                "configure YOUTUBE_OAUTH_PRIMARY_* before removing the legacy client."
-            )
         if not self.youtube_oauth_slot("primary").configured:
             warnings_list.append("YouTube primary OAuth credentials are not configured")
         if self.YOUTUBE_OAUTH_SECONDARY_ENABLED and not self.youtube_oauth_slot("secondary").configured:

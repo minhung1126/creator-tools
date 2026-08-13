@@ -7,7 +7,6 @@ from pydantic import BaseModel, Field
 
 from backend.app.core.account_state import get_account_setting
 from backend.app.core.dependencies import require_account_subject, require_login_credentials
-from backend.app.core.runtime_config import runtime_config
 from backend.app.services.sheets_service import (
     get_copyable_sheet_table,
     get_people_for_team,
@@ -37,12 +36,8 @@ class RandomMemberPreviewInput(GetPeopleInput):
     columns: List[Annotated[str, Field(max_length=200)]] = Field(max_length=50)
 
 
-def resolve_spreadsheet_id(value: Optional[str], owner_sub: str | None = None) -> str:
-    target_id = value or get_account_setting(
-        owner_sub,
-        "default_spreadsheet_id",
-        runtime_config.get("default_spreadsheet_id") if not owner_sub else "",
-    )
+def resolve_spreadsheet_id(value: Optional[str], owner_sub: str) -> str:
+    target_id = value or get_account_setting(owner_sub, "default_spreadsheet_id", "")
     if not target_id:
         raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
     return target_id

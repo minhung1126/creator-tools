@@ -2,9 +2,8 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import googleapiclient.discovery
-from google.oauth2.credentials import Credentials
 
-from backend.app.core.youtube_context import YouTubeRequestContext, coerce_youtube_context
+from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 
 logger = logging.getLogger(__name__)
@@ -12,8 +11,7 @@ MAX_PLAYLIST_ITEMS = 5_000
 MAX_VIDEO_IDS = 5_000
 
 
-def get_youtube_service(credentials_or_context: Credentials | YouTubeRequestContext):
-    context = coerce_youtube_context(credentials_or_context)
+def get_youtube_service(context: YouTubeRequestContext):
     return googleapiclient.discovery.build("youtube", "v3", credentials=context.credentials)
 
 
@@ -62,9 +60,8 @@ def _snippet_thumbnail(snippet: Dict[str, Any], video_id: str) -> str:
     )
 
 
-def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dict[str, Any]]:
+def fetch_playlist_items(context: YouTubeRequestContext, playlist_id: str) -> List[Dict[str, Any]]:
     """Fetch all items from a YouTube playlist (handles pagination)."""
-    context = coerce_youtube_context(credentials)
     service = get_youtube_service(context)
     items = []
     next_page_token = None
@@ -85,14 +82,13 @@ def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dic
     return items
 
 
-def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[Dict[str, Any]]:
+def fetch_video_details(context: YouTubeRequestContext, video_ids: List[str]) -> List[Dict[str, Any]]:
     """Fetch detailed info for unique video IDs in batches of 50."""
     video_ids = _deduplicate_video_ids(video_ids)
     if not video_ids:
         return []
     if len(video_ids) > MAX_VIDEO_IDS:
         raise ValueError("影片數量超過系統上限")
-    context = coerce_youtube_context(credentials)
     service = get_youtube_service(context)
     detailed_videos = []
     for i in range(0, len(video_ids), 50):
@@ -106,8 +102,8 @@ def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[
     return detailed_videos
 
 
-def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Dict[str, Any]]:
-    raw_items = fetch_playlist_items(credentials, playlist_id)
+def _api_playlist_preview(context: YouTubeRequestContext, playlist_id: str) -> List[Dict[str, Any]]:
+    raw_items = fetch_playlist_items(context, playlist_id)
     if not raw_items:
         return []
     video_ids = [
@@ -115,7 +111,7 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
         for item in raw_items
         if item.get("contentDetails", {}).get("videoId")
     ]
-    details_map = {item["id"]: item for item in fetch_video_details(credentials, video_ids) if item.get("id")}
+    details_map = {item["id"]: item for item in fetch_video_details(context, video_ids) if item.get("id")}
     parsed_videos = []
     for index, item in enumerate(raw_items, start=1):
         video_id = item.get("contentDetails", {}).get("videoId")
@@ -137,22 +133,21 @@ def _api_playlist_preview(credentials: Credentials, playlist_id: str) -> List[Di
 
 
 def fetch_playlist_preview(
-    credentials: Credentials,
+    context: YouTubeRequestContext,
     playlist_id: str,
 ) -> Tuple[List[Dict[str, Any]], str, Optional[str]]:
     """Use authenticated playlistItems and videos API data for preview/order."""
-    return _api_playlist_preview(credentials, playlist_id), "youtube-api", None
+    return _api_playlist_preview(context, playlist_id), "youtube-api", None
 
 
 def update_single_video_metadata(
-    credentials: Credentials,
+    context: YouTubeRequestContext,
     video_id: str,
     new_title: str,
     new_description: str,
     current_snippet: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Update title/description while preserving existing snippet properties."""
-    context = coerce_youtube_context(credentials)
     service = get_youtube_service(context)
     if current_snippet is None:
         request = service.videos().list(part="snippet", id=video_id)
@@ -183,7 +178,7 @@ def update_single_video_metadata(
 
 
 def get_video_status(
-    credentials: Credentials,
+    context: YouTubeRequestContext,
     video_id: str,
     current_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -191,7 +186,6 @@ def get_video_status(
 
     if current_video is not None:
         return dict(current_video.get("status", {}))
-    context = coerce_youtube_context(credentials)
     service = get_youtube_service(context)
     request = service.videos().list(part="status", id=video_id)
     response = _execute_with_quota(request, "videos.list", context)
@@ -202,13 +196,12 @@ def get_video_status(
 
 
 def set_video_public(
-    credentials: Credentials,
+    context: YouTubeRequestContext,
     video_id: str,
     current_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Set a video public, treating an already-public video as success."""
 
-    context = coerce_youtube_context(credentials)
     status = get_video_status(context, video_id, current_video)
     if status.get("privacyStatus") == "public":
         return {"id": video_id, "status": status, "already_public": True}
@@ -218,12 +211,11 @@ def set_video_public(
     return _execute_with_quota(request, "videos.update", context)
 
 
-def remove_playlist_item(credentials: Credentials, playlist_item_id: Optional[str]) -> Dict[str, Any]:
+def remove_playlist_item(context: YouTubeRequestContext, playlist_item_id: Optional[str]) -> Dict[str, Any]:
     """Remove a To-Post item; a 404 is the idempotent 'already removed' case."""
 
     if not playlist_item_id:
         return {"already_removed": True}
-    context = coerce_youtube_context(credentials)
     service = get_youtube_service(context)
     try:
         request = service.playlistItems().delete(id=playlist_item_id)
@@ -237,13 +229,12 @@ def remove_playlist_item(credentials: Credentials, playlist_item_id: Optional[st
 
 
 def publish_and_remove_playlist_item(
-    credentials: Credentials,
+    context: YouTubeRequestContext,
     video_id: str,
     playlist_item_id: str,
     current_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Set a video public and remove its playlist item without deleting it."""
-    context = coerce_youtube_context(credentials)
     if current_video is None:
         service = get_youtube_service(context)
         request = service.videos().list(part="status", id=video_id)

@@ -24,6 +24,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
   const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
+  const activeSlot = authUser?.youtube?.active_slot || 'primary';
   const [loading, setLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [result, setResult] = useState(null);
@@ -42,7 +43,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       toast.warning('請先登入控制台！');
       return;
     }
-    if (!authUser.youtube?.authenticated) {
+    if (!authUser.youtube?.slots?.[activeSlot]?.authenticated) {
       toast.warning('請先在「YouTube 設定」連結 YouTube 頻道 Google 帳號！');
       return;
     }

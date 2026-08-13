@@ -45,42 +45,16 @@ def test_youtube_settings_require_secondary_pair_and_validate_default_slot():
     assert configured.youtube_oauth_slot("primary").client_fingerprint != "youtube-primary"
 
 
-def test_primary_legacy_fallback_is_explicitly_detectable():
+def test_primary_requires_explicit_credentials_even_when_login_is_configured():
     configured = Settings(
         ENVIRONMENT="development",
         PUBLIC_BASE_URL="http://localhost:8000",
-        GOOGLE_CLIENT_ID="legacy-client",
-        GOOGLE_CLIENT_SECRET="legacy-secret",
+        GOOGLE_CLIENT_ID="login-client",
+        GOOGLE_CLIENT_SECRET="login-secret",
     )
     primary = configured.youtube_oauth_slot("primary")
-    assert primary.configured is True
-    assert primary.uses_legacy_google_credentials is True
-    assert configured.youtube_oauth_warnings()
-
-
-def test_credential_store_migrates_legacy_youtube_record_to_primary(tmp_path: Path):
-    store = CredentialStore(tmp_path / "credentials.json")
-    store.save_youtube_connection(
-        {
-            "token": "access",
-            "refresh_token": "refresh",
-            "client_id": "youtube-client",
-            "client_secret": "must-not-persist",
-            "user": {"sub": "subject", "email": "creator@example.com"},
-            "channel_id": "channel-1",
-            "channel_title": "Creator",
-        },
-        owner_sub="subject",
-    )
-    record = store._data["users"]["subject"].pop("youtube_primary")
-    store._data["users"]["subject"]["youtube"] = record
-    store._save()
-
-    migrated = CredentialStore(tmp_path / "credentials.json")
-    assert migrated.get_youtube_credentials("subject")["token"] == "access"
-    assert migrated.get_youtube_public("subject")["channel_id"] == "channel-1"
-    assert "youtube" not in migrated._data["users"]["subject"]
-    assert "client_secret" not in migrated.get_youtube_credentials("subject")
+    assert primary.configured is False
+    assert configured.youtube_oauth_warnings() == ["YouTube primary OAuth credentials are not configured"]
 
 
 def test_youtube_slot_credentials_and_ledgers_are_isolated(tmp_path: Path):
@@ -141,15 +115,17 @@ def test_request_context_keeps_the_selected_slot():
         credentials=SimpleNamespace(token="secondary-token"),
         quota_limiter=SimpleNamespace(),
         channel_id="channel-1",
+        owner_sub="subject",
     )
     assert context.slot == "secondary"
     assert context.channel_id == "channel-1"
 
 
-def test_slot_api_routes_are_exposed_alongside_legacy_aliases():
+def test_slot_api_routes_are_exposed_without_single_slot_aliases():
     paths = main.app.openapi()["paths"]
-    assert "/api/v1/auth/youtube/url" in paths
     assert "/api/v1/auth/youtube/{slot}/url" in paths
     assert "/api/v1/auth/youtube/{slot}/disconnect" in paths
     assert "/api/v1/auth/youtube/{slot}/activate" in paths
     assert "/api/v1/settings/youtube-slots" in paths
+    assert "/api/v1/auth/youtube/url" not in paths
+    assert "/api/v1/auth/youtube/disconnect" not in paths

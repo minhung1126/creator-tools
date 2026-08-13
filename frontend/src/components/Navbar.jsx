@@ -6,6 +6,8 @@ const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon:
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, sidebarCollapsed, setSidebarCollapsed }) {
+  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const youtubeAuthorized = Boolean(authUser?.youtube?.slots?.[activeSlot]?.authenticated);
   const { value: savedNavigation, save: saveNavigation } = useAccountWorkState('navigation', {});
   const [youtubeOpen, setYoutubeOpen] = useState(savedNavigation.youtubeOpen ?? youtubeItems.some((i) => i.id === activeTab));
   const [sheetOpen, setSheetOpen] = useState(savedNavigation.sheetOpen ?? sheetItems.some((i) => i.id === activeTab));
@@ -105,7 +107,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, si
         {group('sheet', 'Sheet', FileSpreadsheet, sheetOpen, setSheetOpen, sheetItems)}
         {item({ id: 'settings', label: '帳號與 Google 設定', icon: Settings })}
       </nav>
-      <div className="sidebar-footer"><div className="glass-panel account-card"><strong className="account-title">帳號資訊</strong><span className="badge badge-connected account-status"><CheckCircle2 size={12} />控制台已登入</span><p className="account-email">{authUser?.email}</p><span className={`badge account-youtube-status ${authUser?.youtube?.authenticated ? 'badge-connected' : 'badge-disconnected'}`}>{authUser?.youtube?.authenticated ? 'YouTube 已授權' : 'YouTube 未連結'}</span><button type="button" className="logout-button" onClick={onLogout}>登出控制台</button></div></div>
+      <div className="sidebar-footer"><div className="glass-panel account-card"><strong className="account-title">帳號資訊</strong><span className="badge badge-connected account-status"><CheckCircle2 size={12} />控制台已登入</span><p className="account-email">{authUser?.email}</p><span className={`badge account-youtube-status ${youtubeAuthorized ? 'badge-connected' : 'badge-disconnected'}`}>{youtubeAuthorized ? 'YouTube 已授權' : 'YouTube 未連結'}</span><button type="button" className="logout-button" onClick={onLogout}>登出控制台</button></div></div>
     </aside>
   </>;
 }
