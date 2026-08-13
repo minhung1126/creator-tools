@@ -6,12 +6,12 @@ Centralizes common dependency injection functions used across API routes.
 
 import logging
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 from google.oauth2.credentials import Credentials
 
+from backend.app.core.account_state import get_account_active_slot
 from backend.app.core.config import settings
 from backend.app.core.credential_store import credential_store
-from backend.app.core.runtime_config import runtime_config
 from backend.app.core.session_store import session_store
 from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.google_auth import get_login_credentials, get_youtube_credentials
@@ -51,20 +51,28 @@ def require_login_credentials(request: Request) -> Credentials:
     return creds
 
 
-def require_youtube_context(request: Request) -> YouTubeRequestContext:
-    """Resolve the active slot once at request start."""
-    slot = runtime_config.get_youtube_active_slot()
-    slot_config = settings.youtube_oauth_slot(slot)
-    if not slot_config.configured:
-        logger.warning("YouTube API access attempted with an unconfigured active slot: %s", slot)
+def require_account_subject(
+    request: Request,
+    creds: Credentials = Depends(require_login_credentials),
+) -> str:
+    """Resolve the authenticated Google account used to scope saved state."""
+    del creds
+    session_id = request.cookies.get(settings.session_cookie_name)
+    session_data = session_store.get(session_id) if session_id else None
+    subject = str(((session_data or {}).get("user") or {}).get("sub") or "").strip()
+    if not subject:
         raise HTTPException(
-            status_code=503,
+            status_code=401,
             detail={
-                "code": "youtube_slot_not_configured",
-                "message": "目前作用中的 YouTube OAuth slot 尚未完成伺服器設定。",
-                "slot": slot,
+                "code": "login_required",
+                "message": "登入資料缺少 Google OIDC subject，請重新登入。",
             },
         )
+    return subject
+
+
+def require_youtube_context(request: Request) -> YouTubeRequestContext:
+    """Resolve the active slot once at request start."""
     session_id = request.cookies.get(settings.session_cookie_name)
     login_creds = get_login_credentials(session_id)
     if not login_creds or not login_creds.valid:
@@ -74,6 +82,21 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
             detail={
                 "code": "login_required",
                 "message": "控制台登入已失效，請重新登入 Google 帳號。",
+            },
+        )
+
+    session_data = session_store.get(session_id) or {}
+    owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip() or None
+    slot = get_account_active_slot(owner_sub)
+    slot_config = settings.youtube_oauth_slot(slot)
+    if not slot_config.configured:
+        logger.warning("YouTube API access attempted with an unconfigured active slot: %s", slot)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "youtube_slot_not_configured",
+                "message": "目前作用中的 YouTube OAuth slot 尚未完成伺服器設定。",
+                "slot": slot,
             },
         )
 
@@ -88,8 +111,6 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
                 "slot": slot,
             },
         )
-    session_data = session_store.get(session_id) or {}
-    owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip() or None
     public = credential_store.get_youtube_public(owner_sub, slot=slot) if owner_sub else None
     other_slot = "secondary" if slot == "primary" else "primary"
     other_public = credential_store.get_youtube_public(owner_sub, slot=other_slot) if owner_sub else None

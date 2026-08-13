@@ -3,9 +3,9 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
+import useAccountWorkState from '../hooks/useAccountWorkState';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import SourceLinkInput from '../components/SourceLinkInput';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,11 +17,9 @@ import {
   Trash2,
 } from 'lucide-react';
 
-const STORAGE_KEY = 'creator-tools.youtube-publish-cleaner.v1';
-
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
-  const saved = readPersistentJson(STORAGE_KEY, {});
+  const { value: saved, error: workStateError, save: saveWorkState } = useAccountWorkState('youtube_publish_cleaner', {});
   const [playlistId, setPlaylistId] = useState(saved.playlistId || sysSettings.default_playlist_id || '');
   const [videos, setVideos] = useState([]);
   const [playlistSource, setPlaylistSource] = useState('');
@@ -36,8 +34,8 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   const [estimateLoading, setEstimateLoading] = useState(false);
 
   useEffect(() => {
-    writePersistentJson(STORAGE_KEY, { playlistId });
-  }, [playlistId]);
+    saveWorkState({ playlistId });
+  }, [playlistId, saveWorkState]);
 
   const handleLoadPlaylist = async () => {
     if (!authUser) {
@@ -146,6 +144,8 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
           {loading ? '讀取中...' : '讀取 To-Post 播放清單'}
         </button>
       </div>
+
+      {workStateError && <div className="filter-panel-status filter-panel-status-error" role="alert">工作狀態同步失敗：{workStateError}</div>}
 
       {sourceLabel && (
         <div className="info-banner">

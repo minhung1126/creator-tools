@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { api } from '../services/api';
-import { normalizeTeamPersonFilter, writeSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
+import { normalizeTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 
 export default function useSharedTeamPersonFilterPersistence({
   team = '',
@@ -18,20 +18,17 @@ export default function useSharedTeamPersonFilterPersistence({
     if (lastSavedRef.current === serialized) return undefined;
 
     lastSavedRef.current = serialized;
-    writeSharedTeamPersonFilter(filter, { pending: true });
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     const timer = window.setTimeout(() => {
       api.updateTeamPersonFilter(filter)
         .then((result) => {
           if (requestId !== requestIdRef.current) return;
-          writeSharedTeamPersonFilter(result, { pending: false });
           onError?.('');
         })
         .catch((error) => {
           if (requestId !== requestIdRef.current) return;
-          writeSharedTeamPersonFilter(filter, { pending: true });
-          onError?.(`共用隊伍／人物篩選同步失敗：${error.message}`);
+          onError?.(`帳號隊伍／人物篩選同步失敗：${error.message}`);
         });
     }, 500);
 

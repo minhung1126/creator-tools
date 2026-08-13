@@ -4,15 +4,9 @@ import { api } from '../services/api';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
 import TeamPersonFilterPanel from '../components/TeamPersonFilterPanel';
 import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
+import useAccountWorkState from '../hooks/useAccountWorkState';
 import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFilterPersistence';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
 import { readSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
-
-const STORAGE_KEY = 'creator-tools.sheet-copy.v1';
-
-function loadSaved() {
-  return readPersistentJson(STORAGE_KEY, {});
-}
 
 async function copyText(text) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
@@ -27,9 +21,10 @@ async function copyText(text) {
 }
 
 export default function SheetCopyPage({ sysSettings }) {
-  const saved = useMemo(loadSaved, []);
+  const { value: savedState, error: workStateError, save: saveWorkState } = useAccountWorkState('sheet_copy', {});
+  const saved = savedState && typeof savedState === 'object' ? savedState : {};
   const sharedFilter = useMemo(
-    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter),
+    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter, { allowBrowserFallback: false }),
     [sysSettings.shared_team_person_filter],
   );
   const initialSpreadsheetId = saved.spreadsheetId || sysSettings.default_spreadsheet_id || '';
@@ -84,13 +79,13 @@ export default function SheetCopyPage({ sysSettings }) {
   });
 
   useEffect(() => {
-    writePersistentJson(STORAGE_KEY, {
+    saveWorkState({
       spreadsheetId,
       worksheetName,
       visibleKeys,
       query,
     });
-  }, [query, spreadsheetId, visibleKeys, worksheetName]);
+  }, [query, saveWorkState, spreadsheetId, visibleKeys, worksheetName]);
 
   useEffect(() => {
     if (!copiedCell) return undefined;
@@ -199,7 +194,8 @@ export default function SheetCopyPage({ sysSettings }) {
       <SheetDataSourcePanel spreadsheetId={spreadsheetId} onSpreadsheetIdChange={handleSpreadsheetChange} worksheets={worksheets} worksheetName={worksheetName} onWorksheetChange={handleWorksheetChange} onRefresh={refresh} loading={loading} sourceReady={sourceReady} stale={sourceStale} error={sourceError} />
 
       <TeamPersonFilterPanel teams={sourceStale ? [] : teams} selectedTeam={sourceStale ? '' : selectedTeam} onTeamChange={setSelectedTeam} people={sourceStale ? [] : people} selectedPeople={sourceStale ? [] : selectedPeople} onSelectedPeopleChange={setSelectedPeople} loadingTeams={loadingTeams} loadingPeople={loadingPeople} error={teamPersonError} disabled={sourceStale || !sourceReady} teamEmptyLabel="全部團體" peopleDisabledMessage="未選定團體時顯示全部團體；請選擇團體後再篩選人物。" description="未選定團體時顯示全部團體；選定團體後只顯示已勾選的人物。" />
-      {sharedFilterSaveError && <div className="filter-panel-status filter-panel-status-error" role="alert">{sharedFilterSaveError}；本機快取仍已保留。</div>}
+      {workStateError && <div className="filter-panel-status filter-panel-status-error" role="alert">工作狀態同步失敗：{workStateError}</div>}
+      {sharedFilterSaveError && <div className="filter-panel-status filter-panel-status-error" role="alert">{sharedFilterSaveError}</div>}
 
       <section className="glass-panel card-padding sheet-copy-display-panel">
         <div className="filter-panel-header"><div><strong><Search size={17} aria-hidden="true" />顯示內容</strong><p>搜尋目前顯示欄位，並選擇要保留在資料表中的欄位。</p></div></div>

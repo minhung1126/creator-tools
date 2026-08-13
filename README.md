@@ -11,7 +11,7 @@
 1. **🔑 Google OAuth 2.0 與平台分頁設定**
    - 整合 Google Sheets readonly 與 YouTube Data API v3 權限；YouTube 支援 primary / optional secondary OAuth slot。
    - Google 與 YouTube 使用各自的設定頁。
-   - 工作流程設定會持久化儲存；敏感 token / secret 不會由設定 API 回傳前端。
+   - 工作流程設定與工作進度會依登入的 Google 帳號（OIDC `sub`）保存於伺服器；瀏覽器不再是主要儲存來源。敏感 token / secret 不會由設定 API 回傳前端。
 
 2. **📝 YouTube Video / Shorts 草稿管理**
    - Video 與 Shorts 使用獨立頁面，各自記住工作表與欄位；Sheet 內容複製、Video、Shorts 共用同一組團體與人物篩選。
@@ -43,7 +43,7 @@ creator-tools/
 ├── backend/
 │   ├── app/
 │   │   ├── api/              # auth, settings, sheets, youtube
-│   │   ├── core/             # 環境變數、安全 Session、設定
+│   │   ├── core/             # 環境變數、安全 Session、帳號狀態與設定
 │   │   ├── services/         # Google、Sheets、YouTube
 │   │   └── main.py
 │   ├── requirements.txt
@@ -111,5 +111,5 @@ npm run dev
 ### OAuth Token 維運注意事項
 
 - 正式環境必須固定 `CREDENTIAL_ENCRYPTION_KEY`；金鑰變更後既有加密 token 無法解密，需要重新授權。
-- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session、工作流程設定與 YouTube quota 估算。
+- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session、帳號工作狀態、工作流程設定與 YouTube quota 估算。
    - Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。YouTube slot token、channel metadata 與 quota ledger 分開保存。

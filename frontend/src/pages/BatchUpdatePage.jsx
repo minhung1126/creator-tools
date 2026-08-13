@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
+import useAccountWorkState from '../hooks/useAccountWorkState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
@@ -26,12 +26,6 @@ const DEFAULT_COLUMNS = {
   Video: { title: 'Youtube Title', description: 'Youtube Description', worksheet: 'Youtube Video' },
   Shorts: { title: 'Shorts Title', description: 'Shorts Description', worksheet: 'Youtube Shorts' },
 };
-
-const storageKey = (videoType) => `youtube-draft-config-${videoType.toLowerCase()}`;
-
-function readRemembered(videoType) {
-  return readPersistentJson(storageKey(videoType), {});
-}
 
 export function resolveDraftConfig(serverConfig, cached) {
   const hasServerConfig = serverConfig
@@ -70,9 +64,11 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const toast = useToast();
   const youtubeConnected = Boolean(authUser?.youtube?.authenticated);
   const defaults = DEFAULT_COLUMNS[videoType];
-  const remembered = useMemo(() => readRemembered(videoType), [videoType]);
+  const draftStateKey = videoType === 'Shorts' ? 'youtube_draft_shorts' : 'youtube_draft_video';
+  const { value: rememberedState, error: workStateError, save: saveWorkState } = useAccountWorkState(draftStateKey, {});
+  const remembered = rememberedState && typeof rememberedState === 'object' ? rememberedState : {};
   const sharedFilter = useMemo(
-    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter),
+    () => readSharedTeamPersonFilter(sysSettings.shared_team_person_filter, { allowBrowserFallback: false }),
     [sysSettings.shared_team_person_filter],
   );
   const persistedDefaults = useMemo(() => ({
@@ -197,7 +193,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       });
 
     return () => { cancelled = true; };
-  }, [videoType, authUser, defaults, remembered, persistedDefaults, sharedFilter, applyConfig]);
+  }, [videoType, authUser, defaults, persistedDefaults, sharedFilter, applyConfig]);
 
   useEffect(() => {
     if (!hydrated) return undefined;
@@ -211,9 +207,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       selectedVideoIds,
       bulkPerson,
     };
-    writePersistentJson(storageKey(videoType), cache);
+    saveWorkState(cache);
     return undefined;
-  }, [assignments, bulkPerson, descriptionColumn, hydrated, playlistId, selectedVideoIds, spreadsheetId, titleColumn, videoType, worksheetName]);
+  }, [assignments, bulkPerson, descriptionColumn, hydrated, playlistId, saveWorkState, selectedVideoIds, spreadsheetId, titleColumn, worksheetName]);
 
   useEffect(() => {
     if (!hydrated || !authUser || !sourceReady || (worksheetName && (!teamPersonReady || loadingPeople))) return undefined;
@@ -479,7 +475,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         <div className="form-group"><label className="form-label" htmlFor="batch-title-column">標題套用欄位</label><select id="batch-title-column" className="form-select" value={titleColumn} onChange={(e) => setTitleColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
         <div className="form-group"><label className="form-label" htmlFor="batch-description-column">描述套用欄位</label><select id="batch-description-column" className="form-select" value={descriptionColumn} onChange={(e) => setDescriptionColumn(e.target.value)}>{columns.map((column) => <option key={column} value={column}>{column}</option>)}</select></div>
         <div className="form-group"><label className="form-label" htmlFor="batch-playlist-id"><PlaySquare size={14} /> 目標播放清單 ID</label><SourceLinkInput id="batch-playlist-id" value={playlistId} onChange={(e) => setPlaylistId(e.target.value)} sourceType="youtube-playlist" /></div>
-        <div className="info-banner filter-panel-full-width"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作表、欄位與工作流資源；Sheet 內容複製、Video、Shorts 共用團體與人物篩選。未指定的資源會使用全域共用 Google Sheet 或 YouTube 預設播放清單。</span></div>
+        <div className="info-banner filter-panel-full-width"><Info size={14} color="var(--primary)" /><span>Video / Shorts 各自保存工作表、欄位與工作流資源；Sheet 內容複製、Video、Shorts 共用目前帳號的團體與人物篩選。未指定的資源會使用目前帳號的預設 Google Sheet 或 YouTube 播放清單。</span></div>
       </SheetDataSourcePanel>
 
       <TeamPersonFilterPanel
@@ -508,7 +504,8 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       </div>
 
       {errorMsg && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMsg}</span></div>}
-      {configSaveError && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{configSaveError}；此瀏覽器快取仍已保留。</span></div>}
+      {workStateError && <div className="filter-panel-status filter-panel-status-error" role="alert">工作狀態同步失敗：{workStateError}</div>}
+      {configSaveError && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{configSaveError}</span></div>}
       <div className="page-actions"><button className="btn btn-primary" onClick={handleLoadVideos} disabled={loadingVideos}><RefreshCw size={16} className={loadingVideos ? 'spin' : ''} /> {loadingVideos ? '載入中...' : `讀取 ${videoType} 草稿影片`}</button></div>
 
       {videos.length > 0 && <div className="section-gap batch-videos">

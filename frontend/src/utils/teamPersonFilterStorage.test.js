@@ -19,7 +19,7 @@ describe('teamPersonFilterStorage', () => {
   it('prefers a pending local filter over the server value', () => {
     writeSharedTeamPersonFilter({ team: '本機團體', selectedPeople: ['甲'] }, { pending: true });
 
-    expect(readSharedTeamPersonFilter({ configured: true, team: '伺服器團體', selected_people: ['乙'] })).toMatchObject({
+    expect(readSharedTeamPersonFilter({ configured: true, team: '伺服器團體', selected_people: ['乙'] }, { allowBrowserFallback: true })).toMatchObject({
       team: '本機團體',
       selectedPeople: ['甲'],
       pending: true,
@@ -29,7 +29,7 @@ describe('teamPersonFilterStorage', () => {
   it('uses the current local record when the server has no configured filter', () => {
     writeSharedTeamPersonFilter({ team: '本機團體', selectedPeople: ['甲'] });
 
-    expect(readSharedTeamPersonFilter({ configured: false, team: '', selected_people: [] })).toMatchObject({
+    expect(readSharedTeamPersonFilter({ configured: false, team: '', selected_people: [] }, { allowBrowserFallback: true })).toMatchObject({
       team: '本機團體',
       selectedPeople: ['甲'],
       source: 'local',

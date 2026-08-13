@@ -62,7 +62,7 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-accent"><Settings size={28} /></div>
-          <div className="feature-card-copy"><h3>全域與 Google 設定</h3><p>管理控制台登入與共用試算表；YouTube 頻道授權請至 YouTube 設定。</p></div>
+          <div className="feature-card-copy"><h3>帳號與 Google 設定</h3><p>管理控制台登入與目前帳號的預設試算表；YouTube 頻道授權請至 YouTube 設定。</p></div>
           <button className="btn btn-secondary feature-card-action" onClick={() => setActiveTab('settings')}>進入系統設定 <ArrowRight size={16} /></button>
         </div>
       </div>

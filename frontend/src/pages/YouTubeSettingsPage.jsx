@@ -3,17 +3,14 @@ import { ArrowRight, CheckCircle2, Clapperboard, ExternalLink, PlaySquare, Save,
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
-import { readPersistentJson, resolvePersistentValue, writePersistentJson } from '../utils/persistentStorage';
 
-const STORAGE_KEY = 'creator-tools.youtube-settings.v1';
 const SLOT_ORDER = ['primary', 'secondary'];
 
 export function initialSettings(defaultPlaylistId, quotaLimit, quotaBuffer) {
-  const saved = readPersistentJson(STORAGE_KEY, {});
   return {
-    playlistId: resolvePersistentValue(saved, 'playlistId', defaultPlaylistId, ''),
-    quotaLimit: resolvePersistentValue(saved, 'quotaLimit', quotaLimit, 10000),
-    quotaBuffer: resolvePersistentValue(saved, 'quotaBuffer', quotaBuffer, 1000),
+    playlistId: defaultPlaylistId || '',
+    quotaLimit: quotaLimit ?? 10000,
+    quotaBuffer: quotaBuffer ?? 1000,
   };
 }
 
@@ -109,7 +106,6 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
         youtube_general_quota_limit: limit,
         youtube_quota_safety_buffer_units: buffer,
       });
-      writePersistentJson(STORAGE_KEY, { playlistId, quotaLimit: limit, quotaBuffer: buffer, _pending: false });
       await refreshSettings();
       if (refreshAuthUser) await refreshAuthUser();
       setMsg({ type: 'success', text: `${slotRecords[slot].label} 設定已儲存。` });
@@ -131,7 +127,6 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
         youtube_general_quota_limit: Number(slotDrafts.primary.quotaLimit),
         youtube_quota_safety_buffer_units: Number(slotDrafts.primary.quotaBuffer),
       });
-      writePersistentJson(STORAGE_KEY, { playlistId, quotaLimit: slotDrafts.primary.quotaLimit, quotaBuffer: slotDrafts.primary.quotaBuffer, _pending: false });
       await refreshSettings();
       setMsg({ type: 'success', text: '預設播放清單已儲存。' });
       toast.success('預設播放清單已儲存');

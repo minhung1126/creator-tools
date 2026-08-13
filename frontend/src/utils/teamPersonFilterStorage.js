@@ -19,14 +19,18 @@ export function normalizeTeamPersonFilter(value = {}) {
   };
 }
 
-export function readSharedTeamPersonFilter(serverFilter = null) {
-  const local = readPersistentJson(TEAM_PERSON_FILTER_STORAGE_KEY, null);
+export function readSharedTeamPersonFilter(serverFilter = null, { allowBrowserFallback = false } = {}) {
+  const local = allowBrowserFallback ? readPersistentJson(TEAM_PERSON_FILTER_STORAGE_KEY, null) : null;
   if (local && typeof local === 'object' && local.version === 1 && local._pending === true) {
     return { ...normalizeTeamPersonFilter(local), exists: true, pending: true, source: 'local' };
   }
 
   if (serverFilter?.configured) {
     return { ...normalizeTeamPersonFilter(serverFilter), exists: true, pending: false, source: 'server' };
+  }
+
+  if (!allowBrowserFallback) {
+    return { ...normalizeTeamPersonFilter(), exists: false, pending: false, source: 'default' };
   }
 
   if (local && typeof local === 'object' && local.version === 1) {

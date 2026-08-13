@@ -1,12 +1,19 @@
 import logging
-from typing import Annotated, Dict, List, Literal
+from typing import Annotated, Any, Dict, List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field, model_validator
 
+from backend.app.core.account_state import (
+    get_account_active_slot,
+    get_account_setting,
+    get_account_work_state,
+    set_account_setting,
+    update_account_work_state,
+)
 from backend.app.core.config import settings
-from backend.app.core.dependencies import require_login_credentials
+from backend.app.core.dependencies import require_account_subject, require_login_credentials
 from backend.app.core.runtime_config import runtime_config
 
 logger = logging.getLogger(__name__)
@@ -66,12 +73,30 @@ class YouTubeDraftConfigUpdateModel(BaseModel):
     config: YouTubeDraftConfigModel
 
 
+class WorkStateUpdateModel(BaseModel):
+    key: Literal[
+        "navigation",
+        "sheet_copy",
+        "youtube_publish_cleaner",
+        "youtube_draft_video",
+        "youtube_draft_shorts",
+    ]
+    value: Dict[str, Any] = Field(default_factory=dict)
+
+
 def _draft_config_key(video_type: str) -> str:
     return f"youtube_draft_{video_type.lower()}_config"
 
 
-def _read_draft_config(video_type: str) -> Dict:
-    raw = runtime_config.get(_draft_config_key(video_type), "")
+def _resolve_owner(owner_sub: Any) -> str | None:
+    if not isinstance(owner_sub, str):
+        return None
+    value = owner_sub.strip()
+    return value or None
+
+
+def _read_draft_config(video_type: str, owner_sub: str | None = None) -> Dict:
+    raw = get_account_setting(owner_sub, _draft_config_key(video_type), "")
     if not isinstance(raw, dict) or not raw:
         return {}
     try:
@@ -81,8 +106,8 @@ def _read_draft_config(video_type: str) -> Dict:
         return {}
 
 
-def _read_team_person_filter() -> tuple[Dict, bool]:
-    raw = runtime_config.get("shared_team_person_filter", None)
+def _read_team_person_filter(owner_sub: str | None = None) -> tuple[Dict, bool]:
+    raw = get_account_setting(owner_sub, "shared_team_person_filter", None)
     if isinstance(raw, dict):
         try:
             return TeamPersonFilterModel.model_validate(raw).model_dump(), True
@@ -92,10 +117,14 @@ def _read_team_person_filter() -> tuple[Dict, bool]:
 
 
 @router.get("/shared")
-def get_shared_settings(creds: Credentials = Depends(require_login_credentials)):
+def get_shared_settings(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
+    owner = _resolve_owner(owner_sub)
     return {
-        "default_spreadsheet_id": runtime_config.get("default_spreadsheet_id", ""),
+        "default_spreadsheet_id": get_account_setting(owner, "default_spreadsheet_id", ""),
     }
 
 
@@ -113,26 +142,41 @@ def get_system_info(creds: Credentials = Depends(require_login_credentials)):
 
 @router.put("/shared")
 def update_shared_settings(
-    payload: SharedResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)
+    payload: SharedResourceSettingsModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
 ):
-    runtime_config.update({"default_spreadsheet_id": payload.default_spreadsheet_id.strip()})
-    logger.info("Shared resource settings updated: default_spreadsheet_id")
-    return {"status": "success", "settings": get_shared_settings(creds)}
+    owner = _resolve_owner(owner_sub)
+    value = payload.default_spreadsheet_id.strip()
+    if owner:
+        set_account_setting(owner, "default_spreadsheet_id", value)
+    else:
+        # Keep direct/unit-test callers and legacy integrations functional.
+        runtime_config.update({"default_spreadsheet_id": value})
+    logger.info("Account-scoped resource settings updated: default_spreadsheet_id")
+    return {"status": "success", "settings": get_shared_settings(creds, owner)}
 
 
 @router.get("/youtube")
-def get_youtube_settings(creds: Credentials = Depends(require_login_credentials)):
+def get_youtube_settings(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
+    owner = _resolve_owner(owner_sub)
     primary_limit, primary_buffer = runtime_config.get_youtube_quota_settings("primary")
     return {
-        "default_playlist_id": runtime_config.get("default_playlist_id", ""),
+        "default_playlist_id": get_account_setting(owner, "default_playlist_id", ""),
         "youtube_general_quota_limit": primary_limit,
         "youtube_quota_safety_buffer_units": primary_buffer,
     }
 
 
 @router.get("/youtube-slots")
-def get_youtube_slot_settings(creds: Credentials = Depends(require_login_credentials)):
+def get_youtube_slot_settings(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     """Return non-secret configuration defaults for both YouTube slots."""
     del creds
     slots = {}
@@ -148,13 +192,16 @@ def get_youtube_slot_settings(creds: Credentials = Depends(require_login_credent
             "quota_limit": limit,
             "safety_buffer_units": buffer,
         }
-    return {"active_slot": runtime_config.get_youtube_active_slot(), "slots": slots}
+    return {"active_slot": get_account_active_slot(_resolve_owner(owner_sub)), "slots": slots}
 
 
 @router.put("/youtube")
 def update_youtube_settings(
-    payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)
+    payload: YouTubeResourceSettingsModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
 ):
+    owner = _resolve_owner(owner_sub)
     slot = payload.slot or "primary"
     current_limit, current_buffer = runtime_config.get_youtube_quota_settings(slot)
     limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit
@@ -184,43 +231,96 @@ def update_youtube_settings(
                 f"youtube_{slot}_quota_safety_buffer_units": buffer,
             }
         )
-    runtime_config.update(updates)
-    logger.info("YouTube resource settings updated: slot=%s playlist and quota policy", slot)
-    return {"status": "success", "settings": get_youtube_settings(creds)}
+    if owner:
+        set_account_setting(owner, "default_playlist_id", updates["default_playlist_id"])
+        quota_updates = {key: value for key, value in updates.items() if key != "default_playlist_id"}
+        if quota_updates:
+            # Quota is tied to the deployed OAuth project and shared ledger;
+            # keep its policy server-global while scoping the working playlist.
+            runtime_config.update(quota_updates)
+    else:
+        runtime_config.update(updates)
+    logger.info("YouTube resource settings updated: account playlist, slot=%s quota policy", slot)
+    return {"status": "success", "settings": get_youtube_settings(creds, owner)}
 
 
 @router.get("/youtube-drafts")
-def get_youtube_draft_settings(creds: Credentials = Depends(require_login_credentials)):
+def get_youtube_draft_settings(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
+    owner = _resolve_owner(owner_sub)
     return {
-        "video": _read_draft_config("Video"),
-        "shorts": _read_draft_config("Shorts"),
+        "video": _read_draft_config("Video", owner),
+        "shorts": _read_draft_config("Shorts", owner),
     }
 
 
 @router.put("/youtube-drafts")
 def update_youtube_draft_settings(
-    payload: YouTubeDraftConfigUpdateModel, creds: Credentials = Depends(require_login_credentials)
+    payload: YouTubeDraftConfigUpdateModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
 ):
     del creds
+    owner = _resolve_owner(owner_sub)
     key = _draft_config_key(payload.video_type)
     value = payload.config.model_dump()
-    runtime_config.set(key, value)
-    logger.info("YouTube %s draft settings updated", payload.video_type)
+    if owner:
+        set_account_setting(owner, key, value)
+    else:
+        runtime_config.set(key, value)
+    logger.info("Account-scoped YouTube %s draft settings updated", payload.video_type)
     return {"status": "success", "video_type": payload.video_type, "config": value}
 
 
 @router.get("/team-person-filter")
-def get_team_person_filter(creds: Credentials = Depends(require_login_credentials)):
+def get_team_person_filter(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
-    value, configured = _read_team_person_filter()
+    value, configured = _read_team_person_filter(_resolve_owner(owner_sub))
     return {"configured": configured, **value}
 
 
 @router.put("/team-person-filter")
-def update_team_person_filter(payload: TeamPersonFilterModel, creds: Credentials = Depends(require_login_credentials)):
+def update_team_person_filter(
+    payload: TeamPersonFilterModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
     value = payload.model_dump()
-    runtime_config.set("shared_team_person_filter", value)
-    logger.info("Shared team/person filter updated")
+    owner = _resolve_owner(owner_sub)
+    if owner:
+        set_account_setting(owner, "shared_team_person_filter", value)
+    else:
+        runtime_config.set("shared_team_person_filter", value)
+    logger.info("Account-scoped team/person filter updated")
     return {"configured": True, **value}
+
+
+@router.get("/work-state")
+def get_work_state(
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
+    del creds
+    return {"version": 1, "state": get_account_work_state(_resolve_owner(owner_sub))}
+
+
+@router.put("/work-state")
+def update_work_state(
+    payload: WorkStateUpdateModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
+    del creds
+    owner = _resolve_owner(owner_sub)
+    try:
+        state = update_account_work_state(owner, payload.key, payload.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"version": 1, "state": state}

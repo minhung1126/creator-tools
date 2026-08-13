@@ -1,13 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Video, X, Youtube } from 'lucide-react';
-import { readPersistentJson, writePersistentJson } from '../utils/persistentStorage';
+import useAccountWorkState from '../hooks/useAccountWorkState';
 
 const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
-const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, sidebarCollapsed, setSidebarCollapsed }) {
-  const savedNavigation = readPersistentJson(NAVIGATION_STORAGE_KEY, {});
+  const { value: savedNavigation, save: saveNavigation } = useAccountWorkState('navigation', {});
   const [youtubeOpen, setYoutubeOpen] = useState(savedNavigation.youtubeOpen ?? youtubeItems.some((i) => i.id === activeTab));
   const [sheetOpen, setSheetOpen] = useState(savedNavigation.sheetOpen ?? sheetItems.some((i) => i.id === activeTab));
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -64,8 +63,8 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, si
   }, [drawerOpen]);
 
   useEffect(() => {
-    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab, youtubeOpen, sheetOpen });
-  }, [activeTab, sheetOpen, youtubeOpen]);
+    saveNavigation({ activeTab, sidebarCollapsed, youtubeOpen, sheetOpen }, { debounceMs: 150 });
+  }, [activeTab, saveNavigation, sheetOpen, sidebarCollapsed, youtubeOpen]);
 
   const item = (value, child = false) => {
     const Icon = value.icon;
@@ -104,7 +103,7 @@ export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, si
         {item({ id: 'api_health', label: 'API健康度', icon: Activity })}
         {group('youtube', 'YouTube', Youtube, youtubeOpen, setYoutubeOpen, youtubeItems)}
         {group('sheet', 'Sheet', FileSpreadsheet, sheetOpen, setSheetOpen, sheetItems)}
-        {item({ id: 'settings', label: '全域與 Google 設定', icon: Settings })}
+        {item({ id: 'settings', label: '帳號與 Google 設定', icon: Settings })}
       </nav>
       <div className="sidebar-footer"><div className="glass-panel account-card"><strong className="account-title">帳號資訊</strong><span className="badge badge-connected account-status"><CheckCircle2 size={12} />控制台已登入</span><p className="account-email">{authUser?.email}</p><span className={`badge account-youtube-status ${authUser?.youtube?.authenticated ? 'badge-connected' : 'badge-disconnected'}`}>{authUser?.youtube?.authenticated ? 'YouTube 已授權' : 'YouTube 未連結'}</span><button type="button" className="logout-button" onClick={onLogout}>登出控制台</button></div></div>
     </aside>

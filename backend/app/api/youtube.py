@@ -6,8 +6,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 
+from backend.app.core.account_state import get_account_active_slot, get_account_setting
 from backend.app.core.config import normalize_youtube_slot
-from backend.app.core.dependencies import require_login_credentials, require_youtube_credentials
+from backend.app.core.dependencies import (
+    require_account_subject,
+    require_login_credentials,
+    require_youtube_credentials,
+)
 from backend.app.core.request_protection import enforce_workflow_rate_limit
 from backend.app.core.runtime_config import runtime_config
 from backend.app.core.youtube_context import YouTubeRequestContext, coerce_youtube_context
@@ -154,10 +159,11 @@ def upload_time_sort_key(video_id: str, details_map, original_positions):
 def get_quota_usage(
     slot: Optional[str] = Query(default=None, max_length=32),
     creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
 ):
     del creds
     try:
-        slot_name = runtime_config.get_youtube_active_slot() if slot is None else normalize_youtube_slot(slot)
+        slot_name = get_account_active_slot(owner_sub) if slot is None else normalize_youtube_slot(slot)
         return get_youtube_quota_tracker(slot_name).get_usage()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="不支援的 YouTube OAuth slot") from exc
@@ -166,7 +172,11 @@ def get_quota_usage(
 
 
 @router.post("/quota-estimate")
-def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(require_login_credentials)):
+def estimate_quota(
+    payload: QuotaEstimateInput,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
     del creds
     if payload.item_count < 0:
         raise HTTPException(status_code=400, detail="item_count 不可小於 0")
@@ -174,7 +184,7 @@ def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(req
         return _quota_estimate(
             payload.operation,
             payload.item_count,
-            slot=payload.slot or runtime_config.get_youtube_active_slot(),
+            slot=payload.slot or get_account_active_slot(owner_sub),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="不支援的 YouTube OAuth slot") from exc
@@ -188,7 +198,11 @@ def get_playlist_videos(
     creds: YouTubeRequestContext = Depends(require_youtube_credentials),
 ):
     youtube_context = coerce_youtube_context(creds)
-    playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
+    playlist_id = payload.playlist_id or get_account_setting(
+        youtube_context.owner_sub,
+        "default_playlist_id",
+        runtime_config.get("default_playlist_id") if not youtube_context.owner_sub else "",
+    )
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:
@@ -266,7 +280,11 @@ def run_batch_metadata_update(
     """Validate and update selected videos synchronously, returning one result per video."""
     youtube_context = coerce_youtube_context(creds)
 
-    spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
+    spreadsheet_id = payload.spreadsheet_url_or_id or get_account_setting(
+        youtube_context.owner_sub,
+        "default_spreadsheet_id",
+        runtime_config.get("default_spreadsheet_id") if not youtube_context.owner_sub else "",
+    )
     if not spreadsheet_id:
         raise HTTPException(status_code=400, detail="Spreadsheet ID or URL is required.")
     normalized_team = normalize_text(payload.team)
@@ -418,7 +436,11 @@ def run_publish_and_cleanup(
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
     youtube_context = coerce_youtube_context(creds)
 
-    playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
+    playlist_id = payload.playlist_id or get_account_setting(
+        youtube_context.owner_sub,
+        "default_playlist_id",
+        runtime_config.get("default_playlist_id") if not youtube_context.owner_sub else "",
+    )
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:

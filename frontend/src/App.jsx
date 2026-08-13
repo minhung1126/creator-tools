@@ -11,22 +11,17 @@ import ApiHealthPage from './pages/ApiHealthPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
 import { clearAuthHash, parseAuthHash } from './utils/authHash';
-import { readPersistentJson, writePersistentJson } from './utils/persistentStorage';
-
-const NAVIGATION_STORAGE_KEY = 'creator-tools.navigation.v1';
+import { AccountWorkStateProvider } from './hooks/useAccountWorkState';
 
 function AppContent() {
-  const [activeTab, setActiveTab] = useState(() => readPersistentJson(NAVIGATION_STORAGE_KEY, {}).activeTab || 'dashboard');
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readPersistentJson(NAVIGATION_STORAGE_KEY, {}).sidebarCollapsed ?? false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [sysSettings, setSysSettings] = useState({});
+  const [workState, setWorkState] = useState({});
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState(null);
   const toast = useToast();
-
-  useEffect(() => {
-    writePersistentJson(NAVIGATION_STORAGE_KEY, { ...readPersistentJson(NAVIGATION_STORAGE_KEY, {}), activeTab, sidebarCollapsed });
-  }, [activeTab, sidebarCollapsed]);
 
   const fetchUser = async () => {
     try {
@@ -48,12 +43,22 @@ function AppContent() {
 
   const fetchSettings = async () => {
     try {
-      const [system, shared, youtube, teamPersonFilter] = await Promise.all([
+      const [systemResult, sharedResult, youtubeResult, teamPersonFilterResult, workStateResult] = await Promise.allSettled([
         api.getSystemInfo(),
         api.getSharedSettings(),
         api.getYoutubeSettings(),
         api.getTeamPersonFilter(),
+        api.getWorkState(),
       ]);
+      const value = (result) => result.status === 'fulfilled' ? result.value : {};
+      const system = value(systemResult);
+      const shared = value(sharedResult);
+      const youtube = value(youtubeResult);
+      const teamPersonFilter = value(teamPersonFilterResult);
+      const nextWorkState = value(workStateResult)?.state || {};
+      setWorkState(nextWorkState);
+      setActiveTab(nextWorkState.navigation?.activeTab || 'dashboard');
+      setSidebarCollapsed(nextWorkState.navigation?.sidebarCollapsed ?? false);
       setSysSettings({ ...(system || {}), ...(shared || {}), ...(youtube || {}), shared_team_person_filter: teamPersonFilter });
     }
     catch (err) { console.error('Failed to fetch system settings:', err); }
@@ -96,23 +101,25 @@ function AppContent() {
   }, [toast]);
 
   const handleLogout = async () => {
-    try { await api.logout(); setAuthUser(null); toast.success('已成功登出控制台！'); }
+    try { await api.logout(); setAuthUser(null); setWorkState({}); setActiveTab('dashboard'); setSidebarCollapsed(false); toast.success('已成功登出控制台！'); }
     catch (err) { console.error('Logout error:', err); toast.error('登出失敗，請稍後再試'); }
   };
 
   if (loading) return <div className="loading-center">系統初始化中...</div>;
   if (!authUser) return <LoginPage initialError={authError} />;
 
-  return <div className={`app-container${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} /><main className="main-content">
-    {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
-    {activeTab === 'api_health' && <ApiHealthPage authUser={authUser} />}
-    {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
-    {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
-    {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
-    {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshAuthUser={fetchUser} setActiveTab={setActiveTab} />}
-    {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
-    {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
-  </main></div>;
+  return <AccountWorkStateProvider key={authUser.sub || authUser.email} initialState={workState}>
+    <div className={`app-container${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} /><main className="main-content">
+      {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
+      {activeTab === 'api_health' && <ApiHealthPage authUser={authUser} />}
+      {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
+      {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
+      {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
+      {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshAuthUser={fetchUser} setActiveTab={setActiveTab} />}
+      {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
+      {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
+    </main></div>
+  </AccountWorkStateProvider>;
 }
 
 class ErrorBoundary extends React.Component {

@@ -45,7 +45,7 @@ YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS=1000
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時會拒絕登入。Google client secret 只放後端 `.env`，不得傳給前端。
 
-登入後的預設 Google Sheet 與 YouTube 播放清單不放在 `.env`；請到「全域與 Google 設定」設定共用 Sheet，並到 YouTube 分組中的「YouTube 設定」設定播放清單。這些值會保存於伺服器的 `data/runtime_config.json`。
+登入後的預設 Google Sheet 與 YouTube 播放清單不放在 `.env`；請到「帳號與 Google 設定」設定目前帳號的 Sheet，並到 YouTube 分組中的「YouTube 設定」設定目前帳號的播放清單。這些值與各頁工作狀態會依 Google 帳號保存於伺服器的 `data/account_state.json`。
 
 ## 3. 驗證
 

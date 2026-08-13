@@ -6,6 +6,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
+from backend.app.core.account_state import get_account_active_slot, set_account_active_slot
 from backend.app.core.config import normalize_youtube_slot, settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.runtime_config import runtime_config
@@ -401,7 +402,7 @@ def get_user_status(request: Request):
     else:
         for slot in youtube_slots.values():
             slot["channel_mismatch"] = False
-    active_slot = runtime_config.get_youtube_active_slot()
+    active_slot = get_account_active_slot(session_sub)
     youtube_connection = {
         **youtube_slots.get(active_slot, {}),
         "active_slot": active_slot,
@@ -437,7 +438,7 @@ def disconnect_youtube_slot(slot: str, request: Request, confirm: bool = Query(F
     session_id = _get_authenticated_session_id(request)
     session_data = session_store.get(session_id) or {}
     owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip()
-    if slot_name == runtime_config.get_youtube_active_slot() and not confirm:
+    if slot_name == get_account_active_slot(owner_sub) and not confirm:
         raise HTTPException(
             status_code=409,
             detail={
@@ -487,7 +488,7 @@ def activate_youtube_slot(slot: str, request: Request):
                 "slot": slot_name,
             },
         )
-    runtime_config.set_youtube_active_slot(slot_name)
+    set_account_active_slot(owner_sub, slot_name)
     logger.info("YouTube active slot changed to %s", slot_name)
     return {"status": "youtube_slot_activated", "active_slot": slot_name}
 

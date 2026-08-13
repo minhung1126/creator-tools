@@ -3,18 +3,14 @@ import { CheckCircle2, ExternalLink, FileSpreadsheet, Globe, Key, RefreshCw, Sav
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
-import { readPersistentJson, resolvePersistentValue, writePersistentJson } from '../utils/persistentStorage';
 
 const GITHUB_DOCS = {
   google: 'https://github.com/minhung1126/creator-tools/blob/main/docs/GOOGLE_API_SETUP.md',
   deployment: 'https://github.com/minhung1126/creator-tools/blob/main/docs/DEPLOYMENT.md',
 };
-const STORAGE_KEY = 'creator-tools.settings.v1';
-
 export function initialFormData(defaultSpreadsheetId) {
-  const saved = readPersistentJson(STORAGE_KEY, {});
   return {
-    default_spreadsheet_id: resolvePersistentValue(saved, 'default_spreadsheet_id', defaultSpreadsheetId, ''),
+    default_spreadsheet_id: defaultSpreadsheetId || '',
   };
 }
 
@@ -60,16 +56,15 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
         try {
           await api.updateSharedSettings(nextData);
           if (version !== saveVersionRef.current) return;
-          writePersistentJson(STORAGE_KEY, { ...nextData, _pending: false });
           dirtyRef.current = false;
           await refreshSettings();
           if (version === saveVersionRef.current) {
-            setMsg({ type: 'success', text: '共用 Google Sheet 設定已自動儲存。' });
+            setMsg({ type: 'success', text: '目前帳號的 Google Sheet 設定已自動儲存。' });
             if (notify) toast.success('設定已儲存');
           }
         } catch (error) {
           if (version !== saveVersionRef.current) return;
-          setMsg({ type: 'error', text: error.message || '儲存失敗；瀏覽器快取仍已保留。' });
+          setMsg({ type: 'error', text: error.message || '伺服器儲存失敗，請稍後重試。' });
           if (notify) toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
         } finally {
           if (version === saveVersionRef.current) setSaving(false);
@@ -90,7 +85,6 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
     const nextData = { ...formData, [field]: value };
     dirtyRef.current = true;
     setFormData(nextData);
-    writePersistentJson(STORAGE_KEY, { ...nextData, _pending: true });
     scheduleSave(nextData);
   };
 
@@ -115,8 +109,8 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
   return (
     <div className="section-gap settings-page">
       <header className="page-header">
-        <h1>全域與 Google 設定</h1>
-        <p className="section-desc">管理控制台登入與共用 Google Sheet；YouTube 頻道授權及發布設定請至「YouTube 設定」。</p>
+        <h1>帳號與 Google 設定</h1>
+        <p className="section-desc">管理控制台登入與目前帳號的 Google Sheet；YouTube 頻道授權及發布設定請至「YouTube 設定」。</p>
       </header>
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
@@ -133,7 +127,7 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
             ? <span className="badge badge-connected"><CheckCircle2 size={14} /> 已連線：{authUser.email}</span>
             : <span className="badge badge-disconnected"><XCircle size={14} /> 未連線 Google 帳號</span>}
         </div>
-        <div className="info-banner"><span>這個 Google 帳號只負責登入控制台與讀取共用 Google Sheet；YouTube 頻道授權請至「YouTube 設定」獨立管理。</span></div>
+        <div className="info-banner"><span>這個 Google 帳號負責登入控制台與讀取自己的工作設定；YouTube 頻道授權請至「YouTube 設定」獨立管理。</span></div>
         <div className="info-banner"><span>Google Client ID 與 Client Secret 由伺服器端 <code>.env</code> 管理。{sysSettings.google_client_configured ? ' ✅ Credentials 已設定。' : ' ⚠️ Credentials 尚未設定。'}</span></div>
         {authUser && <div className="settings-grid">
           <div className="glass-panel settings-info-card"><strong>Token 狀態</strong><p>{tokenStatusLabel(authUser.token_status)}</p></div>
@@ -150,13 +144,13 @@ export default function SettingsPage({ authUser, sysSettings, refreshSettings })
       </div>
 
       <div className="glass-panel card-padding settings-card card-stack">
-        <div><h3 className="settings-heading"><FileSpreadsheet size={20} color="var(--accent)" /> 共用 Google Sheet</h3><p className="section-desc">這是未指定其他來源時的共用預設值，供 Sheet 內容複製與 YouTube 工作流作為 fallback 使用；修改後會自動儲存。</p></div>
-        <div className="form-group"><label className="form-label"><FileSpreadsheet size={14} /> 預設 Google Sheet 網址或 Spreadsheet ID</label><SourceLinkInput value={formData.default_spreadsheet_id} onChange={(e) => handleChange('default_spreadsheet_id', e.target.value)} sourceType="spreadsheet" /><p className="section-desc">修改後會自動儲存，並同步保留於此瀏覽器作為離線快取。</p></div>
+        <div><h3 className="settings-heading"><FileSpreadsheet size={20} color="var(--accent)" /> 帳號預設 Google Sheet</h3><p className="section-desc">這是目前帳號未指定其他來源時的預設值，供 Sheet 內容複製與 YouTube 工作流使用；修改後會自動儲存。</p></div>
+        <div className="form-group"><label className="form-label"><FileSpreadsheet size={14} /> 預設 Google Sheet 網址或 Spreadsheet ID</label><SourceLinkInput value={formData.default_spreadsheet_id} onChange={(e) => handleChange('default_spreadsheet_id', e.target.value)} sourceType="spreadsheet" /><p className="section-desc">修改後會自動儲存至目前登入的 Google 帳號；換瀏覽器或重新登入仍可取回。</p></div>
       </div>
 
       <div className="glass-panel card-padding settings-card card-stack"><h3 className="settings-heading"><Globe size={20} /> 系統／部署資訊（唯讀）</h3><div className="settings-grid"><div className="form-group"><label className="form-label">對外公開網址（PUBLIC_BASE_URL）</label><input className="form-input" value={sysSettings.public_base_url || ''} readOnly /></div><div className="form-group"><label className="form-label">伺服器監聽位址（BIND_HOST）</label><input className="form-input" value={sysSettings.bind_host || ''} readOnly /></div><div className="form-group"><label className="form-label">Frontend URL</label><input className="form-input" value={sysSettings.frontend_url || ''} readOnly /></div></div><p className="section-desc">這些值由部署環境的 `.env` 管理，不屬於 Google 或 YouTube 工作流設定。BIND_HOST 控制服務監聽哪張網卡；PUBLIC_BASE_URL 是外部使用者網址，也是 Google OAuth callback 的來源。</p></div>
 
-      <div className="page-actions settings-page-actions"><button className="btn btn-success" onClick={handleSave} disabled={saving}><Save size={18} /> {saving ? '儲存中...' : '立即儲存共用設定'}</button></div>
+      <div className="page-actions settings-page-actions"><button className="btn btn-success" onClick={handleSave} disabled={saving}><Save size={18} /> {saving ? '儲存中...' : '立即儲存帳號設定'}</button></div>
     </div>
   );
 }
