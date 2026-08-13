@@ -89,6 +89,7 @@ export const api = {
   getYoutubeQuotaUsage: (slot) => request(`/youtube/quota-usage${slot ? `?slot=${encodeURIComponent(slot)}` : ''}`),
   estimateYoutubeQuota: ({ operation, itemCount, slot }) => request('/youtube/quota-estimate', { method: 'POST', body: JSON.stringify({ operation, item_count: itemCount, ...(slot ? { slot } : {}) }) }),
   getPlaylistVideos: (playlistId) => request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
+  updateYoutubeVideoMetadata: ({ videoId, title, description }) => request('/youtube/video-metadata', { method: 'POST', body: JSON.stringify({ video_id: videoId, title, description }) }),
   batchUpdateMetadata: ({ spreadsheetUrlOrId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
   publishAndCleanup: (playlistId) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: playlistId }) }),
 };

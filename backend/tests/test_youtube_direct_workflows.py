@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from backend.app.api import youtube as youtube_api
-from backend.app.api.youtube import BatchUpdateInput, PublishCleanupInput, VideoAssignment
+from backend.app.api.youtube import BatchUpdateInput, PublishCleanupInput, VideoAssignment, VideoMetadataUpdateInput
 from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 
@@ -102,6 +102,50 @@ def test_metadata_direct_flow_continues_after_one_video_fails(monkeypatch):
     assert response["failed_count"] == 1
     assert [call[0] for call in calls] == ["video-1", "video-2", "video-3"]
     assert calls[0][3]["tags"] == ["keep"]
+
+
+def test_single_video_metadata_update_preserves_existing_snippet(monkeypatch):
+    detail = {
+        "id": "video-1",
+        "snippet": {
+            "title": "Old title",
+            "description": "Old description",
+            "categoryId": "22",
+            "tags": ["keep"],
+            "publishedAt": "2026-01-01T00:00:00Z",
+        },
+    }
+    monkeypatch.setattr(youtube_api, "fetch_video_details", lambda _context, _ids: [detail])
+    calls = []
+
+    def update(_context, video_id, title, description, *, current_snippet):
+        calls.append((video_id, title, description, current_snippet))
+        return {"id": video_id}
+
+    monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
+
+    response = youtube_api.update_video_metadata(
+        VideoMetadataUpdateInput(video_id="video-1", title="New title", description="New description"),
+        creds=youtube_context(),
+    )
+
+    assert response["status"] == "succeeded"
+    assert response["title"] == "New title"
+    assert calls == [("video-1", "New title", "New description", detail["snippet"])]
+
+
+def test_single_video_metadata_update_returns_not_found(monkeypatch):
+    monkeypatch.setattr(youtube_api, "fetch_video_details", lambda _context, _ids: [])
+
+    try:
+        youtube_api.update_video_metadata(
+            VideoMetadataUpdateInput(video_id="missing", title="Title", description=""),
+            creds=youtube_context(),
+        )
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 404
+    else:
+        raise AssertionError("Expected a 404 for a missing YouTube video")
 
 
 def test_metadata_quota_block_keeps_partial_results_and_stops_writes(monkeypatch):

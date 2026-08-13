@@ -40,6 +40,12 @@ class PlaylistItemsInput(BaseModel):
     playlist_id: Optional[str] = Field(default="", max_length=256)
 
 
+class VideoMetadataUpdateInput(BaseModel):
+    video_id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=5000)
+
+
 class VideoAssignment(BaseModel):
     video_id: str = Field(min_length=1, max_length=128)
     person: str = Field(max_length=200)
@@ -229,6 +235,52 @@ def _youtube_thumbnail(detail: dict, video_id: str) -> str:
         or (thumbnails.get("default") or {}).get("url")
         or (f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else "")
     )
+
+
+@router.post("/video-metadata")
+def update_video_metadata(
+    payload: VideoMetadataUpdateInput,
+    creds: YouTubeRequestContext = Depends(require_youtube_context),
+    _rate_limit: None = Depends(enforce_workflow_rate_limit),
+):
+    """Update one video's title and description while preserving other metadata."""
+    youtube_context = creds
+    video_id = normalize_text(payload.video_id)
+    title = normalize_text(payload.title)
+    description = payload.description
+    if not video_id or not title:
+        raise HTTPException(status_code=400, detail="影片 ID 與標題不可為空白。")
+
+    try:
+        details = fetch_video_details(youtube_context, [video_id])
+        detail = next((item for item in details if item.get("id") == video_id), None)
+        if not detail:
+            raise HTTPException(status_code=404, detail="YouTube 找不到此影片或目前帳號無權存取。")
+
+        update_single_video_metadata(
+            youtube_context,
+            video_id,
+            str(title),
+            description,
+            current_snippet=(detail.get("snippet") or {}),
+        )
+        return {
+            "video_id": video_id,
+            "youtube_slot": youtube_context.slot,
+            "title": str(title),
+            "description": description,
+            "thumbnail_url": _youtube_thumbnail(detail, video_id),
+            "status": "succeeded",
+        }
+    except YouTubeQuotaUnavailable as exc:
+        raise _quota_http_exception(exc) from exc
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Single YouTube metadata update failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
+        raise HTTPException(status_code=500, detail="更新 YouTube 影片 metadata 失敗，請稍後再試。") from exc
 
 
 def _safe_workflow_error(exc: Exception) -> str:

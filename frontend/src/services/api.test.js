@@ -102,6 +102,30 @@ describe('API request recovery', () => {
     });
   });
 
+  it('sends single-video YouTube metadata updates', async () => {
+    const updated = { video_id: 'video-1', title: 'New title', description: 'New description', status: 'succeeded' };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => updated,
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.updateYoutubeVideoMetadata({
+      videoId: 'video-1',
+      title: 'New title',
+      description: 'New description',
+    })).resolves.toEqual(updated);
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/v1/youtube/video-metadata');
+    expect(JSON.parse(options.body)).toEqual({
+      video_id: 'video-1',
+      title: 'New title',
+      description: 'New description',
+    });
+  });
+
   it('routes secondary OAuth and quota requests by slot', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

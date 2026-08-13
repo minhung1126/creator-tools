@@ -3,19 +3,36 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 import ThumbnailDialog from '../components/ThumbnailDialog';
+import YouTubeVideoEditDialog from '../components/YouTubeVideoEditDialog';
 import useAccountWorkState from '../hooks/useAccountWorkState';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import SourceLinkInput from '../components/SourceLinkInput';
 import {
   AlertTriangle,
   CheckCircle2,
+  ExternalLink,
   Globe,
   ListOrdered,
+  Pencil,
   PlaySquare,
   RefreshCw,
   Send,
   Trash2,
 } from 'lucide-react';
+
+function youtubeVideoUrl(videoId) {
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+}
+
+function YouTubeVideoLink({ videoId }) {
+  if (!videoId) return null;
+  return (
+    <a className="youtube-video-link" href={youtubeVideoUrl(videoId)} target="_blank" rel="noopener noreferrer">
+      <ExternalLink size={14} aria-hidden="true" />
+      在 YouTube 開啟影片
+    </a>
+  );
+}
 
 export default function PublishCleanerPage({ sysSettings, authUser }) {
   const toast = useToast();
@@ -33,6 +50,8 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
   const [previewImage, setPreviewImage] = useState(null);
   const [quotaEstimate, setQuotaEstimate] = useState(null);
   const [estimateLoading, setEstimateLoading] = useState(false);
+  const [editingVideo, setEditingVideo] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     saveWorkState({ playlistId });
@@ -50,6 +69,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     setLoading(true);
     setErrorMsg(null);
     setResult(null);
+    setEditingVideo(null);
     try {
       const res = await api.getPlaylistVideos(playlistId);
       setVideos(sortVideosByUploadTime(res.videos || []));
@@ -67,6 +87,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
     setExecuting(true);
     setErrorMsg(null);
     setResult(null);
+    setEditingVideo(null);
     try {
       const res = await api.publishAndCleanup(playlistId);
       setResult(res);
@@ -80,6 +101,28 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
       toast.error('發布與清理執行失敗');
     } finally {
       setExecuting(false);
+    }
+  };
+
+  const handleSaveEdit = async ({ title, description }) => {
+    if (!editingVideo || savingEdit) return;
+    const videoId = editingVideo.video_id;
+    setSavingEdit(true);
+    try {
+      const updated = await api.updateYoutubeVideoMetadata({ videoId, title, description });
+      const nextTitle = updated.title ?? title;
+      const nextDescription = updated.description ?? description;
+      setVideos((currentVideos) => currentVideos.map((video) => (
+        video.video_id === videoId
+          ? { ...video, title: nextTitle, description: nextDescription }
+          : video
+      )));
+      setEditingVideo(null);
+      toast.success('影片標題與描述已更新');
+    } catch (err) {
+      toast.error(`影片更新失敗：${err.message}`);
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -123,6 +166,13 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
         variant="destructive"
         onConfirm={doPublish}
         onCancel={() => setConfirmOpen(false)}
+      />
+
+      <YouTubeVideoEditDialog
+        video={editingVideo}
+        saving={savingEdit}
+        onSave={handleSaveEdit}
+        onClose={() => setEditingVideo(null)}
       />
 
       <header className="page-header">
@@ -179,6 +229,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
                 {video.thumbnail_url && <img className="publish-cleaner-thumbnail" src={video.thumbnail_url} alt={video.title} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setPreviewImage({ src: video.thumbnail_url, alt: video.title }); }} role="button" tabIndex={0} />}
                 <div className="publish-item-content">
                   {metadataBlock(video.title, video.description)}
+                  <YouTubeVideoLink videoId={video.video_id} />
                   <div className="publish-item-meta">
                     <span>ID: {video.video_id}</span>
                     <span>
@@ -189,6 +240,15 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
                 <div className="publish-item-status">
                   <span className="badge badge-info"><Globe size={12} /> 將設為公開</span>
                   <span className="badge badge-info publish-remove-badge"><Trash2 size={12} /> 移出清單</span>
+                  <button
+                    type="button"
+                    className="btn btn-secondary publish-edit-button"
+                    onClick={() => setEditingVideo(video)}
+                    disabled={executing || savingEdit}
+                    aria-label={`編輯影片 ${video.title || video.video_id}`}
+                  >
+                    <Pencil size={14} aria-hidden="true" /> 編輯
+                  </button>
                 </div>
               </div>
             ))}
@@ -214,7 +274,7 @@ export default function PublishCleanerPage({ sysSettings, authUser }) {
                 <div>
                   <strong>#{index + 1}</strong>
                   <div className="publish-result-metadata">{metadataBlock(item.title, item.description)}</div>
-                  <div className="result-meta">ID: {item.video_id}</div>
+                  <div className="result-meta">ID: {item.video_id} · <YouTubeVideoLink videoId={item.video_id} /></div>
                   {item.reason && <div className={item.status === 'failed' ? 'result-reason result-reason-failed' : 'result-reason'}>說明：{item.reason}</div>}
                 </div>
                 <span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>{item.status === 'succeeded' ? '完成' : item.status === 'succeeded_with_warnings' ? '完成但有警告' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}</span>
