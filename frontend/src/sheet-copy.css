@@ -5,6 +5,34 @@
   font-size: clamp(1.5rem, 3vw, 2.2rem);
   line-height: 1.2;
 }
+
+.sheet-copy-page-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+}
+
+.sheet-copy-auto-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-main);
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sheet-copy-page-option-hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .sheet-copy-display-panel {
   display: grid;
   gap: 18px;
@@ -188,6 +216,13 @@
   cursor: copy;
 }
 
+.sheet-copy-cell-collapsed {
+  min-height: 56px;
+  gap: 6px;
+  padding-top: 10px;
+  padding-bottom: 8px;
+}
+
 .sheet-copy-cell:hover,
 .sheet-copy-cell:focus-visible {
   outline: none;
@@ -200,11 +235,19 @@
   box-shadow: inset 0 0 0 1px #3f695a;
 }
 
-.sheet-copy-cell > span {
+.sheet-copy-cell-content {
   flex: 1;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.5;
+}
+
+.sheet-copy-cell-content.is-collapsed {
+  display: block;
+  min-height: 1.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sheet-copy-cell small {
