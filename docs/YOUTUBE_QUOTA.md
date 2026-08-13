@@ -1,8 +1,8 @@
 # YouTube Data API quota policy
 
-Creator Tools keeps a durable, request-level estimate for the YouTube Data API
-general bucket. It is not a Google Cloud Monitoring feed and does not include
-requests made by other applications in the same Cloud project.
+Creator Tools keeps a durable, request-level estimate for each YouTube OAuth
+slot's general bucket. It is not a Google Cloud Monitoring feed and does not
+include requests made by other applications in the same Cloud project.
 
 The official default for the general bucket is 10,000 units per day. The
 current methods used by this project are recorded at their documented
@@ -14,6 +14,7 @@ per-request costs:
 | `videos.list` | 1 |
 | `videos.update` | 50 |
 | `playlistItems.delete` | 50 |
+| `channels.list` (OAuth channel verification) | 1 |
 
 Pagination is charged per request. Before a request is sent, its documented
 cost is reserved in the JSON-backed quota store. A safety buffer configured by the user is deducted
@@ -37,9 +38,16 @@ When Google returns HTTP 403 with reason `quotaExceeded`, the ledger changes to
 remain blocked until the Pacific midnight reset; there is no background task
 queue or automatic cross-day retry.
 
-Quota usage lives in `data/youtube_quota_usage.json`. Writes use an in-process
-lock and atomic file replacement. Keep the data directory in the deployment
-volume.
+Quota usage lives in `data/youtube_quota_usage.json` for primary and
+`data/youtube_quota_usage.secondary.json` for secondary. Writes use an
+in-process lock and atomic file replacement. Keep the data directory in the
+deployment volume. A workflow captures its active slot at request start, so
+changing the active slot cannot move an in-flight batch to another token or
+ledger.
+
+`quotaExceeded` never triggers an automatic retry with the other slot. Using
+multiple projects to shard the same use case is not a quota increase strategy;
+follow Google's quota extension/compliance process instead.
 
 References:
 

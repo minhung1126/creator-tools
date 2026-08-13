@@ -2,8 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Activity, RefreshCw } from 'lucide-react';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
 
-export default function ApiHealthPage() {
+export default function ApiHealthPage({ authUser }) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const availableSlots = Object.keys(authUser?.youtube?.slots || {}).length
+    ? Object.keys(authUser.youtube.slots)
+    : ['primary', 'secondary'];
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30000);
@@ -22,7 +26,7 @@ export default function ApiHealthPage() {
         </button></div>
       </div>
 
-      <YouTubeQuotaBanner refreshKey={refreshKey} />
+      <YouTubeQuotaBanner refreshKey={refreshKey} activeSlot={activeSlot} availableSlots={availableSlots} />
 
       <div className="info-banner">
         <Activity size={16} color="var(--primary)" />

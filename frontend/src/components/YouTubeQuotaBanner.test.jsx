@@ -45,4 +45,11 @@ describe('YouTubeQuotaBanner', () => {
     await waitFor(() => expect(screen.getByText('Google 已確認 `quotaExceeded`；系統已停止新的 YouTube request，直到官方重設。Google Cloud project 的其他應用程式也可能消耗額度。')).toBeInTheDocument());
     expect(screen.getByText(/系統可用 0 units/)).toBeInTheDocument();
   });
+
+  it('loads the selected secondary slot ledger', async () => {
+    api.getYoutubeQuotaUsage.mockResolvedValue(usage());
+    render(<YouTubeQuotaBanner activeSlot="secondary" />);
+    await waitFor(() => expect(api.getYoutubeQuotaUsage).toHaveBeenCalledWith('secondary'));
+    expect(screen.getByLabelText('YouTube quota slot')).toHaveValue('secondary');
+  });
 });

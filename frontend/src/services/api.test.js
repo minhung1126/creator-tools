@@ -101,4 +101,23 @@ describe('API request recovery', () => {
       assignments: [{ video_id: 'video-1', person: 'Alice' }],
     });
   });
+
+  it('routes secondary OAuth and quota requests by slot', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.getYoutubeAuthUrl('secondary');
+    await api.activateYoutubeSlot('secondary');
+    await api.getYoutubeQuotaUsage('secondary');
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/auth/youtube/secondary/url',
+      '/api/v1/auth/youtube/secondary/activate',
+      '/api/v1/youtube/quota-usage?slot=secondary',
+    ]);
+  });
 });

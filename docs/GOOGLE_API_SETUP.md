@@ -4,8 +4,8 @@ Creator Tools 需要 Google Sheets 與 YouTube Data API v3 的 OAuth 2.0 授權�
 
 ## 1. Google Cloud 設定
 
-1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立 `Creator-Tools` 專案。
-2. 啟用 Google Sheets API 與 YouTube Data API v3。
+1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立登入/Sheets 用的 `Creator-Tools` 專案，並啟用 Google Sheets API。
+2. 建立一個或兩個 YouTube Data API v3 專案／Web Client，分別填入 primary 與 optional secondary slot。兩個 client 可共用 callback，但 quota ledger 與授權 token 在 Creator Tools 中分開保存。
 3. 在 OAuth consent screen 加入 userinfo email/profile、Sheets readonly 與 YouTube scopes；本專案不需要 Google Drive scope。
 4. Development Mode 請把測試管理者加入 Test users。
 5. 建立 Web application OAuth client，設定 callback：
@@ -27,8 +27,20 @@ FRONTEND_URL=https://your-domain.com
 SECRET_KEY=generate-a-unique-secret
 CREDENTIAL_ENCRYPTION_KEY=generate-a-stable-encryption-key
 ALLOWED_GOOGLE_EMAILS=admin@example.com
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-client-secret
+GOOGLE_CLIENT_ID=your-login-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-login-client-secret
+YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=your-youtube-primary-client-id.apps.googleusercontent.com
+YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=your-youtube-primary-client-secret
+YOUTUBE_OAUTH_PRIMARY_LABEL=Primary
+YOUTUBE_OAUTH_SECONDARY_ENABLED=false
+YOUTUBE_OAUTH_SECONDARY_CLIENT_ID=
+YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET=
+YOUTUBE_OAUTH_SECONDARY_LABEL=Secondary
+YOUTUBE_OAUTH_DEFAULT_SLOT=primary
+YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT=10000
+YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS=1000
+YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT=10000
+YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS=1000
 ```
 
 正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時會拒絕登入。Google client secret 只放後端 `.env`，不得傳給前端。
@@ -37,4 +49,6 @@ GOOGLE_CLIENT_SECRET=your-client-secret
 
 ## 3. 驗證
 
-登入後，系統會把 Google token 加密存於 server-side session store；瀏覽器 cookie 只有 opaque session ID。登出只會刪除目前 session。修改 `.env` 後請重新啟動服務。
+登入後，系統會把 Google token 加密存於 server-side credential store；瀏覽器 cookie 只有 opaque session ID。YouTube token 會保存為 `youtube_primary`／`youtube_secondary`，client secret 永不持久化。OAuth callback 會用簽名 cookie 中的 slot 驗證流程，不能以 callback URL 參數改寫 slot。修改 `.env` 後請重新啟動服務。
+
+Primary 會暫時 fallback 到既有 `GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET`，Health Check 會顯示 migration warning。OAuth slot 的兩個授權若回傳不同 Channel ID，第二個 slot 不會被啟用；控制台也只會在有效授權與頻道驗證完成後允許設為 active。

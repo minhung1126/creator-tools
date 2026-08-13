@@ -68,21 +68,38 @@ async def security_headers(request, call_next):
 @app.get("/api/v1/health")
 def health_check():
     google_oauth_ready = bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET)
+    youtube_primary = settings.youtube_oauth_slot("primary")
+    youtube_secondary = settings.youtube_oauth_slot("secondary")
+    youtube_login_ready = google_oauth_ready
+    youtube_primary_ready = youtube_primary.configured
+    youtube_secondary_ready = youtube_secondary.configured
     access_allowlist_ready = bool(settings.allowed_google_emails) or not settings.allowlist_required
     warnings = []
     if not google_oauth_ready:
         warnings.append("Google OAuth credentials are not configured")
     if not access_allowlist_ready:
         warnings.append("ALLOWED_GOOGLE_EMAILS is required for HTTPS/production deployments")
+    if google_oauth_ready and not youtube_primary_ready:
+        warnings.append("YouTube primary OAuth credentials are not configured")
+    if youtube_primary.uses_legacy_google_credentials:
+        warnings.append(
+            "YouTube primary OAuth is using the legacy Google login client; configure YOUTUBE_OAUTH_PRIMARY_* to complete migration"
+        )
     return {
         "status": "healthy",
-        "ready": google_oauth_ready and access_allowlist_ready,
+        "ready": google_oauth_ready and youtube_primary_ready and access_allowlist_ready,
         "service": "Creator Tools Backend",
         "host": settings.base_url,
         "redirect_uri": settings.get_redirect_uri(),
         "configuration": {
             "google_oauth_ready": google_oauth_ready,
             "access_allowlist_ready": access_allowlist_ready,
+        },
+        "youtube": {
+            "login_configured": youtube_login_ready,
+            "primary_configured": youtube_primary_ready,
+            "secondary_configured": youtube_secondary_ready,
+            "secondary_enabled": youtube_secondary.enabled,
         },
         "warnings": warnings,
         "commit_sha": os.getenv("APP_COMMIT_SHA", "development"),

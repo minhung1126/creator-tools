@@ -12,13 +12,13 @@ from typing import Any, Dict, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from backend.app.core.config import settings
+from backend.app.core.config import normalize_youtube_slot, settings
 
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _DEFAULT_PATH = _PROJECT_ROOT / "data" / "credential_store.json"
-_STORE_VERSION = 5
+_STORE_VERSION = 6
 
 
 def utc_now() -> datetime:
@@ -90,10 +90,45 @@ class CredentialStore:
                         for subject, records in users.items()
                         if isinstance(records, dict) and _normalise_subject(subject)
                     }
+                    migrated = False
+                    for records in users.values():
+                        if "youtube" in records:
+                            legacy = records.pop("youtube")
+                            if "youtube_primary" not in records:
+                                if isinstance(legacy, dict):
+                                    legacy = dict(legacy)
+                                    legacy.setdefault("slot", "primary")
+                                records["youtube_primary"] = legacy
+                            migrated = True
+                        for slot in ("primary", "secondary"):
+                            key = f"youtube_{slot}"
+                            record = records.get(key)
+                            if isinstance(record, dict) and record.get("slot") != slot:
+                                record["slot"] = slot
+                                migrated = True
+                            if isinstance(record, dict):
+                                encrypted = record.get("credentials_encrypted")
+                                try:
+                                    credentials = self._decrypt_json(encrypted)
+                                except RuntimeError:
+                                    credentials = None
+                                if isinstance(credentials, dict) and "client_secret" in credentials:
+                                    credentials.pop("client_secret", None)
+                                    record["credentials_encrypted"] = self._encrypt(
+                                        json.dumps(credentials, ensure_ascii=False)
+                                    )
+                                    migrated = True
+                                if isinstance(credentials, dict) and not record.get("client_fingerprint"):
+                                    client_id = str(credentials.get("client_id") or "").strip()
+                                    if client_id:
+                                        record["client_fingerprint"] = hashlib.sha256(client_id.encode("utf-8")).hexdigest()[:16]
+                                        migrated = True
                     self._data = {
                         "version": _STORE_VERSION,
                         "users": users,
                     }
+                    if migrated:
+                        self._save()
             except (OSError, json.JSONDecodeError) as exc:
                 logger.error("Failed to load credential store: %s", type(exc).__name__)
 
@@ -166,21 +201,32 @@ class CredentialStore:
         second_email = str(_user_from_token(second).get("email") or "").casefold()
         return bool(first_email and second_email and first_email == second_email)
 
-    def _save_connection(self, key: str, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
+    def _save_connection(
+        self,
+        key: str,
+        token_dict: Dict[str, Any],
+        owner_sub: str,
+        *,
+        slot: str | None = None,
+    ) -> Dict[str, Any]:
         """Persist one OAuth connection separately from browser login sessions."""
         if not isinstance(token_dict, dict) or not token_dict.get("token"):
             raise ValueError("Google OAuth response did not contain an access token")
 
         subject = _require_subject(owner_sub)
+        slot_name = normalize_youtube_slot(slot) if key == "youtube" else None
+        storage_key = f"youtube_{slot_name}" if slot_name else key
         now = utc_now()
         with self._lock:
             users = self._data.setdefault("users", {})
             user_records = users.setdefault(subject, {})
-            previous = user_records.get(key)
+            previous = user_records.get(storage_key)
             previous_credentials = (
                 self._decrypt_json(previous.get("credentials_encrypted")) if isinstance(previous, dict) else None
             )
-            credentials = dict(token_dict)
+            # Client secrets are deployment configuration, never credential
+            # data. Refresh code resolves the secret from the selected slot.
+            credentials = {field: value for field, value in token_dict.items() if field != "client_secret"}
             user = _user_from_token(credentials)
             # Google may omit refresh_token when an already-authorized account
             # is connected again. Never replace a working refresh token with
@@ -193,7 +239,11 @@ class CredentialStore:
                 credentials["refresh_token"] = previous_credentials.get("refresh_token")
 
             scopes = credentials.get("scopes") if isinstance(credentials.get("scopes"), list) else []
-            user_records[key] = {
+            client_id = str(credentials.get("client_id") or "").strip()
+            client_fingerprint = str(token_dict.get("client_fingerprint") or "").strip() or (
+                hashlib.sha256(client_id.encode("utf-8")).hexdigest()[:16] if client_id else None
+            )
+            record = {
                 "owner_sub": subject,
                 "credential_sub": _subject_from_token(credentials),
                 "credentials_encrypted": self._encrypt(json.dumps(credentials, ensure_ascii=False)),
@@ -209,16 +259,28 @@ class CredentialStore:
                 "last_refresh_error": None,
                 "status": "active",
             }
+            if slot_name:
+                record.update(
+                    {
+                        "slot": slot_name,
+                        "client_fingerprint": client_fingerprint,
+                        "channel_id": str(token_dict.get("channel_id") or "").strip() or None,
+                        "channel_title": str(token_dict.get("channel_title") or "").strip() or None,
+                    }
+                )
+            user_records[storage_key] = record
             self._save()
-            return self._get_public(key, subject) or {}
+            return self._get_public(storage_key, subject) or {}
 
     def save_google_connection(self, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
         """Persist the control-panel login/Sheets connection for one OIDC subject."""
         return self._save_connection("google", token_dict, owner_sub)
 
-    def save_youtube_connection(self, token_dict: Dict[str, Any], owner_sub: str) -> Dict[str, Any]:
+    def save_youtube_connection(
+        self, token_dict: Dict[str, Any], owner_sub: str, slot: str = "primary"
+    ) -> Dict[str, Any]:
         """Persist a YouTube connection under the logged-in user's OIDC subject."""
-        return self._save_connection("youtube", token_dict, owner_sub)
+        return self._save_connection("youtube", token_dict, owner_sub, slot=slot)
 
     def _get_credentials(self, key: str, owner_sub: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -229,8 +291,9 @@ class CredentialStore:
     def get_google_credentials(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_credentials("google", owner_sub)
 
-    def get_youtube_credentials(self, owner_sub: str) -> Optional[Dict[str, Any]]:
-        return self._get_credentials("youtube", owner_sub)
+    def get_youtube_credentials(self, owner_sub: str, slot: str = "primary") -> Optional[Dict[str, Any]]:
+        slot_name = normalize_youtube_slot(slot)
+        return self._get_credentials(f"youtube_{slot_name}", owner_sub)
 
     def _get_public(self, key: str, owner_sub: str) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -249,8 +312,15 @@ class CredentialStore:
     def get_google_public(self, owner_sub: str) -> Optional[Dict[str, Any]]:
         return self._get_public("google", owner_sub)
 
-    def get_youtube_public(self, owner_sub: str) -> Optional[Dict[str, Any]]:
-        return self._get_public("youtube", owner_sub)
+    def get_youtube_public(self, owner_sub: str, slot: str = "primary") -> Optional[Dict[str, Any]]:
+        slot_name = normalize_youtube_slot(slot)
+        return self._get_public(f"youtube_{slot_name}", owner_sub)
+
+    def get_youtube_slots_public(self, owner_sub: str) -> Dict[str, Dict[str, Any]]:
+        return {
+            slot: self.get_youtube_public(owner_sub, slot) or {}
+            for slot in ("primary", "secondary")
+        }
 
     def _mark_refresh_failed(
         self,
@@ -281,10 +351,18 @@ class CredentialStore:
         )
 
     def mark_youtube_refresh_failed(
-        self, message: str, *, owner_sub: str, requires_reauthorization: bool = False
+        self,
+        message: str,
+        *,
+        owner_sub: str,
+        slot: str = "primary",
+        requires_reauthorization: bool = False,
     ) -> None:
         self._mark_refresh_failed(
-            "youtube", message, owner_sub=owner_sub, requires_reauthorization=requires_reauthorization
+            f"youtube_{normalize_youtube_slot(slot)}",
+            message,
+            owner_sub=owner_sub,
+            requires_reauthorization=requires_reauthorization,
         )
 
     def _clear(self, key: str, owner_sub: str) -> None:
@@ -300,8 +378,8 @@ class CredentialStore:
     def clear_google(self, owner_sub: str) -> None:
         self._clear("google", owner_sub)
 
-    def clear_youtube(self, owner_sub: str) -> None:
-        self._clear("youtube", owner_sub)
+    def clear_youtube(self, owner_sub: str, slot: str = "primary") -> None:
+        self._clear(f"youtube_{normalize_youtube_slot(slot)}", owner_sub)
 
 
 credential_store = CredentialStore()

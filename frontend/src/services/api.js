@@ -61,8 +61,11 @@ async function request(endpoint, options = {}) {
 export const api = {
   getAuthConfig: () => request('/auth/config'),
   getAuthUrl: () => request('/auth/url'),
-  getYoutubeAuthUrl: () => request('/auth/youtube/url'),
-  disconnectYoutube: () => request('/auth/youtube/disconnect', { method: 'POST' }),
+  getYoutubeAuthUrl: (slot = 'primary') => request(slot === 'primary' ? '/auth/youtube/url' : `/auth/youtube/${encodeURIComponent(slot)}/url`),
+  disconnectYoutube: (slot = 'primary', { confirm = false } = {}) => request(slot === 'primary'
+    ? `/auth/youtube/disconnect${confirm ? '?confirm=true' : ''}`
+    : `/auth/youtube/${encodeURIComponent(slot)}/disconnect${confirm ? '?confirm=true' : ''}`, { method: 'POST' }),
+  activateYoutubeSlot: (slot) => request(`/auth/youtube/${encodeURIComponent(slot)}/activate`, { method: 'POST' }),
   getUserStatus: () => request('/auth/user'),
   logout: () => request('/auth/logout', { method: 'POST' }),
   getSystemInfo: () => request('/settings/system'),
@@ -70,6 +73,7 @@ export const api = {
   updateSharedSettings: (payload) => request('/settings/shared', { method: 'PUT', body: JSON.stringify(payload) }),
   getYoutubeSettings: () => request('/settings/youtube'),
   updateYoutubeSettings: (payload) => request('/settings/youtube', { method: 'PUT', body: JSON.stringify(payload) }),
+  getYoutubeSlotSettings: () => request('/settings/youtube-slots'),
   getTeamPersonFilter: () => request('/settings/team-person-filter'),
   updateTeamPersonFilter: ({ team = '', selectedPeople = [] }) => request('/settings/team-person-filter', {
     method: 'PUT',
@@ -82,8 +86,8 @@ export const api = {
   getTeamPeople: (spreadsheetUrlOrId, worksheetName, team) => request('/sheets/people', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName, team }) }),
   getRandomMemberPreview: (spreadsheetUrlOrId, worksheetName, team, columns) => request('/sheets/random-member-preview', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName, team, columns }) }),
   getCopyableSheetTable: (spreadsheetUrlOrId, worksheetName) => request('/sheets/copy-table', { method: 'POST', body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, worksheet_name: worksheetName }) }),
-  getYoutubeQuotaUsage: () => request('/youtube/quota-usage'),
-  estimateYoutubeQuota: ({ operation, itemCount }) => request('/youtube/quota-estimate', { method: 'POST', body: JSON.stringify({ operation, item_count: itemCount }) }),
+  getYoutubeQuotaUsage: (slot) => request(`/youtube/quota-usage${slot ? `?slot=${encodeURIComponent(slot)}` : ''}`),
+  estimateYoutubeQuota: ({ operation, itemCount, slot }) => request('/youtube/quota-estimate', { method: 'POST', body: JSON.stringify({ operation, item_count: itemCount, ...(slot ? { slot } : {}) }) }),
   getPlaylistVideos: (playlistId) => request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: playlistId }) }),
   batchUpdateMetadata: ({ spreadsheetUrlOrId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
   publishAndCleanup: (playlistId) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: playlistId }) }),

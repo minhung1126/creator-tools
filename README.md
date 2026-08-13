@@ -9,7 +9,7 @@
 ## 🌟 核心功能亮點
 
 1. **🔑 Google OAuth 2.0 與平台分頁設定**
-   - 整合 Google Sheets readonly 與 YouTube Data API v3 權限。
+   - 整合 Google Sheets readonly 與 YouTube Data API v3 權限；YouTube 支援 primary / optional secondary OAuth slot。
    - Google 與 YouTube 使用各自的設定頁。
    - 工作流程設定會持久化儲存；敏感 token / secret 不會由設定 API 回傳前端。
 
@@ -31,7 +31,7 @@
 
 5. **📊 JSON-backed YouTube quota 保護**
    - 每次 request 依官方 method cost 先保留估算額度，並以安全 buffer 避免超額。
-   - 用量與 quota breaker 狀態保存於 `data/youtube_quota_usage.json`，不需要 SQLite 任務資料庫。
+   - primary／secondary 用量與 quota breaker 狀態分別保存於 `data/youtube_quota_usage.json` 與 `data/youtube_quota_usage.secondary.json`，不需要 SQLite 任務資料庫。
    - Google 回報 `quotaExceeded` 後會停止新 request，直到 Pacific Time 午夜重設。
 
 ---
@@ -112,4 +112,4 @@ npm run dev
 
 - 正式環境必須固定 `CREDENTIAL_ENCRYPTION_KEY`；金鑰變更後既有加密 token 無法解密，需要重新授權。
 - Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session、工作流程設定與 YouTube quota 估算。
-- Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。
+   - Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。YouTube slot token、channel metadata 與 quota ledger 分開保存。

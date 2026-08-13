@@ -105,11 +105,11 @@ function AppContent() {
 
   return <div className={`app-container${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}><Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} /><main className="main-content">
     {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
-    {activeTab === 'api_health' && <ApiHealthPage />}
+    {activeTab === 'api_health' && <ApiHealthPage authUser={authUser} />}
     {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
     {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
     {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
-    {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} setActiveTab={setActiveTab} />}
+    {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshAuthUser={fetchUser} setActiveTab={setActiveTab} />}
     {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
     {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
   </main></div>;

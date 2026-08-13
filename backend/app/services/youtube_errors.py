@@ -89,6 +89,7 @@ class YouTubeQuotaUnavailable(RuntimeError):
         reset_at: str,
         confirmed_by_google: bool,
         user_message: str,
+        slot: str = "primary",
     ) -> None:
         super().__init__(user_message)
         self.code = code
@@ -98,6 +99,7 @@ class YouTubeQuotaUnavailable(RuntimeError):
         self.bucket = bucket
         self.reset_at = reset_at
         self.confirmed_by_google = bool(confirmed_by_google)
+        self.slot = str(slot or "primary")
         self.user_message = user_message
         self.safe_to_retry = True
 
@@ -108,6 +110,7 @@ class YouTubeQuotaUnavailable(RuntimeError):
             "reason": self.reason,
             "method": self.method,
             "bucket": self.bucket,
+            "youtube_slot": self.slot,
             "reset_at": self.reset_at,
             "reset_timezone": "America/Los_Angeles",
             "confirmed_by_google": self.confirmed_by_google,

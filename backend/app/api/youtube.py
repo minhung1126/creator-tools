@@ -2,13 +2,15 @@ import logging
 import math
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field
 
+from backend.app.core.config import normalize_youtube_slot
 from backend.app.core.dependencies import require_login_credentials, require_youtube_credentials
 from backend.app.core.request_protection import enforce_workflow_rate_limit
 from backend.app.core.runtime_config import runtime_config
+from backend.app.core.youtube_context import YouTubeRequestContext, coerce_youtube_context
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
     get_sheet_headers,
@@ -16,7 +18,7 @@ from backend.app.services.sheets_service import (
     normalize_text,
 )
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
-from backend.app.services.youtube_quota_service import youtube_quota_tracker
+from backend.app.services.youtube_quota_service import get_youtube_quota_tracker, youtube_quota_tracker
 from backend.app.services.youtube_service import (
     fetch_playlist_items,
     fetch_playlist_preview,
@@ -56,13 +58,14 @@ class PublishCleanupInput(BaseModel):
 class QuotaEstimateInput(BaseModel):
     operation: Literal["youtube.metadata_update", "youtube.publish_cleanup"]
     item_count: int = Field(ge=0, le=500)
+    slot: Optional[str] = Field(default=None, max_length=32)
 
 
 def _quota_http_exception(exc: YouTubeQuotaUnavailable) -> HTTPException:
     return HTTPException(status_code=429, detail=exc.to_dict())
 
 
-def _quota_estimate(operation: str, item_count: int) -> dict:
+def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = None) -> dict:
     count = max(int(item_count), 0)
     pages = math.ceil(count / 50) if count else 0
     if operation == "youtube.metadata_update":
@@ -81,7 +84,16 @@ def _quota_estimate(operation: str, item_count: int) -> dict:
         raise ValueError("不支援的 YouTube quota estimate operation")
 
     projected = sum(int(item["units"]) for item in breakdown)
-    usage = youtube_quota_tracker.get_usage()
+    if slot is None:
+        tracker = youtube_quota_tracker
+        slot_name = "primary"
+    else:
+        try:
+            slot_name = normalize_youtube_slot(slot)
+        except ValueError as exc:
+            raise ValueError("不支援的 YouTube OAuth slot") from exc
+        tracker = get_youtube_quota_tracker(slot_name)
+    usage = tracker.get_usage()
     available = int(usage.get("effective_available_units") or 0)
 
     def cost_for(number: int) -> int:
@@ -98,6 +110,7 @@ def _quota_estimate(operation: str, item_count: int) -> dict:
             break
     return {
         "operation": operation,
+        "slot": slot_name,
         "item_count": count,
         "projected_units": projected,
         "worst_case": True,
@@ -138,10 +151,16 @@ def upload_time_sort_key(video_id: str, details_map, original_positions):
 
 
 @router.get("/quota-usage")
-def get_quota_usage(creds: Credentials = Depends(require_login_credentials)):
+def get_quota_usage(
+    slot: Optional[str] = Query(default=None, max_length=32),
+    creds: Credentials = Depends(require_login_credentials),
+):
     del creds
     try:
-        return youtube_quota_tracker.get_usage()
+        slot_name = runtime_config.get_youtube_active_slot() if slot is None else normalize_youtube_slot(slot)
+        return get_youtube_quota_tracker(slot_name).get_usage()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="不支援的 YouTube OAuth slot") from exc
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
 
@@ -152,25 +171,37 @@ def estimate_quota(payload: QuotaEstimateInput, creds: Credentials = Depends(req
     if payload.item_count < 0:
         raise HTTPException(status_code=400, detail="item_count 不可小於 0")
     try:
-        return _quota_estimate(payload.operation, payload.item_count)
+        return _quota_estimate(
+            payload.operation,
+            payload.item_count,
+            slot=payload.slot or runtime_config.get_youtube_active_slot(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="不支援的 YouTube OAuth slot") from exc
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
 
 
 @router.post("/playlist-items")
-def get_playlist_videos(payload: PlaylistItemsInput, creds: Credentials = Depends(require_youtube_credentials)):
+def get_playlist_videos(
+    payload: PlaylistItemsInput,
+    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
+):
+    youtube_context = coerce_youtube_context(creds)
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:
-        videos, source, fallback_reason = fetch_playlist_preview(creds, playlist_id)
+        videos, source, fallback_reason = fetch_playlist_preview(youtube_context, playlist_id)
+        videos = [{**video, "youtube_slot": youtube_context.slot} for video in videos]
         return {
             "playlist_id": playlist_id,
             "total": len(videos),
             "videos": videos,
             "source": source,
             "fallback_reason": fallback_reason,
-            "quota_usage": youtube_quota_tracker.get_usage(),
+            "youtube_slot": youtube_context.slot,
+            "quota_usage": youtube_context.quota_limiter.get_usage(),
         }
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
@@ -203,10 +234,12 @@ def _direct_workflow_response(
     results: list[dict],
     *,
     quota_error: Optional[YouTubeQuotaUnavailable] = None,
+    slot: str = "primary",
 ) -> dict:
     statuses = [str(item.get("status") or "") for item in results]
     response = {
         "operation": operation,
+        "youtube_slot": slot,
         "completed": quota_error is None and "not_attempted" not in statuses,
         "total_count": len(results),
         "succeeded_count": statuses.count("succeeded"),
@@ -226,11 +259,12 @@ def _direct_workflow_response(
 @router.post("/batch-update")
 def run_batch_metadata_update(
     payload: BatchUpdateInput,
-    creds: Credentials = Depends(require_youtube_credentials),
+    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
     sheet_creds: Credentials = Depends(require_login_credentials),
     _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Validate and update selected videos synchronously, returning one result per video."""
+    youtube_context = coerce_youtube_context(creds)
 
     spreadsheet_id = payload.spreadsheet_url_or_id or runtime_config.get("default_spreadsheet_id")
     if not spreadsheet_id:
@@ -308,7 +342,7 @@ def run_batch_metadata_update(
 
         details_map = {
             item["id"]: item
-            for item in fetch_video_details(creds, [item["video_id"] for item in prepared])
+            for item in fetch_video_details(youtube_context, [item["video_id"] for item in prepared])
             if item.get("id")
         }
         results: list[dict] = []
@@ -320,6 +354,7 @@ def run_batch_metadata_update(
             snippet = (detail or {}).get("snippet") or {}
             base_result = {
                 "video_id": item["video_id"],
+                "youtube_slot": youtube_context.slot,
                 "title": snippet.get("title") or item["video_id"],
                 "description": snippet.get("description") or "",
                 "thumbnail_url": _youtube_thumbnail(detail or {}, item["video_id"]),
@@ -339,7 +374,7 @@ def run_batch_metadata_update(
                 continue
             try:
                 update_single_video_metadata(
-                    creds,
+                    youtube_context,
                     item["video_id"],
                     str(item.get("new_title") or ""),
                     str(item.get("new_description") or ""),
@@ -359,31 +394,37 @@ def run_batch_metadata_update(
                 results.append({**base_result, "status": "not_attempted", "reason": exc.user_message})
             except Exception as exc:
                 results.append({**base_result, "status": "failed", "reason": _safe_workflow_error(exc)})
-        return _direct_workflow_response("youtube.metadata_update", results, quota_error=quota_error)
+        return _direct_workflow_response(
+            "youtube.metadata_update",
+            results,
+            quota_error=quota_error,
+            slot=youtube_context.slot,
+        )
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Batch metadata update failed: %s", type(exc).__name__)
+        logger.error("Batch metadata update failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
         raise HTTPException(status_code=500, detail="執行 YouTube metadata 更新失敗，請稍後再試。") from exc
 
 
 @router.post("/publish-and-cleanup")
 def run_publish_and_cleanup(
     payload: PublishCleanupInput,
-    creds: Credentials = Depends(require_youtube_credentials),
+    creds: YouTubeRequestContext = Depends(require_youtube_credentials),
     _rate_limit: None = Depends(enforce_workflow_rate_limit),
 ):
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
+    youtube_context = coerce_youtube_context(creds)
 
     playlist_id = payload.playlist_id or runtime_config.get("default_playlist_id")
     if not playlist_id:
         raise HTTPException(status_code=400, detail="Playlist ID is required.")
     try:
-        raw_items = fetch_playlist_items(creds, playlist_id)
+        raw_items = fetch_playlist_items(youtube_context, playlist_id)
         if not raw_items:
-            response = _direct_workflow_response("youtube.publish_cleanup", [])
+            response = _direct_workflow_response("youtube.publish_cleanup", [], slot=youtube_context.slot)
             response["message"] = "To-Post 播放清單目前沒有影片。"
             return response
         playlist_item_map: dict[str, str] = {}
@@ -396,7 +437,9 @@ def run_publish_and_cleanup(
             playlist_item_map[video_id] = item.get("id")
             api_order.append(video_id)
             title_map[video_id] = item.get("snippet", {}).get("title", "")
-        details_map = {item["id"]: item for item in fetch_video_details(creds, api_order) if item.get("id")}
+        details_map = {
+            item["id"]: item for item in fetch_video_details(youtube_context, api_order) if item.get("id")
+        }
         original_positions = {video_id: index for index, video_id in enumerate(api_order)}
         ordered_ids = sorted(
             api_order, key=lambda video_id: upload_time_sort_key(video_id, details_map, original_positions)
@@ -410,6 +453,7 @@ def run_publish_and_cleanup(
             snippet = (detail or {}).get("snippet") or {}
             base_result = {
                 "video_id": video_id,
+                "youtube_slot": youtube_context.slot,
                 "title": title_map.get(video_id) or snippet.get("title") or video_id,
                 "description": snippet.get("description") or "",
                 "thumbnail_url": _youtube_thumbnail(detail or {}, video_id),
@@ -431,7 +475,7 @@ def run_publish_and_cleanup(
                 continue
 
             try:
-                set_video_public(creds, video_id, current_video=detail)
+                set_video_public(youtube_context, video_id, current_video=detail)
             except YouTubeQuotaUnavailable as exc:
                 quota_error = exc
                 results.append({**base_result, "status": "not_attempted", "reason": exc.user_message})
@@ -442,7 +486,7 @@ def run_publish_and_cleanup(
                 continue
 
             try:
-                remove_playlist_item(creds, playlist_item_map.get(video_id))
+                remove_playlist_item(youtube_context, playlist_item_map.get(video_id))
                 results.append({**base_result, "status": "succeeded", "reason": None})
             except YouTubeQuotaUnavailable as exc:
                 quota_error = exc
@@ -461,7 +505,12 @@ def run_publish_and_cleanup(
                         "reason": f"影片已設為公開，但移出 To-Post 失敗：{_safe_workflow_error(exc)}",
                     }
                 )
-        response = _direct_workflow_response("youtube.publish_cleanup", results, quota_error=quota_error)
+        response = _direct_workflow_response(
+            "youtube.publish_cleanup",
+            results,
+            quota_error=quota_error,
+            slot=youtube_context.slot,
+        )
         response.update({"playlist_id": playlist_id, "sort_order": "published_at_ascending"})
         return response
     except YouTubeQuotaUnavailable as exc:
@@ -469,5 +518,5 @@ def run_publish_and_cleanup(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Publish cleanup workflow failed: %s", type(exc).__name__)
+        logger.error("Publish cleanup workflow failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
         raise HTTPException(status_code=500, detail="執行 YouTube 公開清理失敗，請稍後再試。") from exc

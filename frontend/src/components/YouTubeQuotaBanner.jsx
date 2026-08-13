@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Clock3, Database, RefreshCw, ShieldAlert } from 'lucide-react';
 import { api } from '../services/api';
 
@@ -8,6 +8,7 @@ const STATE_STYLE = {
   safety_blocked: { color: '#d8ae83', background: '#362b23', border: '#6a503b', label: '已達安全上限' },
   confirmed_exhausted: { color: '#d49393', background: '#332426', border: '#624044', label: 'Google 已確認用完' },
 };
+const DEFAULT_AVAILABLE_SLOTS = ['primary', 'secondary'];
 
 function formatPacificReset(value) {
   if (!value) return '未知';
@@ -32,24 +33,29 @@ function units(value) {
   return Number(value || 0).toLocaleString();
 }
 
-export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) {
+export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, activeSlot = 'primary', availableSlots = DEFAULT_AVAILABLE_SLOTS }) {
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState(activeSlot || 'primary');
 
-  const loadUsage = async () => {
+  useEffect(() => {
+    if (availableSlots.includes(activeSlot)) setSelectedSlot(activeSlot);
+  }, [activeSlot, availableSlots]);
+
+  const loadUsage = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      setUsage(await api.getYoutubeQuotaUsage());
+      setUsage(await api.getYoutubeQuotaUsage(selectedSlot));
     } catch (err) {
       setError(err.message || '無法讀取配額估算');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedSlot]);
 
-  useEffect(() => { loadUsage(); }, [refreshKey]);
+  useEffect(() => { loadUsage(); }, [loadUsage, refreshKey]);
 
   if (loading && !usage) {
     return <div className="glass-panel" style={{ padding: compact ? '10px 14px' : '14px 18px', display: 'flex', alignItems: 'center', gap: '10px' }}><RefreshCw size={17} className="spin" color="var(--primary)" /><span style={{ color: 'var(--text-muted)', fontSize: '0.86rem' }}>讀取 YouTube quota 估算中...</span></div>;
@@ -78,6 +84,9 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false }) 
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
               <strong style={{ color: 'var(--text-main)', fontSize: '1rem' }}>YouTube API 今日估算用量</strong>
               <span className="badge" style={{ color: style.color, borderColor: style.border, background: style.background }}>{style.label}</span>
+              <select aria-label="YouTube quota slot" className="form-input" value={selectedSlot} onChange={(event) => setSelectedSlot(event.target.value)} style={{ width: 'auto', minWidth: '120px', padding: '4px 8px', fontSize: '0.78rem' }}>
+                {availableSlots.map((slot) => <option value={slot} key={slot}>{slot === 'primary' ? 'Primary' : 'Secondary'}</option>)}
+              </select>
             </div>
             <div style={{ marginTop: '5px', color: 'var(--text-main)', fontSize: '1.35rem', fontWeight: 700 }}>
               {units(used)} / {units(limit)}

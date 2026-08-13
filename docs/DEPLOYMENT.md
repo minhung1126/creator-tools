@@ -6,7 +6,7 @@ Creator Tools 的 production image 可由 GitHub Actions 發布至 GHCR；本機
 
 1. 安裝 Docker Engine/Docker Compose v2。
 2. 建立 `.env`，參考根目錄 `.env.example`。
-3. 正式環境至少設定 `ENVIRONMENT=production`、`BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS` 與 Google OAuth 憑證。
+3. 正式環境至少設定 `ENVIRONMENT=production`、`BIND_HOST`、`PUBLIC_BASE_URL`、`FRONTEND_URL`、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY`、`ALLOWED_GOOGLE_EMAILS`、登入 Google OAuth 憑證與 YouTube primary OAuth 憑證。secondary 是 optional，但啟用時 client ID/secret 必須成對存在。
 
 `PUBLIC_BASE_URL` 是 Google callback 的唯一來源；`BIND_HOST` 只控制容器內 bind address。若 reverse proxy 位於 homelab 的另一台設備，Creator Tools 主機必須讓該設備可以連到 `8000`，建議設定成：
 
@@ -21,8 +21,14 @@ TRUSTED_HOSTS=creator-tools.ymin.io
 SECRET_KEY=請改成唯一且隨機的長字串
 CREDENTIAL_ENCRYPTION_KEY=請固定保存的加密金鑰
 ALLOWED_GOOGLE_EMAILS=admin@example.com
-GOOGLE_CLIENT_ID=你的 Google OAuth Client ID
-GOOGLE_CLIENT_SECRET=你的 Google OAuth Client Secret
+GOOGLE_CLIENT_ID=你的登入 Google OAuth Client ID
+GOOGLE_CLIENT_SECRET=你的登入 Google OAuth Client Secret
+YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=你的 YouTube primary OAuth Client ID
+YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=你的 YouTube primary OAuth Client Secret
+YOUTUBE_OAUTH_SECONDARY_ENABLED=false
+YOUTUBE_OAUTH_SECONDARY_CLIENT_ID=
+YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET=
+YOUTUBE_OAUTH_DEFAULT_SLOT=primary
 ```
 
 此 production image 已包含編譯後的前端，前端與 API 可以共用同一個公開網址：`/` 由前端提供，`/api/*` 由 API 處理。Compose 預設只將 container port 綁到本機 loopback；reverse proxy 應與 Creator Tools 在同一台主機。若 proxy 位於另一台設備，請將 `docker-compose.yml` 的 bind address 改成明確的私有 LAN IP，並以防火牆只允許該 proxy 存取，勿綁定到公開介面。
@@ -48,6 +54,7 @@ docker compose logs -f creator-tools
   data/sessions.json
   data/runtime_config.json
   data/youtube_quota_usage.json
+  data/youtube_quota_usage.secondary.json
   ```
 
   實務上建議直接備份整個 `data/` volume，而不是只挑單一檔案。YouTube metadata 與發布清理會在 API request 內直接執行，不再建立背景任務、通知或歷史資料。

@@ -10,8 +10,12 @@ from fastapi import HTTPException, Request
 from google.oauth2.credentials import Credentials
 
 from backend.app.core.config import settings
+from backend.app.core.credential_store import credential_store
+from backend.app.core.runtime_config import runtime_config
 from backend.app.core.session_store import session_store
+from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.google_auth import get_login_credentials, get_youtube_credentials
+from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +51,20 @@ def require_login_credentials(request: Request) -> Credentials:
     return creds
 
 
-def require_youtube_credentials(request: Request) -> Credentials:
-    """Require both a valid page login and a separate YouTube authorization."""
+def require_youtube_context(request: Request) -> YouTubeRequestContext:
+    """Resolve the active slot once at request start."""
+    slot = runtime_config.get_youtube_active_slot()
+    slot_config = settings.youtube_oauth_slot(slot)
+    if not slot_config.configured:
+        logger.warning("YouTube API access attempted with an unconfigured active slot: %s", slot)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "youtube_slot_not_configured",
+                "message": "目前作用中的 YouTube OAuth slot 尚未完成伺服器設定。",
+                "slot": slot,
+            },
+        )
     session_id = request.cookies.get(settings.session_cookie_name)
     login_creds = get_login_credentials(session_id)
     if not login_creds or not login_creds.valid:
@@ -61,7 +77,7 @@ def require_youtube_credentials(request: Request) -> Credentials:
             },
         )
 
-    creds = get_youtube_credentials(session_id)
+    creds = get_youtube_credentials(session_id, slot=slot)
     if not creds or not creds.valid:
         logger.warning("YouTube API access attempted without channel authorization")
         raise HTTPException(
@@ -69,6 +85,34 @@ def require_youtube_credentials(request: Request) -> Credentials:
             detail={
                 "code": "youtube_not_connected",
                 "message": "尚未連結 YouTube 頻道 Google 帳號，請至「YouTube 設定」完成授權。",
+                "slot": slot,
             },
         )
-    return creds
+    session_data = session_store.get(session_id) or {}
+    owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip() or None
+    public = credential_store.get_youtube_public(owner_sub, slot=slot) if owner_sub else None
+    other_slot = "secondary" if slot == "primary" else "primary"
+    other_public = credential_store.get_youtube_public(owner_sub, slot=other_slot) if owner_sub else None
+    channel_id = str((public or {}).get("channel_id") or "").strip()
+    other_channel_id = str((other_public or {}).get("channel_id") or "").strip()
+    if channel_id and other_channel_id and channel_id != other_channel_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "youtube_channel_mismatch",
+                "message": "Primary 與 secondary 必須管理同一個 YouTube Channel，請重新授權其中一個 slot。",
+                "slot": slot,
+            },
+        )
+    return YouTubeRequestContext(
+        slot=slot,
+        credentials=creds,
+        quota_limiter=get_youtube_quota_tracker(slot),
+        channel_id=(public or {}).get("channel_id"),
+        owner_sub=owner_sub,
+    )
+
+
+def require_youtube_credentials(request: Request) -> YouTubeRequestContext:
+    """Compatibility alias for routes and integrations using the old name."""
+    return require_youtube_context(request)

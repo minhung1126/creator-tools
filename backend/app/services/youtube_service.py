@@ -4,22 +4,24 @@ from typing import Any, Dict, List, Optional, Tuple
 import googleapiclient.discovery
 from google.oauth2.credentials import Credentials
 
+from backend.app.core.youtube_context import YouTubeRequestContext, coerce_youtube_context
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
-from backend.app.services.youtube_quota_service import youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
 MAX_PLAYLIST_ITEMS = 5_000
 MAX_VIDEO_IDS = 5_000
 
 
-def get_youtube_service(credentials: Credentials):
-    return googleapiclient.discovery.build("youtube", "v3", credentials=credentials)
+def get_youtube_service(credentials_or_context: Credentials | YouTubeRequestContext):
+    context = coerce_youtube_context(credentials_or_context)
+    return googleapiclient.discovery.build("youtube", "v3", credentials=context.credentials)
 
 
-def _execute_with_quota(request, method: str):
+def _execute_with_quota(request, method: str, context: YouTubeRequestContext):
     """Reserve the documented cost before executing the request."""
 
-    return youtube_quota_tracker.execute(request, method)
+    logger.debug("Executing YouTube method=%s slot=%s", method, context.slot)
+    return context.quota_limiter.execute(request, method)
 
 
 def _deduplicate_videos(videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -62,7 +64,8 @@ def _snippet_thumbnail(snippet: Dict[str, Any], video_id: str) -> str:
 
 def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dict[str, Any]]:
     """Fetch all items from a YouTube playlist (handles pagination)."""
-    service = get_youtube_service(credentials)
+    context = coerce_youtube_context(credentials)
+    service = get_youtube_service(context)
     items = []
     next_page_token = None
     while True:
@@ -72,7 +75,7 @@ def fetch_playlist_items(credentials: Credentials, playlist_id: str) -> List[Dic
             maxResults=50,
             pageToken=next_page_token,
         )
-        response = _execute_with_quota(request, "playlistItems.list")
+        response = _execute_with_quota(request, "playlistItems.list", context)
         items.extend(response.get("items", []))
         if len(items) > MAX_PLAYLIST_ITEMS:
             raise ValueError("播放清單項目數超過系統上限")
@@ -89,7 +92,8 @@ def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[
         return []
     if len(video_ids) > MAX_VIDEO_IDS:
         raise ValueError("影片數量超過系統上限")
-    service = get_youtube_service(credentials)
+    context = coerce_youtube_context(credentials)
+    service = get_youtube_service(context)
     detailed_videos = []
     for i in range(0, len(video_ids), 50):
         chunk = video_ids[i : i + 50]
@@ -97,7 +101,7 @@ def fetch_video_details(credentials: Credentials, video_ids: List[str]) -> List[
             part="snippet,contentDetails,status",
             id=",".join(chunk),
         )
-        response = _execute_with_quota(request, "videos.list")
+        response = _execute_with_quota(request, "videos.list", context)
         detailed_videos.extend(response.get("items", []))
     return detailed_videos
 
@@ -148,10 +152,11 @@ def update_single_video_metadata(
     current_snippet: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Update title/description while preserving existing snippet properties."""
-    service = get_youtube_service(credentials)
+    context = coerce_youtube_context(credentials)
+    service = get_youtube_service(context)
     if current_snippet is None:
         request = service.videos().list(part="snippet", id=video_id)
-        response = _execute_with_quota(request, "videos.list")
+        response = _execute_with_quota(request, "videos.list", context)
         items = response.get("items", [])
         if not items:
             raise ValueError(f"Video ID {video_id} not found on YouTube.")
@@ -174,7 +179,7 @@ def update_single_video_metadata(
         part="snippet",
         body={"id": video_id, "snippet": updated_snippet},
     )
-    return _execute_with_quota(update_request, "videos.update")
+    return _execute_with_quota(update_request, "videos.update", context)
 
 
 def get_video_status(
@@ -186,9 +191,10 @@ def get_video_status(
 
     if current_video is not None:
         return dict(current_video.get("status", {}))
-    service = get_youtube_service(credentials)
+    context = coerce_youtube_context(credentials)
+    service = get_youtube_service(context)
     request = service.videos().list(part="status", id=video_id)
-    response = _execute_with_quota(request, "videos.list")
+    response = _execute_with_quota(request, "videos.list", context)
     items = response.get("items", [])
     if not items:
         raise ValueError(f"Video {video_id} not found.")
@@ -202,13 +208,14 @@ def set_video_public(
 ) -> Dict[str, Any]:
     """Set a video public, treating an already-public video as success."""
 
-    status = get_video_status(credentials, video_id, current_video)
+    context = coerce_youtube_context(credentials)
+    status = get_video_status(context, video_id, current_video)
     if status.get("privacyStatus") == "public":
         return {"id": video_id, "status": status, "already_public": True}
-    service = get_youtube_service(credentials)
+    service = get_youtube_service(context)
     status["privacyStatus"] = "public"
     request = service.videos().update(part="status", body={"id": video_id, "status": status})
-    return _execute_with_quota(request, "videos.update")
+    return _execute_with_quota(request, "videos.update", context)
 
 
 def remove_playlist_item(credentials: Credentials, playlist_item_id: Optional[str]) -> Dict[str, Any]:
@@ -216,10 +223,11 @@ def remove_playlist_item(credentials: Credentials, playlist_item_id: Optional[st
 
     if not playlist_item_id:
         return {"already_removed": True}
-    service = get_youtube_service(credentials)
+    context = coerce_youtube_context(credentials)
+    service = get_youtube_service(context)
     try:
         request = service.playlistItems().delete(id=playlist_item_id)
-        _execute_with_quota(request, "playlistItems.delete")
+        _execute_with_quota(request, "playlistItems.delete", context)
         return {"deleted_playlist_item_id": playlist_item_id}
     except Exception as exc:
         response = getattr(exc, "resp", None)
@@ -235,17 +243,18 @@ def publish_and_remove_playlist_item(
     current_video: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Set a video public and remove its playlist item without deleting it."""
+    context = coerce_youtube_context(credentials)
     if current_video is None:
-        service = get_youtube_service(credentials)
+        service = get_youtube_service(context)
         request = service.videos().list(part="status", id=video_id)
-        response = _execute_with_quota(request, "videos.list")
+        response = _execute_with_quota(request, "videos.list", context)
         items = response.get("items", [])
         if not items:
             raise ValueError(f"Video {video_id} not found.")
         current_video = items[0]
-    update_result = set_video_public(credentials, video_id, current_video)
+    update_result = set_video_public(context, video_id, current_video)
     try:
-        playlist_cleanup = remove_playlist_item(credentials, playlist_item_id)
+        playlist_cleanup = remove_playlist_item(context, playlist_item_id)
     except YouTubeQuotaUnavailable:
         raise
     except Exception as exc:

@@ -23,6 +23,7 @@ class YouTubeResourceSettingsModel(BaseModel):
     """YouTube-only resource settings."""
 
     default_playlist_id: str = Field(default="", max_length=256)
+    slot: Literal["primary", "secondary"] | None = None
     youtube_general_quota_limit: int | None = None
     youtube_quota_safety_buffer_units: int | None = None
 
@@ -122,19 +123,40 @@ def update_shared_settings(
 @router.get("/youtube")
 def get_youtube_settings(creds: Credentials = Depends(require_login_credentials)):
     del creds
+    primary_limit, primary_buffer = runtime_config.get_youtube_quota_settings("primary")
     return {
         "default_playlist_id": runtime_config.get("default_playlist_id", ""),
-        "youtube_general_quota_limit": runtime_config.get("youtube_general_quota_limit", 10_000),
-        "youtube_quota_safety_buffer_units": runtime_config.get("youtube_quota_safety_buffer_units", 1_000),
+        "youtube_general_quota_limit": primary_limit,
+        "youtube_quota_safety_buffer_units": primary_buffer,
     }
+
+
+@router.get("/youtube-slots")
+def get_youtube_slot_settings(creds: Credentials = Depends(require_login_credentials)):
+    """Return non-secret configuration defaults for both YouTube slots."""
+    del creds
+    slots = {}
+    for slot, slot_config in settings.youtube_oauth_slots.items():
+        limit, buffer = runtime_config.get_youtube_quota_settings(slot)
+        slots[slot] = {
+            "slot": slot,
+            "label": slot_config.label,
+            "configured": slot_config.configured,
+            "enabled": slot_config.enabled,
+            "client_fingerprint": slot_config.client_fingerprint,
+            "uses_legacy_google_credentials": slot_config.uses_legacy_google_credentials,
+            "quota_limit": limit,
+            "safety_buffer_units": buffer,
+        }
+    return {"active_slot": runtime_config.get_youtube_active_slot(), "slots": slots}
 
 
 @router.put("/youtube")
 def update_youtube_settings(
     payload: YouTubeResourceSettingsModel, creds: Credentials = Depends(require_login_credentials)
 ):
-    current_limit = int(runtime_config.get("youtube_general_quota_limit", 10_000))
-    current_buffer = int(runtime_config.get("youtube_quota_safety_buffer_units", 1_000))
+    slot = payload.slot or "primary"
+    current_limit, current_buffer = runtime_config.get_youtube_quota_settings(slot)
     limit = payload.youtube_general_quota_limit if payload.youtube_general_quota_limit is not None else current_limit
     buffer = (
         payload.youtube_quota_safety_buffer_units
@@ -145,14 +167,25 @@ def update_youtube_settings(
         raise HTTPException(status_code=422, detail="youtube_general_quota_limit 必須大於 0")
     if buffer < 0 or buffer >= limit:
         raise HTTPException(status_code=422, detail="youtube_quota_safety_buffer_units 必須大於等於 0 且小於 limit")
-    runtime_config.update(
-        {
-            "default_playlist_id": payload.default_playlist_id.strip(),
-            "youtube_general_quota_limit": limit,
-            "youtube_quota_safety_buffer_units": buffer,
-        }
-    )
-    logger.info("YouTube resource settings updated: playlist and quota policy")
+    updates = {"default_playlist_id": payload.default_playlist_id.strip()}
+    if payload.slot is None:
+        # Preserve the old API's primary keys for clients that have not yet
+        # learned the slot-specific settings contract.
+        updates.update(
+            {
+                "youtube_general_quota_limit": limit,
+                "youtube_quota_safety_buffer_units": buffer,
+            }
+        )
+    else:
+        updates.update(
+            {
+                f"youtube_{slot}_general_quota_limit": limit,
+                f"youtube_{slot}_quota_safety_buffer_units": buffer,
+            }
+        )
+    runtime_config.update(updates)
+    logger.info("YouTube resource settings updated: slot=%s playlist and quota policy", slot)
     return {"status": "success", "settings": get_youtube_settings(creds)}
 
 

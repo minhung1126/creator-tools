@@ -1,9 +1,44 @@
 import hashlib
 import secrets
 import warnings
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+YOUTUBE_OAUTH_SLOT_NAMES = ("primary", "secondary")
+
+
+def normalize_youtube_slot(value: str) -> str:
+    """Validate the small, intentionally fixed YouTube slot allowlist."""
+    slot = str(value or "").strip().casefold()
+    if slot not in YOUTUBE_OAUTH_SLOT_NAMES:
+        raise ValueError("YouTube OAuth slot must be primary or secondary")
+    return slot
+
+
+@dataclass(frozen=True)
+class YouTubeOAuthSlot:
+    """Resolved, non-secret configuration for one YouTube OAuth slot."""
+
+    name: str
+    label: str
+    client_id: str
+    client_secret: str
+    enabled: bool
+    quota_limit: int
+    safety_buffer_units: int
+    uses_legacy_google_credentials: bool = False
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.enabled and self.client_id and self.client_secret)
+
+    @property
+    def client_fingerprint(self) -> str | None:
+        if not self.client_id:
+            return None
+        return hashlib.sha256(self.client_id.encode("utf-8")).hexdigest()[:16]
 
 
 class Settings(BaseSettings):
@@ -25,6 +60,18 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
 
+    # YouTube uses separate OAuth Web Clients from the control-panel login.
+    # Primary intentionally supports a temporary fallback to the old Google
+    # client so existing installations can migrate without losing tokens.
+    YOUTUBE_OAUTH_PRIMARY_CLIENT_ID: str = ""
+    YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET: str = ""
+    YOUTUBE_OAUTH_PRIMARY_LABEL: str = "Primary"
+    YOUTUBE_OAUTH_SECONDARY_ENABLED: bool = False
+    YOUTUBE_OAUTH_SECONDARY_CLIENT_ID: str = ""
+    YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET: str = ""
+    YOUTUBE_OAUTH_SECONDARY_LABEL: str = "Secondary"
+    YOUTUBE_OAUTH_DEFAULT_SLOT: str = "primary"
+
     SECRET_KEY: str = ""
     CREDENTIAL_ENCRYPTION_KEY: str = ""
 
@@ -33,6 +80,10 @@ class Settings(BaseSettings):
     # fallback and never contain secrets.
     YOUTUBE_GENERAL_QUOTA_LIMIT: int = 10_000
     YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
+    YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT: int | None = None
+    YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS: int | None = None
+    YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT: int = 10_000
+    YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -45,6 +96,56 @@ class Settings(BaseSettings):
         self.ENVIRONMENT = self.ENVIRONMENT.strip().casefold()
         if self.ENVIRONMENT not in {"development", "test", "staging", "production"}:
             raise ValueError("ENVIRONMENT must be one of development, test, staging, or production")
+
+        self.YOUTUBE_OAUTH_DEFAULT_SLOT = normalize_youtube_slot(self.YOUTUBE_OAUTH_DEFAULT_SLOT)
+        self._validate_oauth_pair(
+            "GOOGLE_CLIENT_ID",
+            self.GOOGLE_CLIENT_ID,
+            "GOOGLE_CLIENT_SECRET",
+            self.GOOGLE_CLIENT_SECRET,
+        )
+        self._validate_oauth_pair(
+            "YOUTUBE_OAUTH_PRIMARY_CLIENT_ID",
+            self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID,
+            "YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET",
+            self.YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET,
+        )
+        self._validate_oauth_pair(
+            "YOUTUBE_OAUTH_SECONDARY_CLIENT_ID",
+            self.YOUTUBE_OAUTH_SECONDARY_CLIENT_ID,
+            "YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET",
+            self.YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET,
+        )
+        if self.YOUTUBE_OAUTH_SECONDARY_ENABLED and not (
+            self.YOUTUBE_OAUTH_SECONDARY_CLIENT_ID and self.YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET
+        ):
+            raise ValueError(
+                "YOUTUBE_OAUTH_SECONDARY_ENABLED=true requires both "
+                "YOUTUBE_OAUTH_SECONDARY_CLIENT_ID and YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET"
+            )
+        if self.YOUTUBE_OAUTH_DEFAULT_SLOT == "secondary" and not self.youtube_oauth_slot("secondary").configured:
+            raise ValueError("YOUTUBE_OAUTH_DEFAULT_SLOT must refer to a configured YouTube OAuth slot")
+
+        for name, limit, buffer in (
+            (
+                "YOUTUBE_PRIMARY",
+                self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT
+                if self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT is not None
+                else self.YOUTUBE_GENERAL_QUOTA_LIMIT,
+                self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS
+                if self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS is not None
+                else self.YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS,
+            ),
+            (
+                "YOUTUBE_SECONDARY",
+                self.YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT,
+                self.YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS,
+            ),
+        ):
+            if limit <= 0:
+                raise ValueError(f"{name}_GENERAL_QUOTA_LIMIT must be greater than 0")
+            if buffer < 0 or buffer >= limit:
+                raise ValueError(f"{name}_QUOTA_SAFETY_BUFFER_UNITS must be >= 0 and less than the quota limit")
 
         if not self.PUBLIC_BASE_URL:
             self.PUBLIC_BASE_URL = f"http://localhost:{self.PORT}"
@@ -151,6 +252,74 @@ class Settings(BaseSettings):
     @property
     def allowed_google_emails(self) -> frozenset[str]:
         return frozenset(email.strip().casefold() for email in self.ALLOWED_GOOGLE_EMAILS.split(",") if email.strip())
+
+    @staticmethod
+    def _validate_oauth_pair(first_name: str, first_value: str, second_name: str, second_value: str) -> None:
+        if bool(str(first_value or "").strip()) != bool(str(second_value or "").strip()):
+            raise ValueError(f"{first_name} and {second_name} must be configured together")
+
+    @property
+    def youtube_primary_uses_legacy_credentials(self) -> bool:
+        return not self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID and bool(
+            self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET
+        )
+
+    def youtube_oauth_slot(self, slot: str) -> YouTubeOAuthSlot:
+        slot_name = normalize_youtube_slot(slot)
+        if slot_name == "primary":
+            client_id = self.YOUTUBE_OAUTH_PRIMARY_CLIENT_ID or self.GOOGLE_CLIENT_ID
+            client_secret = self.YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET or self.GOOGLE_CLIENT_SECRET
+            limit = (
+                self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT
+                if self.YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT is not None
+                else self.YOUTUBE_GENERAL_QUOTA_LIMIT
+            )
+            buffer = (
+                self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS
+                if self.YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS is not None
+                else self.YOUTUBE_QUOTA_SAFETY_BUFFER_UNITS
+            )
+            return YouTubeOAuthSlot(
+                name="primary",
+                label=(self.YOUTUBE_OAUTH_PRIMARY_LABEL or "Primary").strip() or "Primary",
+                client_id=client_id.strip(),
+                client_secret=client_secret,
+                enabled=True,
+                quota_limit=int(limit),
+                safety_buffer_units=int(buffer),
+                uses_legacy_google_credentials=self.youtube_primary_uses_legacy_credentials,
+            )
+
+        return YouTubeOAuthSlot(
+            name="secondary",
+            label=(self.YOUTUBE_OAUTH_SECONDARY_LABEL or "Secondary").strip() or "Secondary",
+            client_id=self.YOUTUBE_OAUTH_SECONDARY_CLIENT_ID.strip(),
+            client_secret=self.YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET,
+            enabled=bool(self.YOUTUBE_OAUTH_SECONDARY_ENABLED),
+            quota_limit=int(self.YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT),
+            safety_buffer_units=int(self.YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS),
+        )
+
+    @property
+    def youtube_oauth_slots(self) -> dict[str, YouTubeOAuthSlot]:
+        return {slot: self.youtube_oauth_slot(slot) for slot in YOUTUBE_OAUTH_SLOT_NAMES}
+
+    @property
+    def youtube_default_slot(self) -> str:
+        return self.YOUTUBE_OAUTH_DEFAULT_SLOT
+
+    def youtube_oauth_warnings(self) -> list[str]:
+        warnings_list: list[str] = []
+        if self.youtube_primary_uses_legacy_credentials:
+            warnings_list.append(
+                "YouTube primary OAuth is using the legacy GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET fallback; "
+                "configure YOUTUBE_OAUTH_PRIMARY_* before removing the legacy client."
+            )
+        if not self.youtube_oauth_slot("primary").configured:
+            warnings_list.append("YouTube primary OAuth credentials are not configured")
+        if self.YOUTUBE_OAUTH_SECONDARY_ENABLED and not self.youtube_oauth_slot("secondary").configured:
+            warnings_list.append("YouTube secondary OAuth credentials are not configured")
+        return warnings_list
 
     def is_google_email_allowed(self, email: str) -> bool:
         if self.allowed_google_emails:
