@@ -609,6 +609,15 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const toggleVideoSelection = (videoId) => setSelectedVideoIds((current) => current.includes(videoId)
     ? current.filter((item) => item !== videoId)
     : [...current, videoId]);
+  const handleVideoCardClick = (event, videoId) => {
+    if (event.target?.closest?.('button, input, select, textarea, a, label')) return;
+    toggleVideoSelection(videoId);
+  };
+  const handleVideoCardKeyDown = (event, videoId) => {
+    if (event.target !== event.currentTarget || !['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    toggleVideoSelection(videoId);
+  };
   const setAllVideosSelected = (checked) => setSelectedVideoIds(checked ? videos.map((video) => video.video_id) : []);
 
   const applyBulkAssignment = () => {
@@ -815,7 +824,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
           <div className="action-bar bulk-edit-heading"><div><h3>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3><p>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p></div><label className="bulk-select-all"><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label></div>
           <div className="toolbar bulk-edit-controls"><div className="form-group bulk-person-field"><label className="form-label">批量套用人物</label><select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">請選擇人物</option><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div><button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button></div>
         </div>
-        <div className="video-card-grid">{videos.map((video) => <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}${selectedVideoIds.includes(video.video_id) ? ' video-card-selected' : ''}`}>
+        <div className="video-card-grid">{videos.map((video) => <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}${selectedVideoIds.includes(video.video_id) ? ' video-card-selected' : ''}`} role="button" tabIndex={0} aria-pressed={selectedVideoIds.includes(video.video_id)} aria-label={`${selectedVideoIds.includes(video.video_id) ? '取消選取' : '選取'}${video.title || '影片'}加入批量編輯`} onClick={(event) => handleVideoCardClick(event, video.video_id)} onKeyDown={(event) => handleVideoCardKeyDown(event, video.video_id)}>
           <label className="video-select-label"><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批量編輯</label>
           <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <button type="button" className="video-thumbnail-button" aria-label={`放大檢視${video.title || '影片'}縮圖`} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })}><img className="video-thumbnail" src={video.thumbnail_url} alt="" /></button> : <div>無縮圖</div>}</div>
           <div className="video-card-copy"><h4>{video.title || '無標題影片'}</h4><p>Video ID: {video.video_id}</p></div>
