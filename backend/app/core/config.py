@@ -284,9 +284,9 @@ class Settings(BaseSettings):
     def youtube_oauth_warnings(self) -> list[str]:
         warnings_list: list[str] = []
         if not self.youtube_oauth_slot("primary").configured:
-            warnings_list.append("YouTube primary OAuth credentials are not configured")
+            warnings_list.append("尚未設定 YouTube primary OAuth 憑證")
         if self.YOUTUBE_OAUTH_SECONDARY_ENABLED and not self.youtube_oauth_slot("secondary").configured:
-            warnings_list.append("YouTube secondary OAuth credentials are not configured")
+            warnings_list.append("尚未設定 YouTube secondary OAuth 憑證")
         return warnings_list
 
     def is_google_email_allowed(self, email: str) -> bool:

@@ -1,63 +1,58 @@
-import React, { useEffect, useRef } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
+import Dialog from './Dialog';
 
-export default function ConfirmDialog({ open, title, message, confirmText, cancelText, onConfirm, onCancel, variant }) {
+export default function ConfirmDialog({ open, title, message, confirmText, cancelText, onConfirm, onCancel, variant, busy = false }) {
   const cancelRef = useRef(null);
-  const dialogRef = useRef(null);
-  useEffect(() => {
-    if (!open) return undefined;
-    const previousActive = document.activeElement;
-    cancelRef.current?.focus();
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCancel?.();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = [...dialogRef.current.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled])')];
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      if (previousActive instanceof HTMLElement) previousActive.focus();
-    };
-  }, [onCancel, open]);
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   if (!open) return null;
 
   const isDestructive = variant === 'destructive';
+  const isBusy = busy || submitting;
+  const handleConfirm = async () => {
+    if (isBusy || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      await onConfirm?.();
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <div className="confirm-overlay" role="presentation" onClick={onCancel}>
-      <div ref={dialogRef} className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" onClick={(e) => e.stopPropagation()}>
+    <Dialog
+      open={open}
+      className={`confirm-dialog${isDestructive ? ' confirm-dialog-destructive' : ''}`}
+      overlayClassName="confirm-overlay"
+      titleId="confirm-dialog-title"
+      descriptionId="confirm-dialog-message"
+      initialFocusRef={cancelRef}
+      onEscape={onCancel}
+      onBackdropClick={onCancel}
+      busy={isBusy}
+    >
         <div className="confirm-header">
-          <AlertTriangle size={22} color={isDestructive ? '#f87171' : 'var(--primary)'} />
+          <AlertTriangle size={22} aria-hidden="true" />
           <h3 id="confirm-dialog-title" className="confirm-title">{title || '確認操作'}</h3>
         </div>
         <p id="confirm-dialog-message" className="confirm-message">{message}</p>
         <div className="confirm-actions">
-          <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={onCancel}>
+          <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={onCancel} disabled={isBusy}>
             {cancelText || '取消'}
           </button>
           <button
             type="button"
             className={`btn ${isDestructive ? 'btn-danger' : 'btn-primary'}`}
-            onClick={onConfirm}
+            onClick={handleConfirm}
+            disabled={isBusy}
           >
-            {confirmText || '確認'}
+            {isBusy && <RefreshCw size={15} className="spin" aria-hidden="true" />}
+            {isBusy ? '處理中…' : (confirmText || '確認')}
           </button>
         </div>
-      </div>
-    </div>
+    </Dialog>
   );
 }

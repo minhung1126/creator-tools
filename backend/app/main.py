@@ -2,14 +2,17 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.app.api.router import api_router
 from backend.app.core.config import settings
+from backend.app.core.error_contract import normalize_http_detail, validation_field_errors
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,49 @@ app = FastAPI(
     description="FastAPI backend for Google OAuth, Google Sheets, and direct YouTube workflows.",
     version="1.1.0",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(request: Request, exc: RequestValidationError):
+    del request
+    detail = {
+        "code": "validation_error",
+        "message": "輸入資料格式不正確，請檢查欄位。",
+        "retryable": False,
+        "field_errors": validation_field_errors(exc.errors()),
+    }
+    return JSONResponse(status_code=422, content={"detail": detail})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    del request
+    detail = normalize_http_detail(exc.status_code, exc.detail)
+    headers = dict(exc.headers or {})
+    retry_after = headers.get("Retry-After")
+    if retry_after and "retry_after_seconds" not in detail:
+        try:
+            detail["retry_after_seconds"] = max(0, min(int(retry_after), 86_400))
+        except (TypeError, ValueError):
+            pass
+    return JSONResponse(status_code=exc.status_code, content={"detail": detail}, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled API exception on %s: %s", request.url.path, type(exc).__name__)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": {
+                "code": "internal_error",
+                "message": "伺服器發生未預期錯誤，請稍後再試。",
+                "retryable": False,
+                "field_errors": {},
+            }
+        },
+    )
+
 
 origins = {settings.frontend_url, settings.base_url}
 if not settings.is_production:
@@ -76,11 +122,11 @@ def health_check():
     access_allowlist_ready = bool(settings.allowed_google_emails) or not settings.allowlist_required
     warnings = []
     if not google_oauth_ready:
-        warnings.append("Google OAuth credentials are not configured")
+        warnings.append("尚未設定 Google OAuth 憑證")
     if not access_allowlist_ready:
-        warnings.append("ALLOWED_GOOGLE_EMAILS is required for HTTPS/production deployments")
+        warnings.append("HTTPS／正式環境必須設定允許的 Google 帳號")
     if google_oauth_ready and not youtube_primary_ready:
-        warnings.append("YouTube primary OAuth credentials are not configured")
+        warnings.append("尚未設定 YouTube primary OAuth 憑證")
     return {
         "status": "healthy",
         "ready": google_oauth_ready and youtube_primary_ready and access_allowlist_ready,
@@ -111,7 +157,7 @@ def resolve_frontend_path(full_path: str) -> Path:
     try:
         requested_path.relative_to(frontend_dist)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Frontend resource not found") from exc
+        raise HTTPException(status_code=404, detail="找不到前端資源。") from exc
     return requested_path
 
 
@@ -123,7 +169,7 @@ if frontend_dist.is_dir():
     @app.get("/{full_path:path}")
     def serve_frontend(full_path: str):
         if full_path.startswith("api/"):
-            raise HTTPException(status_code=404, detail="API endpoint not found")
+            raise HTTPException(status_code=404, detail="找不到 API 端點。")
         requested_path = resolve_frontend_path(full_path)
         if requested_path.is_file():
             return FileResponse(str(requested_path))

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Clapperboard, ExternalLink, PlaySquare, Save, Smartphone, XCircle, Youtube } from 'lucide-react';
-import { api } from '../services/api';
+import { api, normalizeYoutubePlaylistInput } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 const SLOT_ORDER = ['primary', 'secondary'];
 
@@ -29,14 +30,18 @@ function tokenStatusLabel(status) {
   }[status] || '未取得狀態';
 }
 
-function normalizeSlotRecord(slot, record) {
+export function normalizeSlotRecord(slot, record) {
+  const canBeActive = record?.can_be_active === undefined
+    ? Boolean(record?.authenticated)
+    : Boolean(record.can_be_active);
   return {
     slot,
     label: record?.label || (slot === 'primary' ? 'Primary' : 'Secondary'),
     configured: Boolean(record?.configured),
     enabled: Boolean(record?.enabled),
     authenticated: Boolean(record?.authenticated),
-    can_be_active: Boolean(record?.can_be_active || record?.authenticated),
+    can_be_active: canBeActive,
+    channel_mismatch: Boolean(record?.channel_mismatch),
     user: record?.user || null,
     channel_id: record?.channel_id || null,
     channel_title: record?.channel_title || null,
@@ -50,7 +55,7 @@ function normalizeSlotRecord(slot, record) {
   };
 }
 
-export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSettings, refreshAuthUser, setActiveTab }) {
+export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refreshSettings, refreshAuthUser, setActiveTab }) {
   const toast = useToast();
   const youtube = useMemo(() => authUser?.youtube || {}, [authUser?.youtube]);
   const initial = useMemo(
@@ -69,8 +74,8 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
     }]),
   ));
   const [activeSlot, setActiveSlot] = useState(youtube.active_slot || 'primary');
-  const [busySlot, setBusySlot] = useState(null);
-  const [savingResources, setSavingResources] = useState(false);
+  const [busyAction, setBusyAction] = useState(null);
+  const [disconnectTarget, setDisconnectTarget] = useState(null);
   const [msg, setMsg] = useState(null);
 
   useEffect(() => {
@@ -95,14 +100,13 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
       toast.error(message);
       return;
     }
-    setBusySlot(slot);
+    setBusyAction({ kind: 'quota', slot });
     setMsg(null);
     try {
-      await api.updateYoutubeSettings({
+      await api.updateYoutubeQuota({
         slot,
-        default_playlist_id: playlistId.trim(),
-        quota_limit: limit,
-        safety_buffer_units: buffer,
+        quotaLimit: limit,
+        safetyBufferUnits: buffer,
       });
       await refreshSettings();
       if (refreshAuthUser) await refreshAuthUser();
@@ -112,28 +116,34 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
       setMsg({ type: 'error', text: error.message || '儲存失敗。' });
       toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
     } finally {
-      setBusySlot(null);
+      setBusyAction(null);
     }
   };
 
   const saveResources = async (event) => {
     event.preventDefault();
-    setSavingResources(true);
+    const normalizedPlaylistId = normalizeYoutubePlaylistInput(playlistId);
+    if (playlistId.trim() && !normalizedPlaylistId) {
+      const message = '請輸入合法的 YouTube 播放清單網址或 ID。';
+      setMsg({ type: 'error', text: message });
+      toast.error(message);
+      return;
+    }
+    setBusyAction({ kind: 'playlist' });
+    setMsg(null);
     try {
-      await api.updateYoutubeSettings({
-        slot: 'primary',
-        default_playlist_id: playlistId.trim(),
-        quota_limit: Number(slotDrafts.primary.quotaLimit),
-        safety_buffer_units: Number(slotDrafts.primary.quotaBuffer),
+      await api.updateYoutubePlaylist({
+        playlistId: normalizedPlaylistId,
       });
       await refreshSettings();
+      setPlaylistId(normalizedPlaylistId);
       setMsg({ type: 'success', text: '預設播放清單已儲存。' });
       toast.success('預設播放清單已儲存');
     } catch (error) {
       setMsg({ type: 'error', text: error.message || '儲存失敗。' });
       toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
     } finally {
-      setSavingResources(false);
+      setBusyAction(null);
     }
   };
 
@@ -142,44 +152,61 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
   };
 
   const startOAuth = async (slot) => {
-    setBusySlot(slot);
+    if (busyAction) return;
+    setBusyAction({ kind: 'authorization', slot });
     try {
       const result = await api.getYoutubeAuthUrl(slot);
-      if (result.auth_url) window.location.href = result.auth_url;
+      if (!result.auth_url) throw new Error('無法取得 Google 授權網址，請稍後再試。');
+      window.location.href = result.auth_url;
     } catch (error) {
-      toast.error(`取得 ${slotRecords[slot].label} 授權網址失敗：${error.message}`);
-      setBusySlot(null);
+      toast.error(`取得 ${slotRecords[slot].label} 授權網址失敗：${error.message || '未知錯誤'}`);
+      setBusyAction(null);
     }
   };
 
   const activateSlot = async (slot) => {
-    setBusySlot(slot);
+    if (busyAction || !slotRecords[slot].can_be_active) return;
+    setBusyAction({ kind: 'authorization', slot });
     try {
       await api.activateYoutubeSlot(slot);
       setActiveSlot(slot);
       if (refreshAuthUser) await refreshAuthUser();
       toast.success(`已將 ${slotRecords[slot].label} 設為作用中 slot`);
     } catch (error) {
-      toast.error(`切換 slot 失敗：${error.message}`);
+      toast.error(`切換 slot 失敗：${error.message || '未知錯誤'}`);
     } finally {
-      setBusySlot(null);
+      setBusyAction(null);
     }
   };
 
-  const disconnectSlot = async (slot) => {
+  const requestDisconnect = (slot) => {
+    if (busyAction) return;
     const isActive = activeSlot === slot;
-    if (isActive && !window.confirm('這是目前作用中的 slot；確定要斷開並讓新的 YouTube request 暫時無法執行嗎？')) return;
-    setBusySlot(slot);
+    setDisconnectTarget({ slot, isActive });
+  };
+
+  const disconnectSlot = async () => {
+    if (!disconnectTarget || busyAction) return;
+    const { slot } = disconnectTarget;
+    setDisconnectTarget(null);
+    setBusyAction({ kind: 'authorization', slot });
     try {
-      await api.disconnectYoutube(slot, { confirm: isActive });
+      await api.disconnectYoutube(slot, { confirm: true });
       if (refreshAuthUser) await refreshAuthUser();
       toast.success(`${slotRecords[slot].label} 已斷開`);
     } catch (error) {
-      toast.error(`斷開失敗：${error.message}`);
+      toast.error(`斷開失敗：${error.message || '未知錯誤'}`);
     } finally {
-      setBusySlot(null);
+      setBusyAction(null);
     }
   };
+
+  const pageBusy = Boolean(busyAction);
+  const authorizationBusy = busyAction?.kind === 'authorization';
+  const disconnectRecord = disconnectTarget ? slotRecords[disconnectTarget.slot] : null;
+  const disconnectMessage = disconnectTarget?.isActive
+    ? `這是目前作用中的 ${disconnectRecord?.label || 'YouTube'} 授權組合。斷開後，新的 YouTube request 將暫時無法執行，直到另一個可用組合設為作用中或重新授權。確定要斷開嗎？`
+    : `將移除 ${disconnectRecord?.label || '此組合'} 的 YouTube 授權；目前作用中的 request context 不受影響。確定要斷開嗎？`;
 
   return (
     <div className="section-gap settings-page youtube-settings-page">
@@ -195,7 +222,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
           const record = slotRecords[slot];
           const draft = slotDrafts[slot];
           const isActive = activeSlot === slot;
-          const busy = busySlot === slot;
+          const busy = busyAction?.slot === slot;
           return (
             <section className="glass-panel card-padding settings-card card-stack" key={slot}>
               <div className="card-header">
@@ -232,12 +259,12 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
               <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 只封鎖這個 slot，不會自動跨 project 重試。</p>
 
               <div className="page-actions settings-card-actions">
-                <button className="btn btn-primary" onClick={() => startOAuth(slot)} type="button" disabled={!record.configured || busy}>
+                <button className="btn btn-primary" onClick={() => startOAuth(slot)} type="button" disabled={!record.configured || pageBusy || authorizationBusy}>
                   {busy ? <><span className="login-spinner"></span> 處理中...</> : <><ExternalLink size={16} /> {record.authenticated ? '重新授權' : '連結此 slot'}</>}
                 </button>
-                <button className="btn btn-success" onClick={() => saveSlot(slot)} type="button" disabled={busy}><Save size={16} />儲存 slot 設定</button>
-                {record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={busy}>設為作用中</button>}
-                {record.authenticated && <button className="btn" onClick={() => disconnectSlot(slot)} type="button" disabled={busy}>斷開</button>}
+                <button className="btn btn-success" onClick={() => saveSlot(slot)} type="button" disabled={pageBusy}><Save size={16} />儲存 slot 設定</button>
+                {record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={pageBusy || authorizationBusy}>設為作用中</button>}
+                {record.authenticated && <button className="btn" onClick={() => requestDisconnect(slot)} type="button" disabled={pageBusy || authorizationBusy}>斷開</button>}
               </div>
             </section>
           );
@@ -250,10 +277,10 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
           <p className="section-desc">這個播放清單是 YouTube 發布與清理流程的 fallback。Video／Shorts 草稿頁若保存了自己的播放清單，會優先使用工作流設定。</p>
         </div>
         <div className="form-group">
-          <label className="form-label"><PlaySquare size={14} /> 預設 To-Post 播放清單 ID</label>
-          <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID" />
+          <label className="form-label"><PlaySquare size={14} /> 預設 To-Post 播放清單</label>
+          <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID 或網址" />
         </div>
-        <div className="page-actions settings-card-actions"><button className="btn btn-success" type="submit" disabled={savingResources}><Save size={18} />{savingResources ? '儲存中...' : '儲存預設播放清單'}</button></div>
+        <div className="page-actions settings-card-actions"><button className="btn btn-success" type="submit" disabled={pageBusy}><Save size={18} />{busyAction?.kind === 'playlist' ? '儲存中...' : '儲存預設播放清單'}</button></div>
       </form>
 
       <section className="glass-panel card-padding settings-card card-stack">
@@ -274,6 +301,17 @@ export default function YouTubeSettingsPage({ authUser, sysSettings, refreshSett
           </div>
         </div>
       </section>
+
+      <ConfirmDialog
+        open={Boolean(disconnectTarget)}
+        title={`確認斷開 ${disconnectRecord?.label || 'YouTube'} 授權`}
+        message={disconnectMessage}
+        confirmText="確認斷開"
+        cancelText="取消"
+        variant="destructive"
+        onConfirm={disconnectSlot}
+        onCancel={() => { if (!busyAction) setDisconnectTarget(null); }}
+      />
     </div>
   );
 }

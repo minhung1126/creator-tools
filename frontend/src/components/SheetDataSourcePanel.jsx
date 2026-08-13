@@ -1,6 +1,7 @@
 import React from 'react';
 import { FileSpreadsheet, RefreshCw } from 'lucide-react';
 import SourceLinkInput from './SourceLinkInput';
+import { EmptyState, StatusMessage } from './StatusMessage';
 
 export default function SheetDataSourcePanel({
   spreadsheetId, onSpreadsheetIdChange, worksheets = [], worksheetName = '', onWorksheetChange,
@@ -18,7 +19,7 @@ export default function SheetDataSourcePanel({
         </div>
         <button type="button" className="btn btn-primary" onClick={onRefresh} disabled={disabled || loading || !String(spreadsheetId || '').trim()}>
           <RefreshCw size={16} className={loading ? 'spin' : ''} aria-hidden="true" />
-          {loading ? '刷新中...' : '刷新工作表與欄位'}
+          {loading ? '刷新中…' : '刷新工作表與欄位'}
         </button>
       </div>
       <div className="filter-panel-grid">
@@ -35,9 +36,16 @@ export default function SheetDataSourcePanel({
         </div>
       </div>
       {children && <fieldset className="filter-panel-children" disabled={dependentDisabled}>{children}</fieldset>}
-      {stale && <div className="filter-panel-status" role="status">資料來源已修改，請按「刷新工作表與欄位」套用後才能使用下游篩選。</div>}
-      {!stale && !sourceReady && !loading && <div className="filter-panel-status" role="status">請先刷新資料來源以載入工作表與欄位。</div>}
-      {error && <div className="filter-panel-status filter-panel-status-error" role="alert">{error}</div>}
+      {stale && <StatusMessage tone="warning" title="資料來源需要刷新">請按「刷新工作表與欄位」套用後才能使用下游篩選。</StatusMessage>}
+      {!stale && !sourceReady && !loading && <EmptyState>請先刷新資料來源以載入工作表與欄位。</EmptyState>}
+      {error && (
+        <StatusMessage
+          tone="error"
+          status="failed"
+          title="資料來源刷新失敗"
+          action={<button type="button" className="btn btn-secondary status-message-action" onClick={onRefresh} disabled={sourceDisabled}>重試</button>}
+        >{error}</StatusMessage>
+      )}
     </section>
   );
 }

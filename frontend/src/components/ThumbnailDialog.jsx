@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import Dialog from './Dialog';
 
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 4;
@@ -7,6 +8,7 @@ const MAX_ZOOM = 4;
 export default function ThumbnailDialog({ image, onClose }) {
   const [zoom, setZoom] = useState(1);
   const [displaySrc, setDisplaySrc] = useState(image?.previewSrc || image?.src || '');
+  const closeRef = useRef(null);
 
   useEffect(() => {
     if (!image) return undefined;
@@ -27,15 +29,6 @@ export default function ThumbnailDialog({ image, onClose }) {
     };
   }, [image]);
 
-  useEffect(() => {
-    if (!image) return undefined;
-    const handleKeyDown = (event) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [image, onClose]);
-
   if (!image) return null;
 
   const handleWheel = (event) => {
@@ -51,8 +44,16 @@ export default function ThumbnailDialog({ image, onClose }) {
   };
 
   return (
-    <div className="thumbnail-dialog-overlay" role="dialog" aria-modal="true" aria-label="影片縮圖放大預覽，可使用滑鼠滾輪縮放" onClick={onClose}>
-      <div className="thumbnail-dialog-viewport" onClick={(event) => event.stopPropagation()} onWheel={handleWheel}>
+    <Dialog
+      open={Boolean(image)}
+      className="thumbnail-dialog-surface"
+      overlayClassName="thumbnail-dialog-overlay"
+      label="影片縮圖放大預覽，可使用滑鼠滾輪縮放"
+      initialFocusRef={closeRef}
+      onEscape={onClose}
+      onBackdropClick={onClose}
+    >
+      <div className="thumbnail-dialog-viewport" onWheel={handleWheel}>
         <img
           className="thumbnail-dialog-image"
           src={displaySrc}
@@ -61,8 +62,8 @@ export default function ThumbnailDialog({ image, onClose }) {
           style={{ transform: `scale(${zoom})` }}
         />
       </div>
-      <button type="button" className="thumbnail-dialog-close" aria-label="關閉縮圖預覽" onClick={onClose}><X size={22} /></button>
+      <button ref={closeRef} type="button" className="thumbnail-dialog-close" aria-label="關閉縮圖預覽" onClick={onClose}><X size={22} /></button>
       <div className="thumbnail-dialog-hint" aria-live="polite">滾動滑鼠滾輪縮放 · {Math.round(zoom * 100)}%</div>
-    </div>
+    </Dialog>
   );
 }

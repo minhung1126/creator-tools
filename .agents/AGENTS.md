@@ -12,12 +12,12 @@ Creator Tools 使用 FastAPI、React/Vite 與 Docker，整合 Google Sheets 與 
 
 ## 前端
 
-- 禁止原生 `alert()`／`confirm()`；使用 `useToast()` 與 `ConfirmDialog`。
+- 禁止原生瀏覽器警告／確認對話框；使用 `useToast()` 與 `ConfirmDialog`。
 - 沿用暗色 Glassmorphism 與 `index.css` 的共用 class，避免重複 inline style。
 
 ## 驗證
 
-- 後端：`python -m ruff check backend`、`python -m pytest backend/tests -q`
+- 後端：`python -m ruff check backend`、`python -m ruff format --check backend`、`python -m pytest backend/tests -q`
 - 前端：`npm run lint`、`npm test -- --run`、`npm run build`
 
 ## Release

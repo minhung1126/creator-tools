@@ -27,6 +27,7 @@ _PERSISTABLE_FIELDS = {
     "youtube_secondary_quota_safety_buffer_units",
 }
 
+
 class RuntimeConfig:
     """Thread-safe persistent configuration store backed by a JSON file."""
 
@@ -105,5 +106,6 @@ class RuntimeConfig:
         except (TypeError, ValueError):
             parsed_buffer = max(int(slot_config.safety_buffer_units), 0)
         return parsed_limit, min(parsed_buffer, max(parsed_limit - 1, 0))
+
 
 runtime_config = RuntimeConfig()

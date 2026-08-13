@@ -154,11 +154,11 @@ def update_single_video_metadata(
         response = _execute_with_quota(request, "videos.list", context)
         items = response.get("items", [])
         if not items:
-            raise ValueError(f"Video ID {video_id} not found on YouTube.")
+            raise ValueError(f"YouTube 找不到影片 ID：{video_id}。")
         current_snippet = items[0]["snippet"]
     category_id = current_snippet.get("categoryId")
     if not category_id:
-        raise ValueError(f"Cannot retrieve categoryId for video {video_id}.")
+        raise ValueError(f"無法取得影片 {video_id} 的類別 ID。")
     updated_snippet = {
         "title": new_title,
         "description": new_description,
@@ -191,7 +191,7 @@ def get_video_status(
     response = _execute_with_quota(request, "videos.list", context)
     items = response.get("items", [])
     if not items:
-        raise ValueError(f"Video {video_id} not found.")
+        raise ValueError(f"YouTube 找不到影片：{video_id}。")
     return dict(items[0].get("status", {}))
 
 
@@ -241,7 +241,7 @@ def publish_and_remove_playlist_item(
         response = _execute_with_quota(request, "videos.list", context)
         items = response.get("items", [])
         if not items:
-            raise ValueError(f"Video {video_id} not found.")
+            raise ValueError(f"YouTube 找不到影片：{video_id}。")
         current_video = items[0]
     update_result = set_video_public(context, video_id, current_video)
     try:

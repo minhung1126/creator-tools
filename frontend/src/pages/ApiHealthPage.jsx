@@ -7,7 +7,7 @@ export default function ApiHealthPage({ authUser }) {
   const activeSlot = authUser?.youtube?.active_slot || 'primary';
   const availableSlots = Object.keys(authUser?.youtube?.slots || {}).length
     ? Object.keys(authUser.youtube.slots)
-    : ['primary', 'secondary'];
+    : ['primary'];
 
   useEffect(() => {
     const timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30000);

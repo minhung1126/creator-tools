@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from backend.app.core.error_contract import error_detail
+
 
 @dataclass(frozen=True)
 class YouTubeErrorInfo:
@@ -104,18 +106,13 @@ class YouTubeQuotaUnavailable(RuntimeError):
         self.safe_to_retry = True
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "code": self.code,
-            "http_status": self.http_status,
-            "reason": self.reason,
-            "method": self.method,
-            "bucket": self.bucket,
-            "youtube_slot": self.slot,
-            "reset_at": self.reset_at,
-            "reset_timezone": "America/Los_Angeles",
-            "confirmed_by_google": self.confirmed_by_google,
-            "message": self.user_message,
-        }
+        return error_detail(
+            self.code,
+            self.user_message,
+            retryable=True,
+            reset_at=self.reset_at,
+            youtube_slot=self.slot,
+        )
 
 
 __all__ = [

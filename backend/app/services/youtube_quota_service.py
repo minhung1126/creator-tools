@@ -21,6 +21,7 @@ _youtube_quota_trackers: dict[str, YouTubeQuotaLimiter] = {
     "secondary": YouTubeQuotaLimiter(QUOTA_FILE_SECONDARY, slot="secondary"),
 }
 
+
 def get_youtube_quota_tracker(slot: str = "primary") -> YouTubeQuotaLimiter:
     slot_name = str(slot or "").strip().casefold()
     if slot_name not in _youtube_quota_trackers:

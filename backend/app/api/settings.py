@@ -1,7 +1,7 @@
 import logging
 from typing import Annotated, Any, Dict, List, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from google.oauth2.credentials import Credentials
 from pydantic import BaseModel, Field, model_validator
 
@@ -14,7 +14,9 @@ from backend.app.core.account_state import (
 )
 from backend.app.core.config import settings
 from backend.app.core.dependencies import require_account_subject, require_login_credentials
+from backend.app.core.error_contract import http_error
 from backend.app.core.runtime_config import runtime_config
+from backend.app.core.youtube_input import normalize_playlist_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings", tags=["System & Resource Settings"])
@@ -26,10 +28,20 @@ class SharedResourceSettingsModel(BaseModel):
     default_spreadsheet_id: str = Field(default="", max_length=512)
 
 
-class YouTubeResourceSettingsModel(BaseModel):
-    """YouTube-only resource settings."""
-
+class YouTubePlaylistSettingsModel(BaseModel):
     default_playlist_id: str = Field(default="", max_length=256)
+
+    @model_validator(mode="after")
+    def normalize_playlist(self):
+        raw = self.default_playlist_id.strip()
+        normalized = normalize_playlist_id(raw)
+        if raw and not normalized:
+            raise ValueError("請提供合法的 YouTube 播放清單網址或 ID")
+        self.default_playlist_id = normalized
+        return self
+
+
+class YouTubeQuotaSettingsModel(BaseModel):
     slot: Literal["primary", "secondary"]
     quota_limit: int
     safety_buffer_units: int
@@ -147,8 +159,9 @@ def get_youtube_settings(
 ):
     del creds
     primary_limit, primary_buffer = runtime_config.get_youtube_quota_settings("primary")
+    raw_playlist_id = get_account_setting(owner_sub, "default_playlist_id", "")
     return {
-        "default_playlist_id": get_account_setting(owner_sub, "default_playlist_id", ""),
+        "default_playlist_id": normalize_playlist_id(raw_playlist_id),
         "slot": "primary",
         "quota_limit": primary_limit,
         "safety_buffer_units": primary_buffer,
@@ -178,34 +191,46 @@ def get_youtube_slot_settings(
 
 
 @router.put("/youtube")
-def update_youtube_settings(
-    payload: YouTubeResourceSettingsModel,
+def update_youtube_settings():
+    """Reject the former combined write endpoint so resources stay isolated."""
+
+    raise http_error(
+        410,
+        "youtube_settings_split",
+        "YouTube 設定已分離；請分別儲存預設播放清單與 quota。",
+    )
+
+
+@router.put("/youtube/playlist")
+def update_youtube_playlist(
+    payload: YouTubePlaylistSettingsModel,
     creds: Credentials = Depends(require_login_credentials),
     owner_sub: str = Depends(require_account_subject),
 ):
-    slot = payload.slot
-    limit = payload.quota_limit
-    buffer = payload.safety_buffer_units
-    if limit <= 0:
-        raise HTTPException(status_code=422, detail="quota_limit 必須大於 0")
-    if buffer < 0 or buffer >= limit:
-        raise HTTPException(status_code=422, detail="safety_buffer_units 必須大於等於 0 且小於 limit")
-    set_account_setting(owner_sub, "default_playlist_id", payload.default_playlist_id.strip())
+    del creds
+    set_account_setting(owner_sub, "default_playlist_id", payload.default_playlist_id)
+    logger.info("Account-scoped YouTube default playlist updated")
+    return {"status": "success", "default_playlist_id": payload.default_playlist_id}
+
+
+@router.put("/youtube/quota")
+def update_youtube_quota(
+    payload: YouTubeQuotaSettingsModel,
+    creds: Credentials = Depends(require_login_credentials),
+):
+    del creds
     runtime_config.update(
         {
-            f"youtube_{slot}_general_quota_limit": limit,
-            f"youtube_{slot}_quota_safety_buffer_units": buffer,
+            f"youtube_{payload.slot}_general_quota_limit": payload.quota_limit,
+            f"youtube_{payload.slot}_quota_safety_buffer_units": payload.safety_buffer_units,
         }
     )
-    logger.info("YouTube resource settings updated: account playlist, slot=%s quota policy", slot)
+    logger.info("YouTube quota policy updated for slot=%s", payload.slot)
     return {
         "status": "success",
-        "settings": {
-            "default_playlist_id": payload.default_playlist_id.strip(),
-            "slot": slot,
-            "quota_limit": limit,
-            "safety_buffer_units": buffer,
-        },
+        "slot": payload.slot,
+        "quota_limit": payload.quota_limit,
+        "safety_buffer_units": payload.safety_buffer_units,
     }
 
 
@@ -277,5 +302,5 @@ def update_work_state(
     try:
         state = update_account_work_state(owner_sub, payload.key, payload.value)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise http_error(422, "invalid_work_state", "工作狀態資料不正確，請重新整理後再試。") from exc
     return {"version": 1, "state": state}

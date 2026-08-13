@@ -42,7 +42,7 @@ def get_client_config(purpose: str = "login", slot: str = "primary") -> dict:
         client_id = settings.GOOGLE_CLIENT_ID
         client_secret = settings.GOOGLE_CLIENT_SECRET
     else:
-        raise ValueError(f"Unsupported Google OAuth purpose: {purpose}")
+        raise ValueError(f"不支援的 Google OAuth 用途：{purpose}")
     return {
         "web": {
             "client_id": client_id,
@@ -60,7 +60,7 @@ def _scopes_for(purpose: str) -> list[str]:
         return YOUTUBE_SCOPES
     if purpose == "login":
         return LOGIN_SCOPES
-    raise ValueError(f"Unsupported Google OAuth purpose: {purpose}")
+    raise ValueError(f"不支援的 Google OAuth 用途：{purpose}")
 
 
 def create_oauth_flow(
@@ -100,7 +100,7 @@ def get_auth_url(purpose: str = "login", slot: str = "primary") -> tuple[str, st
         prompt=prompt,
     )
     if not flow.code_verifier:
-        raise RuntimeError("Google OAuth PKCE code verifier was not generated.")
+        raise RuntimeError("Google OAuth PKCE code verifier 未建立。")
     return auth_url, state, flow.code_verifier
 
 
@@ -152,7 +152,7 @@ def get_youtube_channel_info(credentials: Credentials, *, slot: str = "primary")
     channel = items[0] if isinstance(items, list) and items else None
     channel_id = str((channel or {}).get("id") or "").strip()
     if not channel_id:
-        raise RuntimeError("The authorized Google account does not have an accessible YouTube channel")
+        raise RuntimeError("授權的 Google 帳號沒有可存取的 YouTube 頻道。")
     snippet = (channel or {}).get("snippet") or {}
     return {
         "channel_id": channel_id,
@@ -261,11 +261,7 @@ def _refresh_credentials(
             )
             # Never persist or expose the provider's raw response body. The
             # status is enough for the UI; diagnostics retain only the type.
-            message = (
-                "Google OAuth refresh requires reauthorization."
-                if requires_reauthorization
-                else "Google OAuth refresh failed."
-            )
+            message = "Google OAuth 憑證需要重新授權。" if requires_reauthorization else "Google OAuth 憑證更新失敗。"
             if credential_key == "youtube":
                 credential_store.mark_youtube_refresh_failed(
                     message,

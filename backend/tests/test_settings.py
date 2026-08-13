@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from backend.app.api import settings as settings_api
 
 
@@ -41,6 +44,31 @@ def test_youtube_settings_returns_only_youtube_resource(monkeypatch):
         "quota_limit": 10000,
         "safety_buffer_units": 1000,
     }
+
+
+def test_youtube_playlist_write_normalizes_url_without_quota_write(monkeypatch):
+    account_updates = []
+    monkeypatch.setattr(
+        settings_api,
+        "set_account_setting",
+        lambda owner, key, value: account_updates.append((owner, key, value)),
+    )
+
+    payload = settings_api.YouTubePlaylistSettingsModel(
+        default_playlist_id="https://www.youtube.com/playlist?list=PL123_abc-789"
+    )
+    result = settings_api.update_youtube_playlist(payload, SimpleNamespace(), "google-user")
+
+    assert account_updates == [("google-user", "default_playlist_id", "PL123_abc-789")]
+    assert result["default_playlist_id"] == "PL123_abc-789"
+
+
+def test_combined_youtube_write_endpoint_is_closed():
+    with pytest.raises(HTTPException) as caught:
+        settings_api.update_youtube_settings()
+
+    assert caught.value.status_code == 410
+    assert caught.value.detail["code"] == "youtube_settings_split"
 
 
 def test_team_person_filter_normalizes_and_persists_as_one_shared_record(monkeypatch):

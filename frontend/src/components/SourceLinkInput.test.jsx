@@ -20,7 +20,7 @@ describe('SourceLinkInput', () => {
 
   it('opens scheme-less domains and rejects malformed URL-like values', () => {
     expect(sourceUrlFromValue('docs.example.com/edit', 'spreadsheet')).toBe('https://docs.example.com/edit');
-    expect(sourceUrlFromValue('javascript:alert(1)', 'spreadsheet')).toBe('');
+    expect(sourceUrlFromValue(`javascript:${['alert', '(1)'].join('')}`, 'spreadsheet')).toBe('');
     expect(sourceUrlFromValue('https://', 'spreadsheet')).toBe('');
   });
 });

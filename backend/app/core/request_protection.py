@@ -7,9 +7,10 @@ from collections import defaultdict, deque
 from threading import RLock
 from urllib.parse import urlparse
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from backend.app.core.config import settings
+from backend.app.core.error_contract import http_error
 
 
 class _SlidingWindowLimiter:
@@ -26,13 +27,13 @@ class _SlidingWindowLimiter:
                 events.popleft()
             if len(events) >= limit:
                 retry_after = max(1, int(events[0] + window_seconds - now) + 1)
-                raise HTTPException(
-                    status_code=429,
+                raise http_error(
+                    429,
+                    "rate_limited",
+                    "請求過於頻繁，請稍後再試。",
+                    retryable=True,
+                    retry_after_seconds=retry_after,
                     headers={"Retry-After": str(retry_after)},
-                    detail={
-                        "code": "rate_limited",
-                        "message": "請求過於頻繁，請稍後再試。",
-                    },
                 )
             events.append(now)
 
@@ -114,10 +115,4 @@ def require_same_origin(request: Request) -> None:
         return
     if not origin and not settings.is_production:
         return
-    raise HTTPException(
-        status_code=403,
-        detail={
-            "code": "csrf_origin_denied",
-            "message": "要求來源未通過驗證。",
-        },
-    )
+    raise http_error(403, "csrf_origin_denied", "要求來源未通過驗證。")

@@ -1,116 +1,96 @@
-# 🎬 Creator Tools Web Dashboard
+# Creator Tools
 
-一個整合 YouTube 草稿管理、metadata 更新與發布清理的創作者自動化 Web 控制台。後端使用 Python FastAPI，前端使用 React，並透過 Google OAuth 2.0 存取 Google Sheets 與 YouTube。
+Creator Tools 是以 FastAPI 與 React/Vite 建置的創作者工作流控制台，使用 Google OAuth 讀取 Google Sheets，並管理 YouTube 草稿、影片資訊更新、發布與播放清單清理。登入 session、帳號工作狀態、加密憑證與 YouTube 配額估算會保存於伺服器端 `data/`。
 
-![System Overview](https://img.shields.io/badge/Python-3.11-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green) ![React](https://img.shields.io/badge/React-18.2-cyan) ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+## 目前功能
 
----
+- Google 控制台登入與 Google Sheets 設定
+- YouTube 主要／次要授權組合、頻道驗證與作用中授權切換
+- Video／Shorts 草稿的工作表欄位設定、人物篩選與影片資訊更新
+- To-Post 播放清單讀取、依上傳時間發布並移出播放清單
+- YouTube Data API 配額估算、安全上限與每個授權組合的 ledger
 
-## 🌟 核心功能亮點
+YouTube API 工作流在 API 請求內執行並直接回傳結果；專案沒有背景任務佇列或自動跨授權組合重試。
 
-1. **🔑 Google OAuth 2.0 與平台分頁設定**
-   - 整合 Google Sheets readonly 與 YouTube Data API v3 權限；YouTube 支援 primary / optional secondary OAuth slot。
-   - Google OAuth 與 YouTube primary slot 可共用同一組 client ID／client secret；環境變數仍需分別填入兩組欄位。
-   - Google 與 YouTube 使用各自的設定頁。
-   - 工作流程設定與工作進度會依登入的 Google 帳號（OIDC `sub`）保存於伺服器；瀏覽器不再是主要儲存來源。敏感 token / secret 不會由設定 API 回傳前端。
+## 操作安全與錯誤處理
 
-2. **📝 YouTube Video / Shorts 草稿管理**
-   - Video 與 Shorts 使用獨立頁面，各自記住工作表與欄位；Sheet 內容複製、Video、Shorts 共用同一組團體與人物篩選。
-   - 人物與全隊選項依 Google Sheet 原始列順序顯示。
-   - 支援逐片選人、批量勾選套用、隨機人物欄位抽查與縮圖放大預覽。
-   - 安全保留 YouTube 既有 categoryId、tags 等 metadata。
+- 公開／移出清單與批次覆寫都必須先讀取並顯示完整預覽；執行請求會帶入後端簽署的短效 token。
+- 後端在任何寫入前重新驗證帳號、YouTube slot、播放清單、試算表與影片 metadata；資料變更時回傳 `409 stale_preview`，不執行任何寫入。
+- YouTube 預設播放清單與每個 slot 的 quota 使用分離 API 與儲存動作；播放清單可填 ID 或 YouTube URL。
+- API 錯誤固定為 `detail.code`、`detail.message`、`detail.retryable`、`detail.field_errors`，provider 原始回應與 token 不會回傳前端。
 
-3. **🚀 YouTube 草稿發布與播放清單清理**
-   - 讀取待發布 To-Post 播放清單，依上傳時間由早到晚處理。
-   - 將影片切換為 `public` 後，自動自播放清單移除，不刪除頻道影片。
-   - YouTube 操作在 API request 內依序執行，完成後直接回傳每支影片結果，不依賴背景任務隊列。
-   - 顯示本應用程式估算的 YouTube Data API quota 使用量。
+## 操作安全與錯誤處理
 
-4. **♻️ OAuth Token 自動管理**
-   - Google Access Token 到期前 5 分鐘自動刷新，最新 token 與 refresh token 加密保存於 `data/credential_store.json`。
-   - Refresh 失敗會記錄狀態並提示重新授權；瀏覽器 Cookie 只保存隨機 session id，不保存 OAuth token。
+- 公開／移出清單與批次覆寫都必須先讀取並顯示完整預覽；執行請求會帶入後端簽署的短效 token。
+- 後端在任何寫入前重新驗證帳號、YouTube slot、播放清單、試算表與影片 metadata；資料變更時回傳 `409 stale_preview`，不執行任何寫入。
+- YouTube 預設播放清單與每個 slot 的 quota 使用分離 API 與儲存動作；播放清單可填 ID 或 YouTube URL。
+- API 錯誤固定為 `detail.code`、`detail.message`、`detail.retryable`、`detail.field_errors`，provider 原始回應與 token 不會回傳前端。
 
-5. **📊 JSON-backed YouTube quota 保護**
-   - 每次 request 依官方 method cost 先保留估算額度，並以安全 buffer 避免超額。
-   - primary／secondary 用量與 quota breaker 狀態分別保存於 `data/youtube_quota_usage.json` 與 `data/youtube_quota_usage.secondary.json`，不需要 SQLite 任務資料庫。
-   - Google 回報 `quotaExceeded` 後會停止新 request，直到 Pacific Time 午夜重設。
-
----
-
-## 📁 專案架構目錄
+## 專案結構
 
 ```text
-creator-tools/
-├── backend/
-│   ├── app/
-│   │   ├── api/              # auth, settings, sheets, youtube
-│   │   ├── core/             # 環境變數、安全 Session、帳號狀態與設定
-│   │   ├── services/         # Google、Sheets、YouTube
-│   │   └── main.py
-│   ├── requirements.txt
-│   └── tests/              # mock-only pytest tests
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   ├── pages/
-│   │   ├── services/
-│   │   └── App.jsx
-│   ├── index.html
-│   └── vite.config.js
-├── docs/
-│   ├── DEPLOYMENT.md
-│   ├── GOOGLE_API_SETUP.md
-│   └── YOUTUBE_QUOTA.md
-├── .env.example
-├── pyproject.toml
-├── Dockerfile
-├── docker-compose.yml
-└── README.md
+backend/app/main.py       FastAPI 應用程式與健康檢查
+backend/app/api/          auth、settings、sheets、youtube 路由
+backend/tests/            後端測試
+frontend/src/             React 應用程式、元件與頁面
+docs/                     OAuth、配額與部署文件
+data/                     執行期資料，不提交至 Git
+Dockerfile                前端建置與 FastAPI production image
+docker-compose.yml        本機／部署用 Compose 設定
 ```
 
----
+## 本機開發
 
-## 🚀 本地開發快速啟動
+先複製環境範例並填入本機值。`ALLOWED_GOOGLE_EMAILS` 必須改成實際允許登入的 Google 帳號；空值只適合本機開發，不適合正式環境。
 
-### 1. 後端
-
-確保已安裝 Python 3.11+，在專案根目錄執行：
-
-```bash
-python -m venv venv
-
-# Windows PowerShell
-.\venv\Scripts\Activate.ps1
-
-pip install -r backend/requirements.txt
+```powershell
 copy .env.example .env
-uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r backend/requirements-dev.txt
+python -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-後端 Health Check：`http://localhost:8000/api/v1/health`。啟動後先確認回應中的 `ready` 是 `true`；若為 `false`，`warnings` 會直接列出尚缺的登入設定。即使程序存活，只要 OAuth 尚未備妥就不會誤報為可登入。
+另一個終端機啟動前端：
 
-### 2. 前端
-
-另開終端機：
-
-```bash
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-瀏覽器開啟 `http://localhost:3000`。
+開啟 <http://localhost:3000>。後端健康檢查為 <http://localhost:8000/api/v1/health>；除 HTTP 200 外，也請確認 JSON 的 `ready` 是否為 `true`。
 
----
+## 驗證
 
-## 📖 設定與部署文件
+```powershell
+cd frontend
+npm run lint
+npm test -- --run
+npm run build
 
-- [Google API 申請與 OAuth 2.0 設定教學](docs/GOOGLE_API_SETUP.md)
-- [YouTube Data API quota 說明](docs/YOUTUBE_QUOTA.md)
-- [Docker 部署說明](docs/DEPLOYMENT.md)
+cd ..
+python -m ruff format --check backend
+python -m ruff check backend
+python -m pytest -q
+docker compose config
+```
 
-### OAuth Token 維運注意事項
+若要執行 Compose，根目錄必須存在 `.env`：
 
-- 正式環境必須固定 `CREDENTIAL_ENCRYPTION_KEY`；金鑰變更後既有加密 token 無法解密，需要重新授權。
-- Docker／服務重建時必須保留 `./data` volume，否則會遺失加密 token、session、帳號工作狀態、工作流程設定與 YouTube quota 估算。
-   - Google 登入 session 仍有安全期限；session 失效代表需要重新登入，不代表 Google refresh token 已失效。YouTube slot token、channel metadata 與 quota ledger 分開保存。
+```powershell
+copy .env.example .env
+docker compose up -d --build
+docker compose ps
+```
+
+Compose 預設把容器的 8000 port 綁到本機 `127.0.0.1:${HOST_PORT}`，並以 `./data:/app/data` 保存執行期資料。
+
+## 文件
+
+- [Google API 與 OAuth 設定](docs/GOOGLE_API_SETUP.md)
+- [YouTube 配額說明](docs/YOUTUBE_QUOTA.md)
+- [Docker 與 production 部署](docs/DEPLOYMENT.md)
+
+正式環境請固定保存 `SECRET_KEY` 與 `CREDENTIAL_ENCRYPTION_KEY`，設定 `PUBLIC_BASE_URL`、`FRONTEND_URL`、`ALLOWED_GOOGLE_EMAILS` 及 Google／YouTube OAuth 憑證。Google callback 由 `PUBLIC_BASE_URL` 組成：`/api/v1/auth/callback`。

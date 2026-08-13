@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from backend.app.api import youtube as youtube_api
@@ -31,6 +32,7 @@ def quota_error():
 def metadata_payload(*people):
     return BatchUpdateInput(
         spreadsheet_url_or_id="sheet-id",
+        preview_token="unit-test-preview-token",
         video_type="Video",
         worksheet_name="Youtube Video",
         title_column="Youtube Title",
@@ -43,6 +45,9 @@ def metadata_payload(*people):
 
 
 def install_metadata_inputs(monkeypatch, people):
+    # These unit tests focus on per-item workflow behavior; signed-token
+    # verification is covered by the API snapshot tests.
+    monkeypatch.setattr(youtube_api, "verify_preview_token", lambda *_args, **_kwargs: True)
     monkeypatch.setattr(
         youtube_api,
         "get_sheet_headers",
@@ -102,6 +107,35 @@ def test_metadata_direct_flow_continues_after_one_video_fails(monkeypatch):
     assert response["failed_count"] == 1
     assert [call[0] for call in calls] == ["video-1", "video-2", "video-3"]
     assert calls[0][3]["tags"] == ["keep"]
+
+
+def test_metadata_per_item_provider_error_is_classified(monkeypatch):
+    people = ["Alice", "Bob"]
+    install_metadata_inputs(monkeypatch, people)
+
+    class ForbiddenFailure(Exception):
+        def __init__(self):
+            super().__init__("provider body must not be returned")
+            self.resp = SimpleNamespace(status=403)
+            self.content = json.dumps(
+                {"error": {"errors": [{"reason": "forbidden"}], "message": "provider body must not be returned"}}
+            ).encode()
+
+    def update(_context, video_id, *_args, **_kwargs):
+        if video_id == "video-2":
+            raise ForbiddenFailure()
+        return {"id": video_id}
+
+    monkeypatch.setattr(youtube_api, "update_single_video_metadata", update)
+    response = youtube_api.run_batch_metadata_update(
+        metadata_payload(*people), creds=youtube_context(), sheet_creds=object()
+    )
+
+    failed = response["results"][1]
+    assert failed["status"] == "failed"
+    assert failed["error"]["code"] == "youtube_permission_denied"
+    assert failed["reason"] == failed["error"]["message"]
+    assert "provider body" not in str(failed)
 
 
 def test_single_video_metadata_update_preserves_existing_snippet(monkeypatch):
@@ -173,6 +207,7 @@ def test_metadata_quota_block_keeps_partial_results_and_stops_writes(monkeypatch
 
 
 def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(monkeypatch):
+    monkeypatch.setattr(youtube_api, "verify_preview_token", lambda *_args, **_kwargs: True)
     raw_items = [
         {"id": f"playlist-{video_id}", "contentDetails": {"videoId": video_id}, "snippet": {"title": video_id}}
         for video_id in ("video-3", "video-1", "video-2")
@@ -213,7 +248,7 @@ def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(
     monkeypatch.setattr(youtube_api, "remove_playlist_item", cleanup)
 
     response = youtube_api.run_publish_and_cleanup(
-        PublishCleanupInput(playlist_id="playlist"), creds=youtube_context()
+        PublishCleanupInput(playlist_id="playlist", preview_token="unit-test-preview-token"), creds=youtube_context()
     )
 
     assert [item["video_id"] for item in response["results"]] == ["video-1", "video-2", "video-3"]
@@ -229,6 +264,7 @@ def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(
 
 
 def test_publish_quota_after_public_keeps_completed_item_and_partial_results(monkeypatch):
+    monkeypatch.setattr(youtube_api, "verify_preview_token", lambda *_args, **_kwargs: True)
     raw_items = [
         {"id": f"playlist-{video_id}", "contentDetails": {"videoId": video_id}, "snippet": {"title": video_id}}
         for video_id in ("video-1", "video-2")
@@ -250,7 +286,7 @@ def test_publish_quota_after_public_keeps_completed_item_and_partial_results(mon
     monkeypatch.setattr(youtube_api, "remove_playlist_item", lambda *_args: (_ for _ in ()).throw(quota_error()))
 
     response = youtube_api.run_publish_and_cleanup(
-        PublishCleanupInput(playlist_id="playlist"), creds=youtube_context()
+        PublishCleanupInput(playlist_id="playlist", preview_token="unit-test-preview-token"), creds=youtube_context()
     )
 
     assert [item["status"] for item in response["results"]] == ["succeeded_with_warnings", "not_attempted"]

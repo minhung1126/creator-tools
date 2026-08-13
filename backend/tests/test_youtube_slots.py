@@ -54,7 +54,7 @@ def test_primary_requires_explicit_credentials_even_when_login_is_configured():
     )
     primary = configured.youtube_oauth_slot("primary")
     assert primary.configured is False
-    assert configured.youtube_oauth_warnings() == ["YouTube primary OAuth credentials are not configured"]
+    assert configured.youtube_oauth_warnings() == ["尚未設定 YouTube primary OAuth 憑證"]
 
 
 def test_youtube_slot_credentials_and_ledgers_are_isolated(tmp_path: Path):
@@ -74,8 +74,12 @@ def test_youtube_slot_credentials_and_ledgers_are_isolated(tmp_path: Path):
     assert store.get_youtube_credentials("subject", "primary")["token"] == "primary-access"
     assert store.get_youtube_credentials("subject", "secondary")["token"] == "secondary-access"
 
-    primary = YouTubeQuotaLimiter(tmp_path / "primary.json", slot="primary", configured_limit=100, safety_buffer_units=1)
-    secondary = YouTubeQuotaLimiter(tmp_path / "secondary.json", slot="secondary", configured_limit=100, safety_buffer_units=1)
+    primary = YouTubeQuotaLimiter(
+        tmp_path / "primary.json", slot="primary", configured_limit=100, safety_buffer_units=1
+    )
+    secondary = YouTubeQuotaLimiter(
+        tmp_path / "secondary.json", slot="secondary", configured_limit=100, safety_buffer_units=1
+    )
     primary.record("videos.update")
     assert primary.get_usage()["estimated_used_units"] == 50
     assert secondary.get_usage()["estimated_used_units"] == 0
@@ -84,7 +88,9 @@ def test_youtube_slot_credentials_and_ledgers_are_isolated(tmp_path: Path):
 def test_quota_ledger_rejects_a_file_from_another_slot(tmp_path: Path):
     primary = YouTubeQuotaLimiter(tmp_path / "quota.json", slot="primary", configured_limit=100, safety_buffer_units=1)
     primary.get_usage()
-    secondary = YouTubeQuotaLimiter(tmp_path / "quota.json", slot="secondary", configured_limit=100, safety_buffer_units=1)
+    secondary = YouTubeQuotaLimiter(
+        tmp_path / "quota.json", slot="secondary", configured_limit=100, safety_buffer_units=1
+    )
     with pytest.raises(YouTubeQuotaUnavailable) as caught:
         secondary.get_usage()
     assert caught.value.code == "youtube_quota_storage_unavailable"

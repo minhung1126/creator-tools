@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ExternalLink, Pencil, Save, X } from 'lucide-react';
+import Dialog from './Dialog';
 
 const TITLE_MAX_LENGTH = 100;
 const DESCRIPTION_MAX_LENGTH = 5000;
@@ -12,54 +13,31 @@ export default function YouTubeVideoEditDialog({ video, saving = false, onSave, 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const titleRef = useRef(null);
-  const dialogRef = useRef(null);
-  const savingRef = useRef(saving);
-
-  useEffect(() => {
-    savingRef.current = saving;
-  }, [saving]);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     if (!video) return undefined;
-    const previousActive = document.activeElement;
     setTitle(video.title || '');
     setDescription(video.description || '');
-    titleRef.current?.focus();
-
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (!savingRef.current) onClose?.();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = [...dialogRef.current.querySelectorAll('button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled])')];
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      if (previousActive instanceof HTMLElement) previousActive.focus();
-    };
-  }, [onClose, video]);
+  }, [video]);
 
   if (!video) return null;
 
   const canSave = title.trim().length > 0 && title.length <= TITLE_MAX_LENGTH && description.length <= DESCRIPTION_MAX_LENGTH && !saving;
   const handleSubmit = (event) => {
     event.preventDefault();
-    if (!canSave) return;
-    onSave?.({ title: title.trim(), description });
+    if (!canSave || submittingRef.current) return;
+    submittingRef.current = true;
+    let result;
+    try {
+      result = onSave?.({ title: title.trim(), description });
+    } catch (error) {
+      submittingRef.current = false;
+      throw error;
+    }
+    Promise.resolve(result).finally(() => {
+      submittingRef.current = false;
+    });
   };
   const close = () => {
     if (!saving) onClose?.();
@@ -67,15 +45,16 @@ export default function YouTubeVideoEditDialog({ video, saving = false, onSave, 
   const videoUrl = youtubeVideoUrl(video.video_id);
 
   return (
-    <div className="youtube-edit-overlay" role="presentation" onClick={close}>
-      <div
-        ref={dialogRef}
-        className="youtube-edit-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="youtube-edit-dialog-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <Dialog
+      open={Boolean(video)}
+      className="youtube-edit-dialog"
+      overlayClassName="youtube-edit-overlay"
+      titleId="youtube-edit-dialog-title"
+      initialFocusRef={titleRef}
+      onEscape={close}
+      onBackdropClick={close}
+      busy={saving}
+    >
         <div className="youtube-edit-dialog-header">
           <div>
             <div className="youtube-edit-dialog-heading">
@@ -135,7 +114,6 @@ export default function YouTubeVideoEditDialog({ video, saving = false, onSave, 
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Dialog>
   );
 }

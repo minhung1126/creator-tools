@@ -1,54 +1,65 @@
-# Google API 申請與 OAuth 2.0 設定教學
+# Google API 與 OAuth 2.0 設定
 
-Creator Tools 需要 Google Sheets 與 YouTube Data API v3 的 OAuth 2.0 授權。
+Creator Tools 使用兩個獨立的 OAuth 流程：控制台登入／Google Sheets，以及 YouTube 頻道授權。Google 登入可與 YouTube primary 使用同一組 OAuth client；secondary 若啟用則需另一組 client。
 
-## 1. Google Cloud 設定
+## Google Cloud 設定
 
-1. 在 [Google Cloud Console](https://console.cloud.google.com/) 建立登入/Sheets 用的 `Creator-Tools` 專案，並啟用 Google Sheets API。
-2. 建立一個或兩個 YouTube Data API v3 專案／Web Client，分別填入 primary 與 optional secondary slot。Google OAuth 登入與 YouTube primary slot 可以共用同一組 client ID 與 client secret；secondary 若啟用則使用另一組 client。所有 client 可共用 callback，但 quota ledger 與授權 token 在 Creator Tools 中分開保存。
-3. 在 OAuth consent screen 加入 userinfo email/profile、Sheets readonly 與 YouTube scopes；本專案不需要 Google Drive scope。
-4. Development Mode 請把測試管理者加入 Test users。
-5. 建立 Web application OAuth client，設定 callback：
+1. 建立 Google Cloud project。
+2. 啟用 Google Sheets API 與 YouTube Data API v3。
+3. 建立 Web application OAuth client。
+4. OAuth consent screen 至少加入測試帳號，並讓使用者同意實際需要的 scope。控制台流程使用 OpenID email/profile 與 `spreadsheets.readonly`；YouTube 流程使用 YouTube 管理所需的 `youtube` scope。
+5. 將下列 callback URI 加入 Authorized redirect URIs：
 
 ```text
 http://localhost:8000/api/v1/auth/callback
-https://your-domain.com/api/v1/auth/callback
+https://your-domain.example/api/v1/auth/callback
 ```
 
-正式 callback 必須是 `PUBLIC_BASE_URL` 加上 `/api/v1/auth/callback`；若 reverse proxy 對外是 `8443`，公開 URL 就保留 `https://your-domain.com:8443/...`。`BIND_HOST` 與 `PORT` 不會被拿來猜 public URL。
+正式 callback 必須是 `PUBLIC_BASE_URL` 加上 `/api/v1/auth/callback`。`BIND_HOST`、`PORT` 與 `HOST_PORT` 不會被用來猜測公開網址；若反向代理使用非標準 port，公開 URL 必須保留該 port。
 
-## 2. 後端 `.env`
+## 後端環境變數
+
+從根目錄 `.env.example` 建立 `.env`。空白的 `ALLOWED_GOOGLE_EMAILS` 只適合本機 HTTP 開發；正式環境或 HTTPS 必須填入實際允許登入的 Google 帳號，不能直接保留範例值。
 
 ```env
+ENVIRONMENT=development
 BIND_HOST=0.0.0.0
 PORT=8000
-PUBLIC_BASE_URL=https://your-domain.com
-FRONTEND_URL=https://your-domain.com
-SECRET_KEY=generate-a-unique-secret
-CREDENTIAL_ENCRYPTION_KEY=generate-a-stable-encryption-key
-ALLOWED_GOOGLE_EMAILS=admin@example.com
+HOST_PORT=8000
+PUBLIC_BASE_URL=http://localhost:8000
+FRONTEND_URL=http://localhost:3000
+TRUSTED_HOSTS=
+SECRET_KEY=
+CREDENTIAL_ENCRYPTION_KEY=
+ALLOWED_GOOGLE_EMAILS=
+
 GOOGLE_CLIENT_ID=your-login-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-login-client-secret
-YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=your-login-client-id.apps.googleusercontent.com
-YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=your-login-client-secret
+
+YOUTUBE_OAUTH_PRIMARY_CLIENT_ID=your-primary-client-id.apps.googleusercontent.com
+YOUTUBE_OAUTH_PRIMARY_CLIENT_SECRET=your-primary-client-secret
 YOUTUBE_OAUTH_PRIMARY_LABEL=Primary
 YOUTUBE_OAUTH_SECONDARY_ENABLED=false
 YOUTUBE_OAUTH_SECONDARY_CLIENT_ID=
 YOUTUBE_OAUTH_SECONDARY_CLIENT_SECRET=
 YOUTUBE_OAUTH_SECONDARY_LABEL=Secondary
 YOUTUBE_OAUTH_DEFAULT_SLOT=primary
+
 YOUTUBE_PRIMARY_GENERAL_QUOTA_LIMIT=10000
 YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS=1000
 YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT=10000
 YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS=1000
 ```
 
-正式環境未設定 `ALLOWED_GOOGLE_EMAILS` 時會拒絕登入。Google client secret 只放後端 `.env`，不得傳給前端。
+`GOOGLE_CLIENT_ID`／`GOOGLE_CLIENT_SECRET` 只供控制台登入；YouTube OAuth slot 的 client 設定獨立保存。primary 可以填相同值，但兩組環境變數仍需同時存在。client secret、`SECRET_KEY`、`CREDENTIAL_ENCRYPTION_KEY` 與 token 只放在後端環境或 `data/` 的受保護資料中，不會傳給前端。
 
-登入後的預設 Google Sheet 與 YouTube 播放清單不放在 `.env`；請到「帳號與 Google 設定」設定目前帳號的 Sheet，並到 YouTube 分組中的「YouTube 設定」設定目前帳號的播放清單。這些值與各頁工作狀態會依 Google 帳號保存於伺服器的 `data/account_state.json`。
+## 啟動與檢查
 
-## 3. 驗證
+```powershell
+copy .env.example .env
+python -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-登入後，系統會把 Google token 加密存於 server-side credential store；瀏覽器 cookie 只有 opaque session ID。YouTube token 會保存為 `youtube_primary`／`youtube_secondary`，client secret 永不持久化。OAuth callback 會用簽名 cookie 中的 slot 驗證流程，不能以 callback URL 參數改寫 slot。修改 `.env` 後請重新啟動服務。
+確認 `http://localhost:8000/api/v1/health` 回傳 `status: "healthy"`，並檢查 `ready`、`configuration`、`youtube` 與 `warnings`。health response 只回報設定狀態，不回傳 client secret。
 
-若 Google OAuth 與 YouTube primary 共用 client，請仍然同時設定 `GOOGLE_CLIENT_*` 與 `YOUTUBE_OAUTH_PRIMARY_CLIENT_*`，兩組值填相同即可；系統會以 YouTube slot 的設定建立 YouTube OAuth flow。OAuth slot 的兩個授權若回傳不同 Channel ID，第二個 slot 不會被啟用；控制台也只會在有效授權與頻道驗證完成後允許設為 active。
+登入成功後，控制台 Google Sheet 在「帳號與 Google 設定」保存；YouTube playlist、slot 與配額設定在「YouTube 設定」保存。這些帳號工作狀態會寫入 `data/account_state.json` 與 runtime 設定檔，不必放入 `.env`。

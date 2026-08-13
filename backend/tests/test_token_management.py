@@ -25,7 +25,9 @@ def test_google_credentials_are_persistent_and_proactively_refreshed(monkeypatch
     credentials_store.save_google_connection(
         google_token_payload(datetime.now(timezone.utc) + timedelta(minutes=1)), owner_sub="subject-a"
     )
-    session_id = sessions.create({"credential_provider": "google_login", "user": {"sub": "subject-a", "email": "admin@example.test"}})
+    session_id = sessions.create(
+        {"credential_provider": "google_login", "user": {"sub": "subject-a", "email": "admin@example.test"}}
+    )
     monkeypatch.setattr(google_auth, "credential_store", credentials_store)
     monkeypatch.setattr(google_auth, "session_store", sessions)
 
@@ -45,7 +47,9 @@ def test_google_credentials_are_persistent_and_proactively_refreshed(monkeypatch
 
 def test_google_reconnect_without_refresh_token_preserves_previous_refresh_token(tmp_path: Path):
     store = CredentialStore(tmp_path / "credentials.json")
-    store.save_google_connection(google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1)), owner_sub="subject-a")
+    store.save_google_connection(
+        google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1)), owner_sub="subject-a"
+    )
     replacement = google_token_payload(datetime.now(timezone.utc) + timedelta(hours=1), token="replacement-token")
     replacement["refresh_token"] = None
     store.save_google_connection(replacement, owner_sub="subject-a")

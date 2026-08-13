@@ -176,7 +176,7 @@ class CredentialStore:
     ) -> Dict[str, Any]:
         """Persist one OAuth connection separately from browser login sessions."""
         if not isinstance(token_dict, dict) or not token_dict.get("token"):
-            raise ValueError("Google OAuth response did not contain an access token")
+            raise ValueError("Google OAuth 回應缺少 access token")
 
         subject = _require_subject(owner_sub)
         slot_name = normalize_youtube_slot(slot) if key == "youtube" else None
@@ -271,7 +271,7 @@ class CredentialStore:
                 if field not in {"credentials_encrypted", "owner_sub", "credential_sub"}
             }
             if public.get("last_refresh_error"):
-                public["last_refresh_error"] = "OAuth token refresh failed."
+                public["last_refresh_error"] = "OAuth 憑證更新失敗。"
             return public
 
     def get_google_public(self, owner_sub: str) -> Optional[Dict[str, Any]]:
@@ -282,10 +282,7 @@ class CredentialStore:
         return self._get_public(f"youtube_{slot_name}", owner_sub)
 
     def get_youtube_slots_public(self, owner_sub: str) -> Dict[str, Dict[str, Any]]:
-        return {
-            slot: self.get_youtube_public(owner_sub, slot) or {}
-            for slot in ("primary", "secondary")
-        }
+        return {slot: self.get_youtube_public(owner_sub, slot) or {} for slot in ("primary", "secondary")}
 
     def _mark_refresh_failed(
         self,
@@ -301,9 +298,7 @@ class CredentialStore:
                 return
             record["status"] = "reauthorization_required" if requires_reauthorization else "refresh_failed"
             record["last_refresh_error"] = (
-                "Google OAuth refresh requires reauthorization."
-                if requires_reauthorization
-                else "OAuth token refresh failed."
+                "Google OAuth 憑證需要重新授權。" if requires_reauthorization else "OAuth 憑證更新失敗。"
             )
             record["last_refresh_failed_at"] = to_iso(utc_now())
             self._save()
