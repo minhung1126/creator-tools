@@ -140,8 +140,8 @@ function buildFallbackPreviewSnapshot(snapshot) {
 
 function buildPublishOptions(snapshot) {
   return {
-    preview_snapshot: snapshot.previewSnapshot ?? buildFallbackPreviewSnapshot(snapshot),
-    preview_token: snapshot.previewToken,
+    previewSnapshot: snapshot.previewSnapshot ?? buildFallbackPreviewSnapshot(snapshot),
+    previewToken: snapshot.previewToken,
   };
 }
 

@@ -163,11 +163,11 @@ describe('PublishCleanerPage snapshot safety', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '確認公開並移出 To-Post' }));
     await waitFor(() => expect(api.publishAndCleanup).toHaveBeenCalledTimes(1));
     expect(api.publishAndCleanup).toHaveBeenCalledWith('playlist-a', {
-      preview_snapshot: expect.objectContaining({
+      previewSnapshot: expect.objectContaining({
         playlist_id: 'playlist-a',
         video_ids: ['video-2', 'video-1'],
       }),
-      preview_token: 'token-playlist-a',
+      previewToken: 'token-playlist-a',
     });
   });
 

@@ -109,6 +109,28 @@ describe('API request recovery', () => {
     });
   });
 
+  it('sends the publish preview token and snapshot to the backend', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ completed: true }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.publishAndCleanup('https://www.youtube.com/playlist?list=PL123_abc-789', {
+      previewToken: 'signed-preview-token',
+      previewSnapshot: { playlist_id: 'PL123_abc-789', video_ids: ['video-1'] },
+    })).resolves.toEqual({ completed: true });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/v1/youtube/publish-and-cleanup');
+    expect(JSON.parse(options.body)).toEqual({
+      playlist_id: 'PL123_abc-789',
+      preview_token: 'signed-preview-token',
+      preview_snapshot: { playlist_id: 'PL123_abc-789', video_ids: ['video-1'] },
+    });
+  });
+
   it('handles non-JSON errors and exposes Retry-After in Traditional Chinese', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
