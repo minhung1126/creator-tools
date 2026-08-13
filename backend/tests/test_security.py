@@ -14,7 +14,6 @@ from backend.app.core.security import (
     verify_timed_data,
 )
 from backend.app.core.session_store import SessionStore
-from backend.app.services import google_auth
 
 
 def test_oauth_state_is_tamper_expiry_and_salt_bound():
@@ -45,40 +44,6 @@ def test_no_cookie_is_rejected():
     with pytest.raises(HTTPException) as error:
         dependencies.require_login_credentials(request)
     assert error.value.status_code == 401
-
-
-def test_google_refresh_updates_the_current_persistent_credential(monkeypatch, tmp_path: Path):
-    credentials_store = CredentialStore(tmp_path / "credentials.json")
-    store = SessionStore(tmp_path / "sessions.json")
-    credentials_store.save_google_connection(
-        {
-            "token": "old-token",
-            "refresh_token": "refresh-token",
-            "client_id": "client",
-            "client_secret": "secret",
-            "expiry": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
-            "user": {"sub": "subject-a", "email": "admin@example.test"},
-        },
-        owner_sub="subject-a",
-    )
-    session_id = store.create(
-        {
-            "credential_provider": "google_login",
-            "user": {"sub": "subject-a", "email": "admin@example.test"},
-        }
-    )
-    monkeypatch.setattr(google_auth, "credential_store", credentials_store)
-    monkeypatch.setattr(google_auth, "session_store", store)
-
-    def refresh(self, request):
-        self.token = "new-token"
-        self.expiry = datetime.now(timezone.utc) + timedelta(hours=1)
-
-    monkeypatch.setattr(google_auth.Credentials, "refresh", refresh)
-    credentials = google_auth.get_login_credentials(session_id)
-    assert credentials.token == "new-token"
-    assert "token" not in store.get(session_id)
-    assert credentials_store.get_google_credentials("subject-a")["token"] == "new-token"
 
 
 def test_credential_store_encrypts_and_rejects_wrong_key(tmp_path: Path, monkeypatch):

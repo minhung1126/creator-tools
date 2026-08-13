@@ -161,10 +161,10 @@ describe('API request recovery', () => {
       }),
     }));
 
-    await expect(api.getUserStatus()).resolves.toMatchObject({
+    const result = await api.getUserStatus();
+    expect(result).toMatchObject({
       youtube: { slots: { primary: { configured: true } } },
     });
-    const result = await api.getUserStatus();
     expect(result.youtube.slots.secondary).toBeUndefined();
   });
 
