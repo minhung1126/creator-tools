@@ -9,7 +9,9 @@ from backend.app.core.account_state import (
     get_account_active_slot,
     get_account_setting,
     get_account_work_state,
+    get_account_youtube_routing_mode,
     set_account_setting,
+    set_account_youtube_routing_mode,
     update_account_work_state,
 )
 from backend.app.core.config import settings
@@ -55,6 +57,10 @@ class YouTubeQuotaSettingsModel(BaseModel):
         if self.safety_buffer_units >= self.quota_limit:
             raise ValueError("safety_buffer_units 必須小於 quota_limit")
         return self
+
+
+class YouTubeRoutingSettingsModel(BaseModel):
+    routing_mode: Literal["auto_primary", "manual"]
 
 
 class YouTubeDraftConfigModel(BaseModel):
@@ -165,6 +171,7 @@ def get_youtube_settings(
         "slot": "primary",
         "quota_limit": primary_limit,
         "safety_buffer_units": primary_buffer,
+        "routing_mode": get_account_youtube_routing_mode(owner_sub),
     }
 
 
@@ -187,7 +194,11 @@ def get_youtube_slot_settings(
             "quota_limit": limit,
             "safety_buffer_units": buffer,
         }
-    return {"active_slot": get_account_active_slot(owner_sub), "slots": slots}
+    return {
+        "active_slot": get_account_active_slot(owner_sub),
+        "routing_mode": get_account_youtube_routing_mode(owner_sub),
+        "slots": slots,
+    }
 
 
 @router.put("/youtube")
@@ -211,6 +222,18 @@ def update_youtube_playlist(
     set_account_setting(owner_sub, "default_playlist_id", payload.default_playlist_id)
     logger.info("Account-scoped YouTube default playlist updated")
     return {"status": "success", "default_playlist_id": payload.default_playlist_id}
+
+
+@router.put("/youtube/routing")
+def update_youtube_routing(
+    payload: YouTubeRoutingSettingsModel,
+    creds: Credentials = Depends(require_login_credentials),
+    owner_sub: str = Depends(require_account_subject),
+):
+    del creds
+    set_account_youtube_routing_mode(owner_sub, payload.routing_mode)
+    logger.info("Account-scoped YouTube routing mode updated: %s", payload.routing_mode)
+    return {"status": "success", "routing_mode": payload.routing_mode}
 
 
 @router.put("/youtube/quota")

@@ -222,6 +222,10 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(normalizeYoutubeSettingsPayload({ default_playlist_id: defaultPlaylistId ?? playlistId ?? '' })),
   }),
+  updateYoutubeRoutingMode: (routingMode) => request('/settings/youtube/routing', {
+    method: 'PUT',
+    body: JSON.stringify({ routing_mode: routingMode }),
+  }),
   updateYoutubeQuota: ({ slot = 'primary', quotaLimit, safetyBufferUnits, quotaBuffer } = {}) => request('/settings/youtube/quota', {
     method: 'PUT',
     body: JSON.stringify({ slot, quota_limit: quotaLimit, safety_buffer_units: safetyBufferUnits ?? quotaBuffer }),
@@ -246,6 +250,6 @@ export const api = {
   getPlaylistVideos: (playlistId) => request('/youtube/playlist-items', { method: 'POST', body: JSON.stringify({ playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId) }) }),
   getBatchPreview: ({ spreadsheetUrlOrId, playlistId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments }) => request('/youtube/batch-preview', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments }) }),
   updateYoutubeVideoMetadata: ({ videoId, title, description }) => request('/youtube/video-metadata', { method: 'POST', body: JSON.stringify({ video_id: videoId, title, description }) }),
-  batchUpdateMetadata: ({ spreadsheetUrlOrId, playlistId, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments, previewToken, previewSnapshot }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments, ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
-  publishAndCleanup: (playlistId, { previewToken, previewSnapshot } = {}) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
+  batchUpdateMetadata: ({ spreadsheetUrlOrId, playlistId, youtubeSlot, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments, previewToken, previewSnapshot }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), ...(youtubeSlot ? { youtube_slot: youtubeSlot } : {}), video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments, ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
+  publishAndCleanup: (playlistId, { youtubeSlot, previewToken, previewSnapshot } = {}) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), ...(youtubeSlot ? { youtube_slot: youtubeSlot } : {}), ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
 };

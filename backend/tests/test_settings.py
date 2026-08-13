@@ -43,7 +43,26 @@ def test_youtube_settings_returns_only_youtube_resource(monkeypatch):
         "slot": "primary",
         "quota_limit": 10000,
         "safety_buffer_units": 1000,
+        "routing_mode": "auto_primary",
     }
+
+
+def test_youtube_routing_mode_is_account_scoped(monkeypatch):
+    updates = []
+    monkeypatch.setattr(
+        settings_api,
+        "set_account_youtube_routing_mode",
+        lambda owner, mode: updates.append((owner, mode)) or mode,
+    )
+
+    result = settings_api.update_youtube_routing(
+        settings_api.YouTubeRoutingSettingsModel(routing_mode="manual"),
+        SimpleNamespace(),
+        "google-user",
+    )
+
+    assert updates == [("google-user", "manual")]
+    assert result == {"status": "success", "routing_mode": "manual"}
 
 
 def test_youtube_playlist_write_normalizes_url_without_quota_write(monkeypatch):

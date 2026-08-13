@@ -9,16 +9,29 @@ import logging
 from fastapi import Depends, Request
 from google.oauth2.credentials import Credentials
 
-from backend.app.core.account_state import get_account_active_slot
+from backend.app.core.account_state import get_account_setting
 from backend.app.core.config import settings
-from backend.app.core.credential_store import credential_store
 from backend.app.core.error_contract import http_error
 from backend.app.core.session_store import session_store
 from backend.app.core.youtube_context import YouTubeRequestContext
-from backend.app.services.google_auth import get_login_credentials, get_youtube_credentials
+from backend.app.core.youtube_routing import choose_youtube_slot, estimate_youtube_request_units
+from backend.app.services.google_auth import get_login_credentials
 from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
+
+
+def _get_preview_slot_hint(path: str, body: object) -> str | None:
+    """Only pin a slot for a write request carrying a complete preview."""
+    normalized_path = path.rstrip("/")
+    if not isinstance(body, dict) or not (
+        normalized_path.endswith("/batch-update") or normalized_path.endswith("/publish-and-cleanup")
+    ):
+        return None
+    if not str(body.get("preview_token") or "").strip() or not isinstance(body.get("preview_snapshot"), dict):
+        return None
+    hint = body.get("youtube_slot")
+    return hint if isinstance(hint, str) else None
 
 
 def require_login_credentials(request: Request) -> Credentials:
@@ -54,8 +67,8 @@ def require_account_subject(
     return subject
 
 
-def require_youtube_context(request: Request) -> YouTubeRequestContext:
-    """Resolve the active slot once at request start."""
+async def require_youtube_context(request: Request) -> YouTubeRequestContext:
+    """Resolve one quota-aware YouTube slot once at request start."""
     session_id = request.cookies.get(settings.session_cookie_name)
     login_creds = get_login_credentials(session_id)
     if not login_creds or not login_creds.valid:
@@ -66,42 +79,38 @@ def require_youtube_context(request: Request) -> YouTubeRequestContext:
     owner_sub = str(((session_data.get("user") or {}).get("sub") or "")).strip()
     if not owner_sub:
         raise http_error(401, "login_required", "登入資料缺少 Google OIDC subject，請重新登入。")
-    slot = get_account_active_slot(owner_sub)
-    slot_config = settings.youtube_oauth_slot(slot)
-    if not slot_config.configured:
-        logger.warning("YouTube API access attempted with an unconfigured active slot: %s", slot)
-        raise http_error(
-            503,
-            "youtube_slot_not_configured",
-            "目前作用中的 YouTube OAuth slot 尚未完成伺服器設定。",
-            youtube_slot=slot,
-        )
-
-    creds = get_youtube_credentials(session_id, slot=slot)
-    if not creds or not creds.valid:
-        logger.warning("YouTube API access attempted without channel authorization")
-        raise http_error(
-            403,
-            "youtube_not_connected",
-            "尚未連結 YouTube 頻道 Google 帳號，請至「YouTube 設定」完成授權。",
-            youtube_slot=slot,
-        )
-    public = credential_store.get_youtube_public(owner_sub, slot=slot)
-    other_slot = "secondary" if slot == "primary" else "primary"
-    other_public = credential_store.get_youtube_public(owner_sub, slot=other_slot)
-    channel_id = str((public or {}).get("channel_id") or "").strip()
-    other_channel_id = str((other_public or {}).get("channel_id") or "").strip()
-    if channel_id and other_channel_id and channel_id != other_channel_id:
-        raise http_error(
-            409,
-            "youtube_channel_mismatch",
-            "Primary 與 secondary 必須管理同一個 YouTube Channel，請重新授權其中一個 slot。",
-            youtube_slot=slot,
-        )
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    default_playlist_id = get_account_setting(owner_sub, "default_playlist_id", "")
+    slot_hint = _get_preview_slot_hint(request.url.path, body)
+    estimated_units = estimate_youtube_request_units(
+        request.url.path,
+        body if isinstance(body, dict) else {},
+        default_playlist_id=str(default_playlist_id or ""),
+    )
+    decision = choose_youtube_slot(
+        session_id,
+        owner_sub,
+        estimated_units=estimated_units,
+        slot_hint=slot_hint if isinstance(slot_hint, str) else None,
+    )
+    logger.info(
+        "YouTube request routed to slot=%s mode=%s reason=%s estimated_units=%s",
+        decision.slot,
+        decision.routing_mode,
+        decision.reason,
+        decision.estimated_units,
+    )
     return YouTubeRequestContext(
-        slot=slot,
-        credentials=creds,
-        quota_limiter=get_youtube_quota_tracker(slot),
-        channel_id=(public or {}).get("channel_id"),
+        slot=decision.slot,
+        credentials=decision.credentials,
+        quota_limiter=get_youtube_quota_tracker(decision.slot),
+        channel_id=decision.channel_id,
         owner_sub=owner_sub,
+        routing_mode=decision.routing_mode,
+        selection_reason=decision.reason,
+        estimated_units=decision.estimated_units,
+        preferred_slot=decision.preferred_slot,
     )

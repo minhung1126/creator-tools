@@ -10,9 +10,10 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { SourceLinkButton } from '../components/SourceLinkInput';
+import { youtubePreferredUiSlot } from '../utils/youtubeRouting';
 
 export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
-  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const activeSlot = youtubePreferredUiSlot(authUser?.youtube);
   const activeYoutube = authUser?.youtube?.slots?.[activeSlot] || {};
 
   return (

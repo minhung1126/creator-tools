@@ -27,6 +27,7 @@ ACCOUNT_SETTING_KEYS = frozenset(
         "default_spreadsheet_id",
         "default_playlist_id",
         "youtube_active_slot",
+        "youtube_routing_mode",
         "youtube_draft_video_config",
         "youtube_draft_shorts_config",
         "shared_team_person_filter",

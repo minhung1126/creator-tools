@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Video, X, Youtube } from 'lucide-react';
 import useAccountWorkState from '../hooks/useAccountWorkState';
+import { youtubeIsConnected } from '../utils/youtubeRouting';
 
 const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, sidebarCollapsed, setSidebarCollapsed }) {
-  const activeSlot = authUser?.youtube?.active_slot || 'primary';
-  const youtubeAuthorized = Boolean(authUser?.youtube?.slots?.[activeSlot]?.authenticated);
+  const youtubeAuthorized = youtubeIsConnected(authUser?.youtube);
   const { value: savedNavigation, save: saveNavigation } = useAccountWorkState('navigation', {});
   const [youtubeOpen, setYoutubeOpen] = useState(savedNavigation.youtubeOpen ?? youtubeItems.some((i) => i.id === activeTab));
   const [sheetOpen, setSheetOpen] = useState(savedNavigation.sheetOpen ?? sheetItems.some((i) => i.id === activeTab));

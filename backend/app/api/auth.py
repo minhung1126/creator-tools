@@ -6,7 +6,11 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 
-from backend.app.core.account_state import get_account_active_slot, set_account_active_slot
+from backend.app.core.account_state import (
+    get_account_active_slot,
+    get_account_youtube_routing_mode,
+    set_account_active_slot,
+)
 from backend.app.core.config import normalize_youtube_slot, settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.error_contract import http_error
@@ -380,6 +384,7 @@ def get_user_status(request: Request):
     active_slot = get_account_active_slot(session_sub)
     youtube_connection = {
         "active_slot": active_slot,
+        "routing_mode": get_account_youtube_routing_mode(session_sub),
         "slots": youtube_slots,
     }
     return {

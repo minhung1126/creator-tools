@@ -65,6 +65,7 @@ class VideoAssignment(BaseModel):
 class BatchUpdateInput(BaseModel):
     spreadsheet_url_or_id: Optional[str] = Field(default="", max_length=512)
     playlist_id: Optional[str] = Field(default="", max_length=256)
+    youtube_slot: Optional[Literal["primary", "secondary"]] = None
     preview_token: Optional[str] = Field(default=None, max_length=16_384)
     preview_snapshot: Optional[dict[str, Any]] = None
     video_type: str = Field(default="Video", max_length=32)
@@ -77,6 +78,7 @@ class BatchUpdateInput(BaseModel):
 
 class PublishCleanupInput(BaseModel):
     playlist_id: Optional[str] = Field(default="", max_length=256)
+    youtube_slot: Optional[Literal["primary", "secondary"]] = None
     preview_token: Optional[str] = Field(default=None, max_length=16_384)
     preview_snapshot: Optional[dict[str, Any]] = None
 
@@ -107,6 +109,16 @@ def _quota_http_exception(exc: YouTubeQuotaUnavailable) -> HTTPException:
         reset_at=detail.get("reset_at"),
         youtube_slot=detail.get("youtube_slot"),
     )
+
+
+def _youtube_context_metadata(context: YouTubeRequestContext) -> dict[str, Any]:
+    return {
+        "youtube_slot": context.slot,
+        "youtube_routing_mode": context.routing_mode,
+        "youtube_slot_reason": context.selection_reason,
+        "youtube_preferred_slot": context.preferred_slot,
+        "youtube_estimated_units": context.estimated_units,
+    }
 
 
 def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = None) -> dict:
@@ -266,6 +278,9 @@ def get_playlist_videos(
         videos, source, fallback_reason = fetch_playlist_preview(youtube_context, playlist_id)
         videos = [{**video, "youtube_slot": youtube_context.slot} for video in videos]
         preview_snapshot = playlist_snapshot_from_preview(videos)
+        preview_snapshot["youtube_slot"] = youtube_context.slot
+        preview_snapshot["youtube_routing_mode"] = youtube_context.routing_mode
+        preview_snapshot["youtube_slot_reason"] = youtube_context.selection_reason
         return {
             "playlist_id": playlist_id,
             "total": len(videos),
@@ -273,6 +288,10 @@ def get_playlist_videos(
             "source": source,
             "fallback_reason": fallback_reason,
             "youtube_slot": youtube_context.slot,
+            "youtube_routing_mode": youtube_context.routing_mode,
+            "youtube_slot_reason": youtube_context.selection_reason,
+            "youtube_preferred_slot": youtube_context.preferred_slot,
+            "youtube_estimated_units": youtube_context.estimated_units,
             "preview_token": _playlist_preview_token(youtube_context, playlist_id, videos),
             "preview_snapshot": preview_snapshot,
             "quota_usage": youtube_context.quota_limiter.get_usage(),
@@ -327,7 +346,7 @@ def update_video_metadata(
         )
         return {
             "video_id": video_id,
-            "youtube_slot": youtube_context.slot,
+            **_youtube_context_metadata(youtube_context),
             "title": str(title),
             "description": description,
             "thumbnail_url": _youtube_thumbnail(detail, video_id),
@@ -527,6 +546,8 @@ def create_batch_metadata_preview(
             "worksheet_name": payload.worksheet_name,
             "playlist_id": playlist_id,
             "youtube_slot": youtube_context.slot,
+            "youtube_routing_mode": youtube_context.routing_mode,
+            "youtube_slot_reason": youtube_context.selection_reason,
             "sheet_digest": sheet_state["sheet_digest"],
             "playlist_digest": playlist_state["playlist_digest"],
             "video_ids": requested_video_ids,
@@ -537,7 +558,7 @@ def create_batch_metadata_preview(
             "preview_snapshot": preview_snapshot,
             "plan": plan,
             "playlist_id": playlist_id,
-            "youtube_slot": youtube_context.slot,
+            **_youtube_context_metadata(youtube_context),
         }
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
@@ -556,6 +577,7 @@ def _direct_workflow_response(
     *,
     quota_error: Optional[YouTubeQuotaUnavailable] = None,
     slot: str = "primary",
+    context: YouTubeRequestContext | None = None,
 ) -> dict:
     statuses = [str(item.get("status") or "") for item in results]
     response = {
@@ -572,6 +594,8 @@ def _direct_workflow_response(
         "reset_at": quota_error.reset_at if quota_error else None,
         "results": results,
     }
+    if context is not None:
+        response.update(_youtube_context_metadata(context))
     if quota_error:
         response["quota_error"] = quota_error.to_dict()
     return response
@@ -807,6 +831,7 @@ def run_batch_metadata_update(
             results,
             quota_error=quota_error,
             slot=youtube_context.slot,
+            context=youtube_context,
         )
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
@@ -841,7 +866,9 @@ def run_publish_and_cleanup(
             payload.preview_token,
         )
         if not raw_items:
-            response = _direct_workflow_response("youtube.publish_cleanup", [], slot=youtube_context.slot)
+            response = _direct_workflow_response(
+                "youtube.publish_cleanup", [], slot=youtube_context.slot, context=youtube_context
+            )
             response["message"] = "To-Post 播放清單目前沒有影片。"
             return response
         playlist_item_map: dict[str, str] = {}
@@ -957,6 +984,7 @@ def run_publish_and_cleanup(
             results,
             quota_error=quota_error,
             slot=youtube_context.slot,
+            context=youtube_context,
         )
         response.update({"playlist_id": playlist_id, "sort_order": "published_at_ascending"})
         return response

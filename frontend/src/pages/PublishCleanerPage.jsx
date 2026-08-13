@@ -6,6 +6,7 @@ import ThumbnailDialog from '../components/ThumbnailDialog';
 import YouTubeVideoEditDialog from '../components/YouTubeVideoEditDialog';
 import useAccountWorkState from '../hooks/useAccountWorkState';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
+import { youtubeIsConnected, youtubePreferredUiSlot, youtubeRoutingMode, youtubeRoutingReasonLabel } from '../utils/youtubeRouting';
 import SourceLinkInput from '../components/SourceLinkInput';
 import {
   AlertTriangle,
@@ -27,15 +28,37 @@ function normalizePlaylistId(value) {
   return normalizeYoutubePlaylistInput(value);
 }
 
+function youtubeAuthorizationFingerprint(youtube) {
+  const slots = ['primary', 'secondary'].map((slot) => {
+    const record = youtube?.slots?.[slot] || {};
+    return [
+      slot,
+      record.configured,
+      record.authenticated,
+      record.channel_id,
+      record.client_fingerprint,
+      record.token_status,
+      record.token_expires_at,
+      record.last_refreshed_at,
+    ];
+  });
+  return JSON.stringify({
+    activeSlot: youtube?.active_slot || 'primary',
+    routingMode: youtubeRoutingMode(youtube),
+    slots,
+  });
+}
+
 function normalizeVersion(value) {
   if (value === undefined || value === null || value === '') return null;
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
 
-function getYoutubeAuthContext(authUser) {
-  const slot = authUser?.youtube?.active_slot || 'primary';
-  const record = authUser?.youtube?.slots?.[slot] || {};
+function getYoutubeAuthContext(authUser, slotOverride = '') {
+  const youtube = authUser?.youtube || {};
+  const slot = slotOverride || youtubePreferredUiSlot(youtube);
+  const record = youtube.slots?.[slot] || {};
   const user = record.user || {};
   return {
     slot,
@@ -43,10 +66,12 @@ function getYoutubeAuthContext(authUser) {
     channelTitle: record.channel_title || '',
     account: user.sub || user.email || '',
     clientFingerprint: record.client_fingerprint || '',
-    authenticated: Boolean(record.authenticated),
+    authenticated: Boolean(record.authenticated) || youtubeIsConnected(youtube),
     tokenStatus: record.token_status || '',
     tokenExpiresAt: record.token_expires_at || '',
     lastRefreshedAt: record.last_refreshed_at || '',
+    routingMode: youtubeRoutingMode(youtube),
+    authorizationFingerprint: youtubeAuthorizationFingerprint(youtube),
   };
 }
 
@@ -61,6 +86,8 @@ function authContextKey(context) {
     tokenStatus: context.tokenStatus,
     tokenExpiresAt: context.tokenExpiresAt,
     lastRefreshedAt: context.lastRefreshedAt,
+    routingMode: context.routingMode,
+    authorizationFingerprint: context.authorizationFingerprint,
   });
 }
 
@@ -139,8 +166,10 @@ function buildFallbackPreviewSnapshot(snapshot) {
 }
 
 function buildPublishOptions(snapshot) {
+  const previewSnapshot = snapshot.previewSnapshot ?? buildFallbackPreviewSnapshot(snapshot);
   return {
-    previewSnapshot: snapshot.previewSnapshot ?? buildFallbackPreviewSnapshot(snapshot),
+    youtubeSlot: previewSnapshot?.youtube_slot || snapshot.auth.slot,
+    previewSnapshot,
     previewToken: snapshot.previewToken,
   };
 }
@@ -163,6 +192,7 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
   const [playlistSnapshot, setPlaylistSnapshot] = useState(null);
   const [loadStatus, setLoadStatus] = useState('idle');
   const authContext = useMemo(() => getYoutubeAuthContext(authUser), [authUser]);
+  const routingMode = youtubeRoutingMode(authUser?.youtube);
   const authKey = useMemo(() => authContextKey(authContext), [authContext]);
   const dataVersion = useMemo(
     () => getCurrentYoutubeDataVersion(authUser, sysSettings, authContext),
@@ -287,11 +317,9 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
       const serverPreviewSnapshot = getPreviewSnapshot(response);
       const responseSlot = response?.youtube_slot
         || (serverPreviewSnapshot && typeof serverPreviewSnapshot === 'object' ? serverPreviewSnapshot.youtube_slot : '');
-      if (responseSlot && responseSlot !== requestedAuthContext.slot) {
-        setErrorMsg('讀取結果的 YouTube 授權組合已變更，請重新讀取播放清單。');
-        setLoadStatus('error');
-        return;
-      }
+      const responseAuthContext = responseSlot
+        ? getYoutubeAuthContext(authUser, responseSlot)
+        : requestedAuthContext;
 
       const loadedVideos = sortVideosByUploadTime(Array.isArray(response?.videos) ? response.videos : []);
       const loadedDataVersion = getDataVersion(response, serverPreviewSnapshot);
@@ -308,7 +336,8 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
         videos: loadedVideos,
         source: response?.source || '',
         fallbackReason: response?.fallback_reason || '',
-        auth: requestedAuthContext,
+        routingReason: response?.youtube_slot_reason || serverPreviewSnapshot?.youtube_slot_reason || '',
+        auth: responseAuthContext,
         authKey: requestedAuthKey,
         dataVersion: loadedDataVersion,
         previewSnapshot: serverPreviewSnapshot,
@@ -499,6 +528,7 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
         <p className="section-desc">
           讀取待發布影片後，依 YouTube 上傳時間由最早到最晚顯示與處理；執行時才呼叫必要的 YouTube API 完成公開與移出清單。
         </p>
+        <p className="section-desc">目前 YouTube routing：{routingMode === 'auto_primary' ? 'Auto：Primary 優先，quota 不足時使用 Secondary' : '手動：只使用目前作用中 slot'}。每次讀取的預覽會固定實際使用的 slot。</p>
       </header>
 
       <div className="glass-panel card-padding toolbar publish-source-panel">
@@ -527,6 +557,7 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
           <span>
             播放清單來源：{sourceLabel}。顯示與實際處理都依上傳時間由最早到最晚；缺少上傳時間的影片排在最後並維持原始順序。
             {currentSnapshot.fallbackReason ? ` 回退原因：${currentSnapshot.fallbackReason}` : ''}
+            {currentSnapshot.routingReason ? ` YouTube routing：${youtubeRoutingReasonLabel(currentSnapshot.routingReason)}。` : ''}
           </span>
         </div>
       )}

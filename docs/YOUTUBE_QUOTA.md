@@ -31,18 +31,14 @@ Google 官方目前說明：YouTube Data API 專案對搜尋、影片上傳等�
 - 請求送出前先保留官方成本；安全預留會從專案可用上限扣除。若預估會超過安全上限，請求不會送出。
 - 系統預設專案配額為 10,000 單位，安全預留預設為 1,000 單位；登入後可在 YouTube 設定頁按授權組合調整。
 - Google 回傳 HTTP 403 且錯誤原因為 `quotaExceeded` 時，該授權組合會標記為已確認用完，新的請求會停止，直到官方重設。
-- `quotaExceeded` 不會自動改用另一個授權組合，也不會建立背景重試工作。
+- Auto routing 會在新的 workflow 開始時優先檢查 Primary；若本次保守成本無法由 Primary 的安全可用額度支應，會選用 Secondary。這不是同一批次中途重試，已開始的 workflow 會固定原本選定的 slot。
+- `quotaExceeded` 或本地安全上限只會封鎖目前 slot；下一個 workflow 會重新評估，Primary 恢復且足夠時會再次優先使用 Primary。
+- YouTube 設定也支援手動模式；手動模式只使用目前作用中的 slot，不會自動 fallback。
 - 配額日界線依 `America/Los_Angeles` 的午夜計算；前端同時顯示 Pacific Time 與瀏覽器本地時間。
 
 ## 與寫入流程的關係
 
-批次覆寫與「公開並清理 To-Post」都先建立完整預覽。預覽由後端以帳號、作用中 YouTube slot、播放清單／試算表快照與影片目前 metadata 簽署；執行前若任一項變更，API 回傳 `409 stale_preview`，不會寫入任何影片或播放清單項目。配額不足則保留已完成項目的結果，未執行項目標示為「未執行」，不會自動跨 slot 重試。
-
-YouTube 設定頁的預設播放清單與 quota 是兩個獨立儲存動作：播放清單使用 `/settings/youtube/playlist`，quota 使用 `/settings/youtube/quota`。舊的合併寫入端點會拒絕請求，避免未儲存草稿互相覆蓋。
-
-## 與寫入流程的關係
-
-批次覆寫與「公開並清理 To-Post」都先建立完整預覽。預覽由後端以帳號、作用中 YouTube slot、播放清單／試算表快照與影片目前 metadata 簽署；執行前若任一項變更，API 回傳 `409 stale_preview`，不會寫入任何影片或播放清單項目。配額不足則保留已完成項目的結果，未執行項目標示為「未執行」，不會自動跨 slot 重試。
+批次覆寫與「公開並清理 To-Post」都先建立完整預覽。預覽由後端以帳號、實際選定的 YouTube slot、播放清單／試算表快照與影片目前 metadata 簽署；執行時會沿用預覽所選 slot，避免 Primary 在兩次 request 之間恢復而改變授權組合。執行前若任一項變更，API 回傳 `409 stale_preview`，不會寫入任何影片或播放清單項目。配額不足則保留已完成項目的結果，未執行項目標示為「未執行」；重新建立下一個 workflow 時才會重新選擇 slot。
 
 YouTube 設定頁的預設播放清單與 quota 是兩個獨立儲存動作：播放清單使用 `/settings/youtube/playlist`，quota 使用 `/settings/youtube/quota`。舊的合併寫入端點會拒絕請求，避免未儲存草稿互相覆蓋。
 

@@ -9,6 +9,7 @@ vi.mock('../services/api', () => ({
   api: {
     updateYoutubeQuota: vi.fn(),
     updateYoutubePlaylist: vi.fn(),
+    updateYoutubeRoutingMode: vi.fn(),
     getYoutubeAuthUrl: vi.fn(),
     activateYoutubeSlot: vi.fn(),
     disconnectYoutube: vi.fn(),
@@ -57,6 +58,7 @@ describe('YouTubeSettingsPage', () => {
     vi.clearAllMocks();
     api.updateYoutubeQuota.mockResolvedValue({});
     api.updateYoutubePlaylist.mockResolvedValue({});
+    api.updateYoutubeRoutingMode.mockResolvedValue({});
     api.getYoutubeAuthUrl.mockResolvedValue({ auth_url: 'https://accounts.google.com/oauth' });
     api.activateYoutubeSlot.mockResolvedValue({});
     api.disconnectYoutube.mockResolvedValue({});
@@ -101,6 +103,7 @@ describe('YouTubeSettingsPage', () => {
     renderPage({
       authUser: {
         youtube: {
+          routing_mode: 'manual',
           active_slot: 'primary',
           slots: {
             primary: primarySlot,

@@ -11,6 +11,7 @@ import useTeamPersonFilter from '../hooks/useTeamPersonFilter';
 import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFilterPersistence';
 import { normalizeTeamPersonFilter, readSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
+import { youtubeIsConnected, youtubePreferredUiSlot, youtubeRoutingReasonLabel } from '../utils/youtubeRouting';
 import {
   AlertCircle,
   CheckCircle2,
@@ -170,20 +171,29 @@ function previewStatusLabel(item) {
 
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
   const toast = useToast();
-  const activeSlot = authUser?.youtube?.active_slot || 'primary';
-  const youtubeConnected = Boolean(authUser?.youtube?.slots?.[activeSlot]?.authenticated);
+  const activeSlot = youtubePreferredUiSlot(authUser?.youtube);
+  const youtubeConnected = youtubeIsConnected(authUser?.youtube);
   const authorizationKey = useMemo(() => {
-    const slot = authUser?.youtube?.slots?.[activeSlot] || {};
-    return [
+    const youtube = authUser?.youtube || {};
+    const slots = ['primary', 'secondary'].map((slot) => {
+      const record = youtube.slots?.[slot] || {};
+      return [
+        slot,
+        record.configured,
+        record.authenticated,
+        record.channel_id,
+        record.client_fingerprint,
+        record.token_status,
+        record.token_expires_at,
+        record.last_refreshed_at,
+      ];
+    });
+    return JSON.stringify({
       activeSlot,
-      slot.authenticated,
-      slot.channel_id,
-      slot.client_fingerprint,
-      slot.token_status,
-      slot.token_expires_at,
-      slot.last_refreshed_at,
-    ].join('|');
-  }, [activeSlot, authUser?.youtube?.slots]);
+      routingMode: youtube.routing_mode || 'auto_primary',
+      slots,
+    });
+  }, [activeSlot, authUser?.youtube]);
   const defaults = DEFAULT_COLUMNS[videoType];
   const draftStateKey = videoType === 'Shorts' ? 'youtube_draft_shorts' : 'youtube_draft_video';
   const { value: rememberedState, error: workStateError, save: saveWorkState } = useAccountWorkState(draftStateKey, {});
@@ -231,6 +241,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [bulkPerson, setBulkPerson] = useState(remembered.bulkPerson || '');
   const [playlistSource, setPlaylistSource] = useState('');
   const [playlistFallbackReason, setPlaylistFallbackReason] = useState('');
+  const [youtubeRoutingInfo, setYoutubeRoutingInfo] = useState(null);
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [loadingVideos, setLoadingVideos] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -302,6 +313,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setVideos([]);
     setPlaylistSource('');
     setPlaylistFallbackReason('');
+    setYoutubeRoutingInfo(null);
     setBatchPreview(null);
     setLoadingPreview(false);
     setPreviewToken('');
@@ -597,6 +609,10 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       restoreVideoOptionsRef.current = false;
       setPlaylistSource(res.source || '');
       setPlaylistFallbackReason(res.fallback_reason || '');
+      setYoutubeRoutingInfo({
+        slot: res.youtube_slot || '',
+        reason: res.youtube_slot_reason || '',
+      });
     } catch (err) {
       if (playlistRequestRef.current !== requestId) return;
       invalidateLoadedVideos();
@@ -660,8 +676,12 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       setBatchPreview(plan);
       setPreviewToken(token);
       setPreviewSnapshot(snapshot);
+      setYoutubeRoutingInfo({
+        slot: snapshot?.youtube_slot || response.youtube_slot || '',
+        reason: snapshot?.youtube_slot_reason || response.youtube_slot_reason || '',
+      });
       setPreviewFingerprint(currentPreviewFingerprint);
-      return plan;
+      return { plan, snapshot };
     } catch (error) {
       setBatchPreview(null);
       setPreviewToken('');
@@ -699,6 +719,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
         descriptionColumn,
         team: selectedTeam,
         assignments: videos.map((video) => ({ video_id: video.video_id, person: assignments[video.video_id] || '不編輯' })),
+        youtubeSlot: previewSnapshot?.youtube_slot,
         previewToken,
         previewSnapshot,
       });
@@ -737,13 +758,18 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     if (titleColumn === descriptionColumn) return toast.warning('標題與描述不能使用同一欄位');
     if (!selectedTeam) return toast.warning('請先選擇所屬團體');
     if (!videos.length) return toast.warning('請先讀取草稿影片');
-    const plan = await loadBatchPreview();
-    if (!plan) return;
+    const previewResult = await loadBatchPreview();
+    if (!previewResult) return;
+    const { plan, snapshot } = previewResult;
     const activeCount = plan.filter((item) => item.willUpdate).length;
     if (!activeCount) return toast.warning('完整預覽中沒有可更新的影片');
     setEstimateLoading(true);
     try {
-      setQuotaEstimate(await api.estimateYoutubeQuota({ operation: 'youtube.metadata_update', itemCount: activeCount, slot: activeSlot }));
+      setQuotaEstimate(await api.estimateYoutubeQuota({
+        operation: 'youtube.metadata_update',
+        itemCount: activeCount,
+        slot: snapshot?.youtube_slot || activeSlot,
+      }));
     } catch (error) {
       setQuotaEstimate(null);
       toast.warning(`無法取得 quota 預估，仍可直接執行：${error.message}`);
@@ -762,6 +788,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       <header className="page-header">
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先確認資料來源、工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
+        {youtubeRoutingInfo?.slot && <p className="section-desc">本次 YouTube routing：{youtubeRoutingInfo.slot}；{youtubeRoutingReasonLabel(youtubeRoutingInfo.reason)}</p>}
         {!youtubeConnected && <div className="info-banner"><AlertCircle size={16} /><span>尚未連結 YouTube 頻道 Google 帳號；請先到「YouTube 設定」授權管理品牌帳號的 Google 帳號。</span></div>}
       </header>
 

@@ -12,6 +12,15 @@ from backend.app.core.account_state_store import (
 )
 from backend.app.core.config import normalize_youtube_slot, settings
 
+YOUTUBE_ROUTING_MODES = ("auto_primary", "manual")
+
+
+def normalize_youtube_routing_mode(value: Any) -> str:
+    mode = str(value or "").strip().casefold()
+    if mode not in YOUTUBE_ROUTING_MODES:
+        raise ValueError("YouTube routing mode must be auto_primary or manual")
+    return mode
+
 
 def _owner(value: Any) -> str | None:
     if not isinstance(value, str):
@@ -70,6 +79,21 @@ def set_account_active_slot(owner_sub: str, slot: str) -> str:
     return normalized
 
 
+def get_account_youtube_routing_mode(owner_sub: str) -> str:
+    subject = ensure_account(owner_sub)
+    value = get_account_setting(subject, "youtube_routing_mode", "auto_primary")
+    try:
+        return normalize_youtube_routing_mode(value)
+    except ValueError:
+        return "auto_primary"
+
+
+def set_account_youtube_routing_mode(owner_sub: str, mode: str) -> str:
+    normalized = normalize_youtube_routing_mode(mode)
+    set_account_setting(owner_sub, "youtube_routing_mode", normalized)
+    return normalized
+
+
 def get_account_work_state(owner_sub: str) -> dict[str, Any]:
     subject = ensure_account(owner_sub)
     return account_state_store.get_work_state(subject)
@@ -87,8 +111,11 @@ __all__ = [
     "get_account_active_slot",
     "get_account_setting",
     "get_account_work_state",
+    "get_account_youtube_routing_mode",
+    "normalize_youtube_routing_mode",
     "set_account_active_slot",
     "set_account_setting",
+    "set_account_youtube_routing_mode",
     "update_account_settings",
     "update_account_work_state",
 ]

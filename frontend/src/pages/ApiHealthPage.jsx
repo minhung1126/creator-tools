@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, RefreshCw } from 'lucide-react';
 import YouTubeQuotaBanner from '../components/YouTubeQuotaBanner';
+import { youtubePreferredUiSlot } from '../utils/youtubeRouting';
 
 export default function ApiHealthPage({ authUser }) {
   const [refreshKey, setRefreshKey] = useState(0);
-  const activeSlot = authUser?.youtube?.active_slot || 'primary';
+  const activeSlot = youtubePreferredUiSlot(authUser?.youtube);
   const availableSlots = Object.keys(authUser?.youtube?.slots || {}).length
     ? Object.keys(authUser.youtube.slots)
     : ['primary'];

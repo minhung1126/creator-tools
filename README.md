@@ -6,11 +6,12 @@ Creator Tools 是以 FastAPI 與 React/Vite 建置的創作者工作流控制台
 
 - Google 控制台登入與 Google Sheets 設定
 - YouTube 主要／次要授權組合、頻道驗證與作用中授權切換
+- YouTube Auto routing：Primary quota 足夠時優先使用 Primary，不足時由新的 workflow 選用 Secondary
 - Video／Shorts 草稿的工作表欄位設定、人物篩選與影片資訊更新
 - To-Post 播放清單讀取、依上傳時間發布並移出播放清單
 - YouTube Data API 配額估算、安全上限與每個授權組合的 ledger
 
-YouTube API 工作流在 API 請求內執行並直接回傳結果；專案沒有背景任務佇列或自動跨授權組合重試。
+YouTube API 工作流在 API 請求內執行並直接回傳結果。預設 Auto routing 會在每個 workflow 開始時以保守 quota 預估選擇 Primary 或 Secondary；同一個 preview／批次執行期間固定使用所選 slot，不會中途切換或建立背景重試工作。需要時可在 YouTube 設定切換為手動模式。
 
 ## 操作安全與錯誤處理
 

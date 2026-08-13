@@ -4,6 +4,7 @@ import { api, normalizeYoutubePlaylistInput } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { YOUTUBE_ROUTING_MODES, youtubeRoutingLabel } from '../utils/youtubeRouting';
 
 const SLOT_ORDER = ['primary', 'secondary'];
 
@@ -74,6 +75,8 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     }]),
   ));
   const [activeSlot, setActiveSlot] = useState(youtube.active_slot || 'primary');
+  const [routingMode, setRoutingMode] = useState(youtube.routing_mode || YOUTUBE_ROUTING_MODES.AUTO_PRIMARY);
+  const [routingModeDraft, setRoutingModeDraft] = useState(youtube.routing_mode || YOUTUBE_ROUTING_MODES.AUTO_PRIMARY);
   const [busyAction, setBusyAction] = useState(null);
   const [disconnectTarget, setDisconnectTarget] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -84,11 +87,33 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
 
   useEffect(() => {
     setActiveSlot(youtube.active_slot || 'primary');
+    const nextRoutingMode = youtube.routing_mode || YOUTUBE_ROUTING_MODES.AUTO_PRIMARY;
+    setRoutingMode(nextRoutingMode);
+    setRoutingModeDraft(nextRoutingMode);
     setSlotDrafts(Object.fromEntries(SLOT_ORDER.map((slot) => [slot, {
       quotaLimit: slotRecords[slot].quota_limit,
       quotaBuffer: slotRecords[slot].safety_buffer_units,
     }])));
-  }, [slotRecords, youtube.active_slot]);
+  }, [slotRecords, youtube.active_slot, youtube.routing_mode]);
+
+  const saveRoutingMode = async () => {
+    if (busyAction) return;
+    setBusyAction({ kind: 'routing' });
+    setMsg(null);
+    try {
+      await api.updateYoutubeRoutingMode(routingModeDraft);
+      setRoutingMode(routingModeDraft);
+      if (refreshSettings) await refreshSettings();
+      if (refreshAuthUser) await refreshAuthUser();
+      setMsg({ type: 'success', text: `YouTube slot 使用模式已切換為「${youtubeRoutingLabel(routingModeDraft)}」。` });
+      toast.success(`已切換為${youtubeRoutingLabel(routingModeDraft)}`);
+    } catch (error) {
+      setMsg({ type: 'error', text: error.message || '儲存失敗。' });
+      toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
 
   const saveSlot = async (slot) => {
     const draft = slotDrafts[slot];
@@ -181,7 +206,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
 
   const requestDisconnect = (slot) => {
     if (busyAction) return;
-    const isActive = activeSlot === slot;
+    const isActive = routingMode === YOUTUBE_ROUTING_MODES.MANUAL && activeSlot === slot;
     setDisconnectTarget({ slot, isActive });
   };
 
@@ -212,22 +237,52 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     <div className="section-gap settings-page youtube-settings-page">
       <header className="page-header">
         <h1>YouTube 設定</h1>
-        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、作用中 request context、發布預設資源與各 project quota。跨 project 不會自動切換重試。</p>
+        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、quota 優先順序、發布預設資源與各 project quota。Auto 模式會在每個新 workflow 開始時優先使用 Primary，quota 不足才選 Secondary；同一批次不會中途切換。</p>
       </header>
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
+
+      <section className="glass-panel card-padding settings-card card-stack">
+        <div className="card-header">
+          <div>
+            <h2 className="settings-heading">YouTube slot 使用優先順序</h2>
+            <p className="section-desc">目前模式：{youtubeRoutingLabel(routingMode)}。Auto 模式會以本次 workflow 的保守 quota 預估選擇可用 slot，並在 Primary 恢復後自動優先回到 Primary。</p>
+          </div>
+          <span className="badge badge-info">{youtubeRoutingLabel(routingMode)}</span>
+        </div>
+        <div className="settings-grid">
+          <div className="form-group">
+            <label className="form-label" htmlFor="youtube-routing-mode">Routing mode</label>
+            <select id="youtube-routing-mode" className="form-select" value={routingModeDraft} onChange={(event) => setRoutingModeDraft(event.target.value)}>
+              <option value={YOUTUBE_ROUTING_MODES.AUTO_PRIMARY}>Auto：Primary 優先，quota 不足時 Secondary</option>
+              <option value={YOUTUBE_ROUTING_MODES.MANUAL}>手動：只使用目前作用中 slot</option>
+            </select>
+          </div>
+          <div className="glass-panel settings-info-card">
+            <strong>切換邊界</strong>
+            <p>{routingModeDraft === YOUTUBE_ROUTING_MODES.AUTO_PRIMARY ? '每個新的 request／preview 開始時選定；同一個 preview 與批次執行會固定同一 slot。' : '只使用下方標示的目前作用中 slot，不會自動 fallback。'}</p>
+          </div>
+        </div>
+        <div className="page-actions settings-card-actions">
+          <button className="btn btn-success" type="button" onClick={saveRoutingMode} disabled={pageBusy || routingModeDraft === routingMode}>
+            <Save size={18} />{busyAction?.kind === 'routing' ? '儲存中...' : '儲存使用模式'}
+          </button>
+        </div>
+      </section>
 
       <div className="responsive-grid youtube-slot-grid">
         {SLOT_ORDER.map((slot) => {
           const record = slotRecords[slot];
           const draft = slotDrafts[slot];
-          const isActive = activeSlot === slot;
+          const isActive = routingMode === YOUTUBE_ROUTING_MODES.MANUAL && activeSlot === slot;
+          const isPrimaryPreferred = routingMode === YOUTUBE_ROUTING_MODES.AUTO_PRIMARY && slot === 'primary';
           const busy = busyAction?.slot === slot;
           return (
             <section className="glass-panel card-padding settings-card card-stack" key={slot}>
               <div className="card-header">
                 <div className="card-header-title"><Youtube size={20} color="#ff4d6d" /><h2 className="settings-heading">{record.label}</h2></div>
                 {isActive && <span className="badge badge-info">目前作用中</span>}
+                {isPrimaryPreferred && <span className="badge badge-info">Auto 優先</span>}
                 {record.authenticated
                   ? <span className="badge badge-connected"><CheckCircle2 size={14} /> 已授權</span>
                   : <span className="badge badge-disconnected"><XCircle size={14} /> {record.configured ? '尚未授權' : '未配置'}</span>}
@@ -256,14 +311,14 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
                   <input id={`${slot}-quota-buffer`} className="form-input" type="number" min="0" step="1" value={draft.quotaBuffer} onChange={(event) => updateDraft(slot, 'quotaBuffer', event.target.value)} />
                 </div>
               </div>
-              <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 只封鎖這個 slot，不會自動跨 project 重試。</p>
+              <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 或安全上限只影響這個 slot。Auto 模式會在下一個 workflow 開始時依 quota 選擇可用 slot。</p>
 
               <div className="page-actions settings-card-actions">
                 <button className="btn btn-primary" onClick={() => startOAuth(slot)} type="button" disabled={!record.configured || pageBusy || authorizationBusy}>
                   {busy ? <><span className="login-spinner"></span> 處理中...</> : <><ExternalLink size={16} /> {record.authenticated ? '重新授權' : '連結此 slot'}</>}
                 </button>
                 <button className="btn btn-success" onClick={() => saveSlot(slot)} type="button" disabled={pageBusy}><Save size={16} />儲存 slot 設定</button>
-                {record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={pageBusy || authorizationBusy}>設為作用中</button>}
+                {routingMode === YOUTUBE_ROUTING_MODES.MANUAL && record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={pageBusy || authorizationBusy}>設為作用中</button>}
                 {record.authenticated && <button className="btn" onClick={() => requestDisconnect(slot)} type="button" disabled={pageBusy || authorizationBusy}>斷開</button>}
               </div>
             </section>
