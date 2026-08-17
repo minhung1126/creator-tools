@@ -37,6 +37,9 @@ Drive 上傳另有獨立的 `video_uploads` bucket：`videos.insert` 每部預�
 - Google 回傳 HTTP 403 且錯誤原因為 `quotaExceeded` 時，該授權組合會標記為已確認用完，新的請求會停止，直到官方重設。
 - Auto routing 會在新的 workflow 開始時優先檢查 Primary；若本次保守成本無法由 Primary 的安全可用額度支應，會選用 Secondary。這不是同一批次中途重試，已開始的 workflow 會固定原本選定的 slot。
 - Drive 上傳預覽會同時檢查 `video_uploads` 與 General 兩個 bucket；工作建立後固定同一個 slot，不會因 quota 變化中途換 slot。每部影片只在取得 YouTube ID 後才保存為已上傳，重試時已有 ID 的項目只重試 playlist insertion。
+- Drive 上傳完整流程的 General 保守成本是 `2 + 50 × insertion_count`：預覽時一次 `playlists.list`、建立工作前再驗證一次，之後每個 To-Post 插入各 50 單位；`video_uploads` 則只計 `1 × new_upload_count`。因此 resume-only 工作（`new_upload_count = 0`）不會誤扣 `video_uploads`。
+- 上傳預覽回傳的 `quota.preview_read`、`quota.job_required`、`quota.total` 與 `quota.create_can_execute` 是分階段契約；前端必須依 `job_required` 與兩個 bucket 的可用量判斷是否能建立工作，不可把已花費的預覽讀取再次加總。建立工作時仍會重新驗證 quota、slot、Drive snapshot 與播放清單。
+- 若 playlist insertion 的回應中斷，工作會保存已取得的 YouTube ID，重試前先以 `playlistItems.list` reconciliation 尋找既有項目，找到時不會重複插入；該 reconciliation 讀取也會經過 General quota ledger，配額不足時工作會安全暫停。
 - `quotaExceeded` 或本地安全上限只會封鎖目前 slot；下一個 workflow 會重新評估，Primary 恢復且足夠時會再次優先使用 Primary。
 - YouTube 設定也支援手動模式；手動模式只使用目前作用中的 slot，不會自動 fallback。
 - 配額日界線依 `America/Los_Angeles` 的午夜計算；前端同時顯示 Pacific Time 與瀏覽器本地時間。

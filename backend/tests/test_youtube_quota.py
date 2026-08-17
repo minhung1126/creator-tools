@@ -98,6 +98,21 @@ def test_two_instances_share_a_path_lock_and_cannot_cross_policy_cap(tmp_path):
     assert first.get_usage()["estimated_used_units"] == 50
 
 
+def test_safety_buffer_is_reserved_at_the_exact_policy_cap(tmp_path):
+    ledger = make_ledger(tmp_path, configured_limit=51, safety_buffer_units=1)
+
+    ledger.record("videos.update")
+    usage = ledger.get_usage()
+
+    assert usage["estimated_used_units"] == 50
+    assert usage["estimated_remaining_units"] == 1
+    assert usage["policy_cap_units"] == 50
+    assert usage["effective_available_units"] == 0
+    with pytest.raises(YouTubeQuotaUnavailable) as caught:
+        ledger.reserve("videos.list")
+    assert caught.value.code == "youtube_quota_safety_blocked"
+
+
 def test_only_403_quota_exceeded_is_confirmed_quota(tmp_path):
     assert is_youtube_quota_exceeded(HttpFailure("quotaExceeded")) is True
     assert is_youtube_quota_exceeded(HttpFailure("forbidden")) is False
@@ -209,5 +224,6 @@ def test_cost_estimates_match_direct_metadata_and_publish_formulas(monkeypatch):
     metadata = _quota_estimate("youtube.metadata_update", 51)
     publish = _quota_estimate("youtube.publish_cleanup", 20)
     assert metadata["projected_units"] == 2 + 51 * 50
-    assert publish["projected_units"] == 2 * 1 + 100 * 20
+    assert publish["projected_units"] == 3 * 1 + 100 * 20
+    assert publish["breakdown"][0] == {"method": "playlistItems.list", "calls": 2, "units": 2}
     assert publish["max_items_today"] == 14

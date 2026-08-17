@@ -262,6 +262,10 @@ def update_single_video_metadata(
     current_snippet: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Update title/description while preserving existing snippet properties."""
+
+    def normalize_description(value: Any) -> str:
+        return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
     service = get_youtube_service(context)
     if current_snippet is None:
         request = service.videos().list(part="snippet", id=video_id)
@@ -270,6 +274,11 @@ def update_single_video_metadata(
         if not items:
             raise ValueError(f"YouTube 找不到影片 ID：{video_id}。")
         current_snippet = items[0]["snippet"]
+    if (
+        str(current_snippet.get("title") or "") == str(new_title or "")
+        and normalize_description(current_snippet.get("description")) == normalize_description(new_description)
+    ):
+        return {"id": video_id, "snippet": dict(current_snippet), "unchanged": True}
     category_id = current_snippet.get("categoryId")
     if not category_id:
         raise ValueError(f"無法取得影片 {video_id} 的類別 ID。")

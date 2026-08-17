@@ -280,19 +280,86 @@ def _verify_snapshot(owner_sub: str, token: str, snapshot: dict[str, Any]) -> No
 
 
 def _quota_summary(slot: str, *, upload_count: int, insertion_count: int) -> dict[str, Any]:
+    return _quota_summary_at_stage(
+        slot,
+        upload_count=upload_count,
+        insertion_count=insertion_count,
+        general_reads_spent=0,
+    )
+
+
+def _quota_summary_at_stage(
+    slot: str,
+    *,
+    upload_count: int,
+    insertion_count: int,
+    general_reads_spent: int,
+) -> dict[str, Any]:
+    """Describe the remaining cost from a known upload workflow stage.
+
+    The Drive upload workflow performs two one-unit playlist validations: one
+    during preview and one immediately before the durable job is created.
+    Keeping those reads separate from the playlist insertions prevents the UI
+    from claiming that a preview is executable when only the first read fits.
+    """
+
     general = get_youtube_quota_tracker(slot).get_usage()
     uploads = get_youtube_upload_quota_tracker(slot).get_usage()
-    general_required = insertion_count * 50
+    upload_count = max(int(upload_count or 0), 0)
+    insertion_count = max(int(insertion_count or 0), 0)
+    general_reads_spent = max(int(general_reads_spent or 0), 0)
+    playlist_insert_required = insertion_count * 50
+    projected_full_general = 2 + playlist_insert_required
+    general_required = max(projected_full_general - general_reads_spent, 0)
     upload_required = upload_count
+    general_available = int(general.get("effective_available_units") or 0)
+    upload_available = int(uploads.get("effective_available_units") or 0)
+    estimated_units = estimate_youtube_upload_quota(upload_count, insertion_count)
+    can_complete = general_required <= general_available and upload_required <= upload_available
+    stage_preview_read = {
+        "general": general_reads_spent,
+        "video_uploads": 0,
+    }
+    stage_job_required = {
+        "general": general_required,
+        "video_uploads": upload_required,
+    }
+    complete_workflow = {
+        "general": projected_full_general,
+        "video_uploads": upload_required,
+    }
     return {
+        "already_spent": {
+            "general": general_reads_spent,
+            "video_uploads": 0,
+        },
+        "remaining_required": {
+            "general": general_required,
+            "video_uploads": upload_required,
+        },
+        "projected_full_workflow": {
+            "general": projected_full_general,
+            "video_uploads": upload_required,
+        },
+        # These explicit stage fields are the frontend contract. The aliases
+        # above remain for older callers that consumed the original summary.
+        "preview_read": stage_preview_read,
+        "job_required": stage_job_required,
+        "total": complete_workflow,
+        "complete_workflow": complete_workflow,
+        "can_create": can_complete,
+        "create_can_execute": can_complete,
         "general": {
             "bucket": "general",
             "used": general.get("estimated_used_units", 0),
             "limit": general.get("configured_project_limit", 10000),
             "effective_available_units": general.get("effective_available_units", 0),
             "projected_units": general_required,
-            "projected_with_preview_reads": general_required + 1,
-            "can_complete": general_required <= int(general.get("effective_available_units") or 0),
+            "projected_with_preview_reads": projected_full_general,
+            "projected_full_workflow": projected_full_general,
+            "already_spent": general_reads_spent,
+            "remaining_required": general_required,
+            "can_complete": general_required <= general_available,
             "reset_at": general.get("reset_at"),
         },
         "video_uploads": {
@@ -301,15 +368,75 @@ def _quota_summary(slot: str, *, upload_count: int, insertion_count: int) -> dic
             "limit": uploads.get("configured_project_limit", 100),
             "effective_available_units": uploads.get("effective_available_units", 0),
             "projected_units": upload_required,
-            "can_complete": upload_required <= int(uploads.get("effective_available_units") or 0),
+            "projected_full_workflow": upload_required,
+            "already_spent": 0,
+            "remaining_required": upload_required,
+            "can_complete": upload_required <= upload_available,
             "reset_at": uploads.get("reset_at"),
         },
-        "can_complete": (
-            general_required <= int(general.get("effective_available_units") or 0)
-            and upload_required <= int(uploads.get("effective_available_units") or 0)
-        ),
-        "estimated_units": estimate_youtube_upload_quota(max(upload_count, insertion_count)),
+        "can_complete": can_complete,
+        "estimated_units": estimated_units,
     }
+
+
+def _full_upload_workflow_fits(slot: str, *, upload_count: int, insertion_count: int) -> bool:
+    """Check the complete preview-to-job cost without mutating quota ledgers."""
+
+    plan = _quota_summary_at_stage(
+        slot,
+        upload_count=upload_count,
+        insertion_count=insertion_count,
+        general_reads_spent=0,
+    )
+    return bool(plan["can_complete"])
+
+
+def _choose_preview_slot(
+    request: Request,
+    owner_sub: str,
+    *,
+    ready_count: int,
+    upload_count: int,
+    insertion_count: int,
+):
+    """Choose a slot that fits both playlist validations and all insertions.
+
+    The shared routing contract predates this workflow's first preview read
+    and checks one validation plus the insertions. Re-check the complete
+    two-read cost here, and only try Secondary when auto routing selected an
+    under-sized Primary. Never use this fallback for a pinned/manual slot.
+    """
+
+    decision = choose_youtube_upload_slot(
+        _session_id(request),
+        owner_sub,
+        item_count=ready_count,
+        upload_count=upload_count,
+        insertion_count=insertion_count,
+    )
+    if _full_upload_workflow_fits(decision.slot, upload_count=upload_count, insertion_count=insertion_count):
+        return decision
+    if decision.routing_mode == "auto_primary" and decision.slot == "primary":
+        secondary = choose_youtube_upload_slot(
+            _session_id(request),
+            owner_sub,
+            item_count=ready_count,
+            upload_count=upload_count,
+            insertion_count=insertion_count,
+            slot_hint="secondary",
+        )
+        if _full_upload_workflow_fits(
+            secondary.slot,
+            upload_count=upload_count,
+            insertion_count=insertion_count,
+        ):
+            return secondary
+    raise http_error(
+        429,
+        "youtube_quota_no_available_slot",
+        "目前沒有足夠 quota 完成預覽後的整批上傳，請稍後重試。",
+        retryable=True,
+    )
 
 
 def _recheck_drive_snapshot(credentials: Credentials, snapshot: dict[str, Any]) -> None:
@@ -362,10 +489,10 @@ def preview_drive_upload(
     items, pending_uploads, insertion_count = _file_snapshot(owner_sub, source_data)
     ready_count = sum(1 for item in items if item.get("uploadable"))
     try:
-        decision = choose_youtube_upload_slot(
-            _session_id(request),
+        decision = _choose_preview_slot(
+            request,
             owner_sub,
-            item_count=ready_count,
+            ready_count=ready_count,
             upload_count=pending_uploads,
             insertion_count=insertion_count,
         )
@@ -396,7 +523,12 @@ def preview_drive_upload(
         items=items,
     )
     token = _token_for(owner_sub, snapshot)
-    quota = _quota_summary(decision.slot, upload_count=pending_uploads, insertion_count=insertion_count)
+    quota = _quota_summary_at_stage(
+        decision.slot,
+        upload_count=pending_uploads,
+        insertion_count=insertion_count,
+        general_reads_spent=1,
+    )
     return {
         "status": "preview_ready",
         "source": {
@@ -482,7 +614,12 @@ def create_upload_job(
             raise http_error(409, "stale_preview", "YouTube 頻道已變更，請重新解析預覽。")
         context = _context(decision, owner_sub)
         validate_playlist(context, playlist_id)
-        quota = _quota_summary(decision.slot, upload_count=upload_count, insertion_count=insertion_count)
+        quota = _quota_summary_at_stage(
+            decision.slot,
+            upload_count=upload_count,
+            insertion_count=insertion_count,
+            general_reads_spent=2,
+        )
         if not quota["can_complete"]:
             raise http_error(
                 429, "youtube_quota_no_available_slot", "目前 quota 不足以完成這批上傳，請稍後重試。", retryable=True
@@ -538,6 +675,9 @@ def create_upload_job(
             "youtube_channel_id": decision.channel_id,
             "youtube_routing_mode": decision.routing_mode,
             "youtube_preferred_slot": decision.preferred_slot,
+            "needs_reconciliation": any(
+                item.get("youtube_video_id") and not item.get("playlist_item_id") for item in job_items
+            ),
             "estimated_quota": quota.get("estimated_units", {}),
             "preview_digest": input_digest(snapshot),
             "items": job_items,

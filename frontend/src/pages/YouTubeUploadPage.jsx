@@ -50,6 +50,164 @@ function errorText(error, fallback = '操作失敗，請稍後重試。') {
   return error?.message || fallback;
 }
 
+function numericValue(value, fallback = null) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function firstBoolean(...values) {
+  return values.find((value) => typeof value === 'boolean');
+}
+
+function quotaMetric(quota, bucket, names, fallback = null) {
+  const bucketData = quota?.[bucket] || {};
+  const candidates = names.flatMap((name) => [
+    bucketData?.[name],
+    bucketData?.[`${name}_units`],
+    typeof quota?.[name] === 'object' ? quota[name]?.[bucket] : undefined,
+    typeof quota?.[`${name}_units`] === 'object' ? quota[`${name}_units`]?.[bucket] : undefined,
+  ]);
+  return numericValue(candidates.find((value) => value !== undefined && value !== null), fallback);
+}
+
+function formatUnits(value) {
+  const number = numericValue(value, 0);
+  return number.toLocaleString('zh-TW');
+}
+
+function resetLabel(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-TW');
+}
+
+function youtubeSlotLabel(slot) {
+  if (slot === 'primary') return '主要授權組合';
+  if (slot === 'secondary') return '次要授權組合';
+  return slot || '—';
+}
+
+function quotaReason(quota, general, videoUploads) {
+  const explicitReason = quota?.create_reason
+    || quota?.can_start_reason
+    || quota?.job_reason
+    || quota?.reason
+    || quota?.blocked_reason
+    || general?.create_reason
+    || general?.reason
+    || videoUploads?.create_reason
+    || videoUploads?.reason;
+  if (explicitReason) return explicitReason;
+
+  const generalAvailable = numericValue(general?.effective_available_units);
+  const generalRequired = quotaMetric(quota, 'general', ['remaining_required', 'job_required', 'create_required'], numericValue(general?.projected_units, 0));
+  if (generalAvailable !== null && generalRequired > generalAvailable) {
+    return `General 配額不足：建立工作還需要 ${formatUnits(generalRequired)} units，目前可用 ${formatUnits(generalAvailable)} units。`;
+  }
+
+  const uploadAvailable = numericValue(videoUploads?.effective_available_units);
+  const uploadRequired = quotaMetric(quota, 'video_uploads', ['remaining_required', 'job_required', 'create_required'], numericValue(videoUploads?.projected_units, 0));
+  if (uploadAvailable !== null && uploadRequired > uploadAvailable) {
+    return `Video Uploads 配額不足：需要 ${formatUnits(uploadRequired)} units，目前可用 ${formatUnits(uploadAvailable)} units。`;
+  }
+  return '後端尚未確認這份預覽可以建立背景工作。';
+}
+
+export function getYoutubeUploadQuotaDecision(preview) {
+  const quota = preview?.quota || {};
+  const general = quota.general || {};
+  const videoUploads = quota.video_uploads || {};
+  const uploadable = numericValue(preview?.summary?.uploadable, 0);
+  const slot = preview?.youtube?.slot || preview?.youtube_slot || '';
+  const snapshotSlot = preview?.preview_snapshot?.youtube_slot || '';
+  const slotValid = Boolean(slot) && (!snapshotSlot || snapshotSlot === slot);
+  const previewCanExecute = firstBoolean(
+    preview?.preview_can_execute,
+    preview?.preview_can_complete,
+    preview?.preview?.can_execute,
+    preview?.preview?.can_complete,
+    quota.preview_can_execute,
+    quota.preview_can_complete,
+  ) ?? preview?.status === 'preview_ready';
+  const explicitCreateCanExecute = firstBoolean(
+    preview?.can_start,
+    quota.can_start,
+    preview?.create_can_execute,
+    preview?.create_can_complete,
+    preview?.create?.can_execute,
+    preview?.create?.can_complete,
+    quota.can_create,
+    quota.create_can_execute,
+    quota.create_can_complete,
+  );
+  const previewRead = {
+    general: quotaMetric(quota, 'general', ['preview_read', 'preview_reads'], quotaMetric(quota, 'general', ['already_spent'], 0)),
+    video_uploads: quotaMetric(quota, 'video_uploads', ['preview_read', 'preview_reads'], quotaMetric(quota, 'video_uploads', ['already_spent'], 0)),
+  };
+  const jobRequired = {
+    general: quotaMetric(quota, 'general', ['remaining_required', 'job_required', 'create_required'], numericValue(general.projected_units, 0)),
+    video_uploads: quotaMetric(quota, 'video_uploads', ['remaining_required', 'job_required', 'create_required'], numericValue(videoUploads.projected_units, 0)),
+  };
+  const total = {
+    general: quotaMetric(quota, 'general', ['total', 'projected_full_workflow', 'projected_with_preview_reads'], previewRead.general + jobRequired.general),
+    video_uploads: quotaMetric(quota, 'video_uploads', ['total', 'projected_full_workflow'], previewRead.video_uploads + jobRequired.video_uploads),
+  };
+  const generalRequired = numericValue(general.create_required_units, jobRequired.general);
+  const uploadRequired = numericValue(videoUploads.create_required_units, jobRequired.video_uploads);
+  const generalAvailable = numericValue(general.effective_available_units);
+  const uploadAvailable = numericValue(videoUploads.effective_available_units);
+  const bucketsFit = generalAvailable !== null && uploadAvailable !== null
+    ? generalRequired <= generalAvailable && uploadRequired <= uploadAvailable
+    : false;
+  const reportedBucketsCanComplete = general.can_complete !== false && videoUploads.can_complete !== false;
+  const canCreate = slotValid && (explicitCreateCanExecute ?? (
+    previewCanExecute
+    && quota.can_complete === true
+    && reportedBucketsCanComplete
+    && bucketsFit
+  ));
+  const confirmedExhausted = Boolean(
+    quota.confirmed_by_google
+      || quota.state === 'confirmed_exhausted'
+      || general.confirmed_by_google
+      || videoUploads.confirmed_by_google,
+  );
+
+  return {
+    slot,
+    snapshotSlot,
+    slotValid,
+    slotReason: preview?.youtube?.slot_reason || preview?.youtube?.reason || '',
+    previewCanExecute,
+    canCreate: Boolean(canCreate),
+    canStart: Boolean(uploadable > 0 && canCreate),
+    uploadable,
+    confirmedExhausted,
+    general,
+    videoUploads,
+    previewRead,
+    jobRequired,
+    total,
+    estimated: quota.estimated_units || {},
+    reason: !slotValid
+      ? (slot ? `預覽 slot（${slot}）與 snapshot slot（${snapshotSlot || '未提供'}）不一致，無法安全建立工作。` : '後端未回傳實際 YouTube slot，無法安全建立工作。')
+      : uploadable <= 0
+      ? '沒有可上傳的項目。'
+      : canCreate
+        ? ''
+        : `${quotaReason(quota, general, videoUploads)}${preview?.youtube?.slot_reason ? `（slot：${preview.youtube.slot_reason}）` : ''}`,
+    resetAt: quota.reset_at || general.reset_at || videoUploads.reset_at || '',
+    requiresCreateRecheck: previewCanExecute && explicitCreateCanExecute === undefined && quota.can_complete === true,
+  };
+}
+
+function isRepreviewRequired(error) {
+  return ['stale_preview', 'youtube_quota_no_available_slot', 'youtube_quota_exhausted', 'youtube_quota_safety_blocked'].includes(error?.code)
+    || error?.status === 409
+    || error?.status === 429;
+}
+
 export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiveTab }) {
   const toast = useToast();
   const [driveSource, setDriveSource] = useState('');
@@ -58,6 +216,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
   const [loading, setLoading] = useState(false);
   const [jobAction, setJobAction] = useState(null);
   const [error, setError] = useState('');
+  const [needsPreview, setNeedsPreview] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
   const driveScopeReady = authUser?.google_scopes?.drive_readonly !== false
@@ -67,7 +226,8 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
     return accountKey ? `creator-tools:youtube-upload-job:${accountKey}` : '';
   }, [authUser?.email, authUser?.sub]);
   const playlistId = preview?.playlist?.id || sysSettings.default_playlist_id || '';
-  const canStart = Boolean(preview?.preview_token && preview?.preview_snapshot && preview?.summary?.uploadable > 0 && preview?.quota?.can_complete);
+  const quotaDecision = useMemo(() => getYoutubeUploadQuotaDecision(preview), [preview]);
+  const canStart = Boolean(preview?.preview_token && preview?.preview_snapshot && quotaDecision.canStart && quotaDecision.previewCanExecute && !needsPreview);
   const jobActive = ACTIVE_JOB_STATUSES.has(job?.status);
   const currentItem = useMemo(() => {
     const index = job?.current_index;
@@ -149,6 +309,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
     if (!driveSource.trim() || loading || jobActive) return;
     setLoading(true);
     setError('');
+    setNeedsPreview(false);
     setPreview(null);
     try {
       const response = await api.previewYoutubeDriveUpload(driveSource.trim());
@@ -173,6 +334,10 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
       setJob(response);
       toast.success(response.status === 'completed' ? '沒有新的影片需要上傳' : '上傳工作已建立，會在背景依序處理');
     } catch (startError) {
+      if (isRepreviewRequired(startError)) {
+        setPreview(null);
+        setNeedsPreview(true);
+      }
       setError(errorText(startError, '無法建立背景上傳工作。'));
     } finally {
       setJobAction(null);
@@ -228,6 +393,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
         </StatusMessage>
       )}
       {error && <StatusMessage tone="error" title="上傳流程無法繼續"><span>{error}</span></StatusMessage>}
+      {needsPreview && <StatusMessage tone="warning" title="請重新預覽後再建立工作"><span>配額、slot 或 Drive 內容可能已變更；請重新解析 Drive 內容，確認後端最新的可執行狀態。</span></StatusMessage>}
 
       <form className="glass-panel card-padding card-stack" onSubmit={loadPreview}>
         <div>
@@ -264,14 +430,29 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
               <h2 className="panel-title"><CheckCircle2 size={19} /> 預覽結果</h2>
               <p className="panel-description">{preview.source?.name || preview.source?.id} ／ {preview.summary?.uploadable || 0} 個項目可上傳。</p>
             </div>
-            <span className="badge badge-connected">slot：{preview.youtube?.slot || '—'}</span>
+            <div className="upload-preview-routing">
+              <span className="badge badge-connected">實際 slot：{youtubeSlotLabel(quotaDecision.slot)}</span>
+              {quotaDecision.slot && <small>slot id：{quotaDecision.slot}</small>}
+              {quotaDecision.slotReason && <small>{quotaDecision.slotReason}</small>}
+            </div>
           </div>
 
           <div className="responsive-grid upload-quota-grid">
-            <div className="glass-panel upload-quota-card"><strong>Video Uploads</strong><span>{preview.quota?.video_uploads?.projected_units || 0} / {preview.quota?.video_uploads?.limit || 100}</span><small>可用 {preview.quota?.video_uploads?.effective_available_units ?? '—'} units</small></div>
-            <div className="glass-panel upload-quota-card"><strong>General</strong><span>{preview.quota?.general?.projected_with_preview_reads || 0} units</span><small>可用 {preview.quota?.general?.effective_available_units ?? '—'} units（含驗證讀取估算）</small></div>
+            <div className={`glass-panel upload-quota-card${quotaDecision.videoUploads.can_complete === false ? ' upload-quota-card-blocked' : ''}`}>
+              <strong>Video Uploads</strong>
+              <span>工作成本 {formatUnits(quotaDecision.jobRequired.video_uploads)} / {formatUnits(quotaDecision.videoUploads.limit || 100)}</span>
+              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.video_uploads)} · 完整流程 {formatUnits(quotaDecision.total.video_uploads)} · 可用 {quotaDecision.videoUploads.effective_available_units ?? '—'} units</small>
+            </div>
+            <div className={`glass-panel upload-quota-card${quotaDecision.general.can_complete === false ? ' upload-quota-card-blocked' : ''}`}>
+              <strong>General</strong>
+              <span>工作成本 {formatUnits(quotaDecision.jobRequired.general)} units</span>
+              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.general)} · 完整流程 {formatUnits(quotaDecision.total.general)} · 可用 {quotaDecision.general.effective_available_units ?? '—'} units</small>
+            </div>
           </div>
-          {!preview.quota?.can_complete && <StatusMessage tone="warning" title="目前 quota 不足"><span>工作尚未建立；請等待 quota 重設，或使用仍有足夠雙 bucket 的 slot。</span></StatusMessage>}
+          <div className="upload-quota-total">本次完整流程估算：General {formatUnits(quotaDecision.total.general ?? quotaDecision.estimated.general)} · Video Uploads {formatUnits(quotaDecision.total.video_uploads ?? quotaDecision.estimated.video_uploads)} · 合計 {formatUnits(quotaDecision.total.general + quotaDecision.total.video_uploads)} units</div>
+          {quotaDecision.confirmedExhausted && <StatusMessage tone="error" title="Google 已確認 quota 耗盡"><span>目前 slot 已被 Google 確認 quotaExceeded；官方重設{resetLabel(quotaDecision.resetAt) ? `（${resetLabel(quotaDecision.resetAt)}）` : ''}後，請重新解析 Drive 內容。</span></StatusMessage>}
+          {!quotaDecision.confirmedExhausted && (!quotaDecision.previewCanExecute || !quotaDecision.canStart) && <StatusMessage tone="warning" title={quotaDecision.previewCanExecute ? '預覽已完成，但目前不可建立工作' : '預覽目前不可執行'}><span>{quotaDecision.reason} 請重新預覽以取得最新 quota 與 slot 判斷。</span></StatusMessage>}
+          {quotaDecision.previewCanExecute && quotaDecision.canStart && <div className="upload-quota-ready">預覽已驗證，但建立前仍會重新檢查 quota、slot 與 Drive 內容。</div>}
 
           <div className="upload-preview-table-wrap">
             <table className="upload-preview-table">

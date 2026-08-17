@@ -2509,6 +2509,35 @@ h1, h2, h3, h4, h5, h6 {
   overflow-wrap: anywhere;
 }
 
+.upload-quota-card-blocked {
+  border-color: #76572f;
+  background: rgba(118, 87, 47, 0.16);
+}
+
+.upload-quota-total,
+.upload-quota-ready {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.upload-quota-ready {
+  color: #9ed6b1;
+}
+
+.upload-preview-routing {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: right;
+}
+
+.upload-preview-routing small {
+  max-width: 22rem;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
 .upload-preview-table-wrap {
   max-width: 100%;
   overflow-x: auto;

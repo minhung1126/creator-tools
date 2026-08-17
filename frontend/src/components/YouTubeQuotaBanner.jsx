@@ -135,6 +135,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, ac
   const stateKey = Object.prototype.hasOwnProperty.call(STATE_META, currentUsage?.state) ? currentUsage.state : 'normal';
   const stateMeta = STATE_META[stateKey];
   const StateIcon = currentUsage?.confirmed_by_google ? ShieldAlert : stateMeta.Icon;
+  const usageSlot = currentUsage?.slot || currentUsage?.youtube_slot || currentUsage?.youtube?.slot || selectedSlot;
   const used = Number(currentUsage?.estimated_used_units ?? 0);
   const limit = Number(currentUsage?.configured_project_limit ?? 10000);
   const effective = Number(currentUsage?.effective_available_units ?? 0);
@@ -151,6 +152,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, ac
             <div className="quota-title-row">
               <strong>YouTube 配額今日估算用量</strong>
               <span className="badge quota-state-badge">{stateMeta.label}</span>
+              <span className="badge badge-info quota-slot-actual">資料 slot：{slotLabel(usageSlot)}</span>
               <select aria-label="YouTube 授權組合" className="form-select quota-slot-select" value={selectedSlot} onChange={handleSlotChange}>
                 {slotOptions.map((slot) => <option value={slot} key={slot}>{slotLabel(slot)}</option>)}
               </select>
@@ -177,6 +179,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, ac
 
       {confirmed && <div className="quota-alert quota-alert-error"><AlertTriangle size={16} aria-hidden="true" /><span>Google 已確認 `quotaExceeded`；系統已停止新的 YouTube 請求，直到官方重設。</span></div>}
       {!confirmed && stateKey === 'safety_blocked' && <div className="quota-alert quota-alert-warning">Creator Tools 已達自訂安全上限，等待官方重設後自動恢復。</div>}
+      {!confirmed && currentUsage?.reason && <div className="quota-alert quota-alert-warning"><AlertTriangle size={16} aria-hidden="true" /><span>{currentUsage.reason}</span></div>}
 
       {!compact && currentUsage?.methods?.length > 0 && <div className="quota-methods">{currentUsage.methods.map((item) => <span key={`${item.method}-${item.cost_per_call}`} className="badge badge-info">{item.method}: {item.calls} 次 × {item.cost_per_call} = {units(item.units)} 單位</span>)}</div>}
       {!compact && <p className="quota-note">{currentUsage?.note || '本數字只統計 Creator Tools，屬於估算，不是 Google Cloud 專案的即時總用量。'}{currentUsage?.quota_rules_verified_at ? ` 官方規則核對日期：${currentUsage.quota_rules_verified_at}。` : ''}</p>}

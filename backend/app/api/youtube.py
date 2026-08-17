@@ -135,7 +135,9 @@ def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = No
         ]
     elif operation == "youtube.publish_cleanup":
         breakdown = [
-            {"method": "playlistItems.list", "calls": pages, "units": pages},
+            # The workflow reads To-Post once for the preview snapshot and a
+            # second time immediately before the first write.
+            {"method": "playlistItems.list", "calls": pages * 2, "units": pages * 2},
             {"method": "videos.list", "calls": pages, "units": pages},
             {"method": "videos.update", "calls": count, "units": count * 50},
             {"method": "playlistItems.delete", "calls": count, "units": count * 50},
@@ -160,7 +162,7 @@ def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = No
         number_pages = math.ceil(number / 50) if number else 0
         if operation == "youtube.metadata_update":
             return number_pages + number * 50
-        return number_pages * 2 + number * 100
+        return number_pages * 3 + number * 100
 
     max_items_today = 0
     for number in range(1, count + 1):

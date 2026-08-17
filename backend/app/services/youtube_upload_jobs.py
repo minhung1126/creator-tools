@@ -25,6 +25,7 @@ from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
 from backend.app.services.youtube_service import (
     ResumableUploadError,
+    fetch_playlist_items,
     insert_video_into_playlist,
     upload_video_resumable,
 )
@@ -119,6 +120,14 @@ class UploadJobStore:
                         continue
                     if item.get("status") in {"downloading", "uploading"}:
                         item["status"] = "uploaded" if item.get("youtube_video_id") else "pending"
+                job["needs_reconciliation"] = bool(
+                    job.get("needs_reconciliation")
+                    or any(
+                        item.get("youtube_video_id") and not item.get("playlist_item_id")
+                        for item in job.get("items", [])
+                        if isinstance(item, dict)
+                    )
+                )
                 normalized[job_id] = job
             self._data = {"version": JOB_SCHEMA_VERSION, "jobs": normalized}
             if normalized:
@@ -403,6 +412,7 @@ class YouTubeUploadWorker:
                 estimated_units=int(job.get("estimated_quota", {}).get("total") or 0),
                 preferred_slot=job.get("youtube_preferred_slot", youtube_slot),
             )
+            self._reconcile_playlist_if_needed(context, owner_sub, job_id)
             for index, item in enumerate(job.get("items", [])):
                 current = self.store.get(owner_sub, job_id)
                 if not current:
@@ -431,6 +441,47 @@ class YouTubeUploadWorker:
             )
         finally:
             _remove_temp_dir(self.store.temp_root, job_id)
+
+    def _reconcile_playlist_if_needed(
+        self,
+        context: YouTubeRequestContext,
+        owner_sub: str,
+        job_id: str,
+    ) -> None:
+        """Resolve uncertain playlist inserts before attempting another insert."""
+
+        job = self.store.get(owner_sub, job_id)
+        if not job:
+            return
+        unresolved = [
+            item
+            for item in job.get("items", [])
+            if item.get("youtube_video_id") and not item.get("playlist_item_id")
+        ]
+        if not unresolved and not job.get("needs_reconciliation"):
+            return
+
+        playlist_items = _with_retries(
+            lambda: fetch_playlist_items(context, str(job["playlist_id"])),
+            stage="playlist_reconcile",
+        )
+        by_video_id: dict[str, str] = {}
+        for playlist_item in playlist_items:
+            content = playlist_item.get("contentDetails") or {}
+            video_id = str(content.get("videoId") or "").strip()
+            playlist_item_id = str(playlist_item.get("id") or "").strip()
+            if video_id and playlist_item_id:
+                by_video_id.setdefault(video_id, playlist_item_id)
+
+        def apply_reconciliation(current: dict[str, Any]) -> None:
+            for item in current.get("items", []):
+                video_id = str(item.get("youtube_video_id") or "").strip()
+                playlist_item_id = by_video_id.get(video_id)
+                if video_id and playlist_item_id and not item.get("playlist_item_id"):
+                    item.update({"playlist_item_id": playlist_item_id, "status": ITEM_DONE, "error": None})
+            current["needs_reconciliation"] = False
+
+        self.store.update_internal(job_id, apply_reconciliation)
 
     def _cancel_remaining(self, owner_sub: str, job_id: str, start_index: int) -> None:
         def cancel(current: dict[str, Any]) -> None:
@@ -528,6 +579,8 @@ class YouTubeUploadWorker:
                 stage="playlist",
             )
             playlist_item_id = str(playlist_response.get("id") or "").strip()
+            if not playlist_item_id:
+                raise ValueError("YouTube 播放清單插入沒有回傳項目 ID。")
             self.store.update_internal(
                 job_id,
                 lambda current, item_index=index, item_id=playlist_item_id: current.update(
@@ -552,6 +605,7 @@ class YouTubeUploadWorker:
                             "status": "paused" if quota_error else "failed",
                             "error": error,
                             "current_index": item_index,
+                            "needs_reconciliation": bool(uploaded_id),
                             "items": _set_item_fields(
                                 current.get("items", []),
                                 item_index,

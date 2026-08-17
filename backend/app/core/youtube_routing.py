@@ -33,6 +33,7 @@ QUOTA_FAILURE_REASONS = frozenset(
 )
 UPLOAD_GENERAL_COST = 50
 UPLOAD_QUOTA_COST = 1
+UPLOAD_PLAYLIST_VALIDATION_READS = 2
 
 
 @dataclass(frozen=True)
@@ -283,21 +284,71 @@ def choose_youtube_slot(
     raise _routing_failure(candidates, preferred_slot)
 
 
-def estimate_youtube_upload_quota(item_count: int, insertion_count: int | None = None) -> dict[str, int]:
-    """Return both bucket costs for a Drive-to-YouTube upload job.
+def plan_youtube_upload_quota(
+    item_count: int,
+    insertion_count: int | None = None,
+    *,
+    general_reads_spent: int = 0,
+) -> dict[str, Any]:
+    """Return stage and complete-workflow costs for a Drive upload.
 
-    A retry may only need playlist insertion for videos that already have a
-    YouTube ID, so the upload and insertion counts are independently tracked.
-    The one-argument form remains the all-new-video estimate.
+    A complete Drive upload workflow performs two one-unit playlist
+    validations: one for preview and one before creating the durable job.
+    ``general_reads_spent`` makes the stage explicit for callers that already
+    performed one of those reads.  Uploads and playlist insertions are tracked
+    independently so a resume-only job (``upload_count=0``) never reserves
+    ``video_uploads`` quota.
     """
 
     upload_count = max(int(item_count or 0), 0)
     playlist_count = upload_count if insertion_count is None else max(int(insertion_count or 0), 0)
-    return {
-        "video_uploads": upload_count * UPLOAD_QUOTA_COST,
-        "general": 1 + playlist_count * UPLOAD_GENERAL_COST,
-        "total": upload_count * UPLOAD_QUOTA_COST + 1 + playlist_count * UPLOAD_GENERAL_COST,
+    reads_spent = max(int(general_reads_spent or 0), 0)
+    validation_reads = max(UPLOAD_PLAYLIST_VALIDATION_READS - reads_spent, 0)
+    complete_general = UPLOAD_PLAYLIST_VALIDATION_READS + playlist_count * UPLOAD_GENERAL_COST
+    video_uploads = upload_count * UPLOAD_QUOTA_COST
+    complete_workflow = {
+        "general": complete_general,
+        "video_uploads": video_uploads,
+        "total": complete_general + video_uploads,
     }
+    # The first validation belongs to preview; the second validation and all
+    # uploads/insertions belong to job execution.  Once a read is spent, the
+    # remaining_required value is what routing must admit against quota.
+    preview_read = {"general": 1 if reads_spent == 0 else 0, "video_uploads": 0}
+    job_required_general = max(complete_general - max(reads_spent, 1), 0)
+    job_required = {
+        "general": job_required_general,
+        "video_uploads": video_uploads,
+    }
+    remaining_required = {
+        "general": validation_reads + playlist_count * UPLOAD_GENERAL_COST,
+        "video_uploads": video_uploads,
+    }
+    return {
+        "preview_read": preview_read,
+        "job_required": job_required,
+        "remaining_required": remaining_required,
+        "complete_workflow": complete_workflow,
+        "general": complete_general,
+        "video_uploads": video_uploads,
+        "total": complete_workflow["total"],
+        "remaining_total": sum(remaining_required.values()),
+    }
+
+
+def estimate_youtube_upload_quota(
+    item_count: int,
+    insertion_count: int | None = None,
+    *,
+    general_reads_spent: int = 0,
+) -> dict[str, Any]:
+    """Return the complete-workflow estimate plus its stage contract."""
+
+    return plan_youtube_upload_quota(
+        item_count,
+        insertion_count,
+        general_reads_spent=general_reads_spent,
+    )
 
 
 def _upload_candidate(
@@ -308,6 +359,7 @@ def _upload_candidate(
     item_count: int,
     upload_count: int | None = None,
     insertion_count: int | None = None,
+    general_reads_spent: int = 0,
     check_quota: bool,
 ) -> _Candidate:
     candidate = _candidate(
@@ -319,20 +371,28 @@ def _upload_candidate(
     )
     if not candidate.eligible or not check_quota:
         return candidate
-    costs = estimate_youtube_upload_quota(
+    costs = plan_youtube_upload_quota(
         item_count if upload_count is None else upload_count,
         item_count if insertion_count is None else insertion_count,
-    )
+        general_reads_spent=general_reads_spent,
+    )["remaining_required"]
     try:
-        general = get_youtube_quota_tracker(slot).get_usage()
-        uploads = get_youtube_upload_quota_tracker(slot).get_usage()
+        general = get_youtube_quota_tracker(slot).get_usage() if costs["general"] else {}
+        uploads = get_youtube_upload_quota_tracker(slot).get_usage() if costs["video_uploads"] else {}
     except YouTubeQuotaUnavailable as exc:
         return _Candidate(slot, candidate.credentials, candidate.channel_id, False, exc.code, exc.reset_at)
-    if int(general.get("effective_available_units") or 0) < costs["general"]:
+    if costs["general"] and int(general.get("effective_available_units") or 0) < costs["general"]:
         return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", general.get("reset_at"))
-    if int(uploads.get("effective_available_units") or 0) < costs["video_uploads"]:
+    if costs["video_uploads"] and int(uploads.get("effective_available_units") or 0) < costs["video_uploads"]:
         return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", uploads.get("reset_at"))
-    return _Candidate(slot, candidate.credentials, candidate.channel_id, True, "available", general.get("reset_at"))
+    return _Candidate(
+        slot,
+        candidate.credentials,
+        candidate.channel_id,
+        True,
+        "available",
+        general.get("reset_at") or uploads.get("reset_at"),
+    )
 
 
 def choose_youtube_upload_slot(
@@ -343,8 +403,15 @@ def choose_youtube_upload_slot(
     upload_count: int | None = None,
     insertion_count: int | None = None,
     slot_hint: str | None = None,
+    general_reads_spent: int | None = None,
 ) -> YouTubeSlotDecision:
-    """Select one slot that can fit both the upload and general buckets."""
+    """Select one slot that can fit both upload buckets.
+
+    ``general_reads_spent`` is the stage contract shared with the upload
+    preview/job flow.  For compatibility with the existing create-job caller,
+    a pinned request with ``item_count=0`` means the preview validation has
+    already been spent and therefore has one read left to reserve.
+    """
 
     routing_mode = get_account_youtube_routing_mode(owner_sub)
     preferred_slot = get_account_active_slot(owner_sub) if routing_mode == "manual" else "primary"
@@ -357,6 +424,9 @@ def choose_youtube_upload_slot(
             normalized_hint = normalize_youtube_slot(slot_hint)
         except ValueError as exc:
             raise http_error(400, "youtube_slot_invalid", "不支援的 YouTube OAuth slot。") from exc
+    if general_reads_spent is None:
+        general_reads_spent = 1 if normalized_hint and normalized_count == 0 else 0
+    normalized_reads_spent = max(int(general_reads_spent or 0), 0)
     if _channel_mismatch(owner_sub):
         raise http_error(
             409,
@@ -373,6 +443,7 @@ def choose_youtube_upload_slot(
             item_count=normalized_count,
             upload_count=normalized_upload_count,
             insertion_count=normalized_insertion_count,
+            general_reads_spent=normalized_reads_spent,
             check_quota=True,
         )]
         if not candidates[0].eligible:
@@ -381,7 +452,11 @@ def choose_youtube_upload_slot(
             slot=normalized_hint,
             preferred_slot=preferred_slot,
             routing_mode=routing_mode,
-            estimated_units=estimate_youtube_upload_quota(normalized_upload_count, normalized_insertion_count)["total"],
+            estimated_units=estimate_youtube_upload_quota(
+                normalized_upload_count,
+                normalized_insertion_count,
+                general_reads_spent=normalized_reads_spent,
+            )["total"],
             reason="preview_pinned_slot",
             credentials=candidates[0].credentials,
             channel_id=candidates[0].channel_id,
@@ -396,6 +471,7 @@ def choose_youtube_upload_slot(
             item_count=normalized_count,
             upload_count=normalized_upload_count,
             insertion_count=normalized_insertion_count,
+            general_reads_spent=normalized_reads_spent,
             check_quota=True,
         )
         for slot in candidate_slots
@@ -410,7 +486,11 @@ def choose_youtube_upload_slot(
             slot=candidate.slot,
             preferred_slot=preferred_slot,
             routing_mode=routing_mode,
-            estimated_units=estimate_youtube_upload_quota(normalized_upload_count, normalized_insertion_count)["total"],
+            estimated_units=estimate_youtube_upload_quota(
+                normalized_upload_count,
+                normalized_insertion_count,
+                general_reads_spent=normalized_reads_spent,
+            )["total"],
             reason=reason,
             credentials=candidate.credentials,
             channel_id=candidate.channel_id,
@@ -424,4 +504,6 @@ __all__ = [
     "choose_youtube_upload_slot",
     "estimate_youtube_request_units",
     "estimate_youtube_upload_quota",
+    "plan_youtube_upload_quota",
+    "UPLOAD_PLAYLIST_VALIDATION_READS",
 ]
