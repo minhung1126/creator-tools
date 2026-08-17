@@ -4,6 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+ARG APP_COMMIT_SHA=development
+ENV VITE_APP_COMMIT_SHA=${APP_COMMIT_SHA}
 RUN npm run build
 
 # Step 2: Build Python FastAPI Backend

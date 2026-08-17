@@ -56,6 +56,31 @@ docker compose logs -f creator-tools
 
 `docker compose config` 需要先存在 `.env`，也可用來確認 interpolation 與 volume 路徑。Compose 使用 `./data:/app/data` 保存執行期資料。
 
+## 前端快取與版本驗證
+
+FastAPI 會對首頁及其他 HTML 回傳：
+
+```text
+Cache-Control: no-cache, max-age=0, must-revalidate
+```
+
+Vite 產生的 `/assets/*-<hash>.js` 與 `/assets/*-<hash>.css` 則回傳一年 immutable 快取。若前方使用 Cloudflare 或其他 CDN，請確認 Browser Cache TTL 沒有覆寫 origin 的 HTML header，也不要對首頁套用一年 immutable 規則；不需要使用 `Clear-Site-Data`。
+
+部署後至少確認：
+
+```powershell
+$base = "https://your-domain.example"
+(Invoke-WebRequest "$base/" -UseBasicParsing).Headers['Cache-Control']
+$html = (Invoke-WebRequest "$base/" -UseBasicParsing).Content
+$assets = [regex]::Matches($html, '/assets/[^"'']+\.(?:js|css)') | ForEach-Object Value | Sort-Object -Unique
+foreach ($asset in $assets) {
+  $response = Invoke-WebRequest "$base$asset" -UseBasicParsing
+  "$asset :: $($response.StatusCode) :: $($response.Headers['Content-Type']) :: $($response.Headers['Cache-Control'])"
+}
+```
+
+`APP_COMMIT_SHA` 會同時傳給 backend runtime 與 frontend builder 的 `VITE_APP_COMMIT_SHA`；health API 的 `commit_sha` 可用來辨識前後端版本是否一致。部署策略應盡量保留至少前一版 hashed assets；若暫時無法保留，首頁的 no-cache/revalidation 規則不可被 CDN 覆寫。
+
 ## 健康檢查與資料保存
 
 - Health endpoint：`/api/v1/health`。Compose healthcheck 會以 `curl` 檢查 HTTP 200；部署後仍需確認 JSON 的 `ready` 為 `true`。

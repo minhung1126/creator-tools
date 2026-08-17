@@ -11,8 +11,31 @@ export default function ApiHealthPage({ authUser }) {
     : ['primary'];
 
   useEffect(() => {
-    const timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30000);
-    return () => window.clearInterval(timer);
+    let timer = null;
+    const stopTimer = () => {
+      if (timer === null) return;
+      window.clearInterval(timer);
+      timer = null;
+    };
+    const startTimer = () => {
+      if (timer !== null || document.hidden) return;
+      timer = window.setInterval(() => setRefreshKey((key) => key + 1), 30000);
+    };
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopTimer();
+        return;
+      }
+      setRefreshKey((key) => key + 1);
+      startTimer();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    startTimer();
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      stopTimer();
+    };
   }, []);
 
   return (

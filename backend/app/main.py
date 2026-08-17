@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -17,6 +18,23 @@ from backend.app.core.error_contract import normalize_http_detail, validation_fi
 logger = logging.getLogger(__name__)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+HTML_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
+HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
+HASHED_FRONTEND_ASSET_RE = re.compile(r"-[A-Za-z0-9_-]{8,}\.(?:js|css)$", re.IGNORECASE)
+
+
+def frontend_cache_control(path: str, content_type: str | None) -> str | None:
+    """Return the cache policy for a frontend response, if it is a frontend asset."""
+    media_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if media_type == "text/html":
+        return HTML_CACHE_CONTROL
+
+    is_script_or_style = media_type in {"application/javascript", "text/javascript", "text/css"}
+    filename = Path(path).name
+    if path.startswith("/assets/") and is_script_or_style and HASHED_FRONTEND_ASSET_RE.search(filename):
+        return HASHED_ASSET_CACHE_CONTROL
+    return None
 
 
 app = FastAPI(
@@ -108,6 +126,9 @@ async def security_headers(request, call_next):
     )
     if settings.is_production:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    cache_control = frontend_cache_control(request.url.path, response.headers.get("content-type"))
+    if cache_control:
+        response.headers["Cache-Control"] = cache_control
     return response
 
 

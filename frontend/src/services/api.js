@@ -207,12 +207,13 @@ async function request(endpoint, options = {}) {
 }
 
 export const api = {
+  getHealth: () => request('/health', { cache: 'no-store' }),
   getAuthConfig: () => request('/auth/config'),
   getAuthUrl: () => request('/auth/url'),
   getYoutubeAuthUrl: (slot = 'primary') => request(`/auth/youtube/${encodeURIComponent(slot)}/url`),
   disconnectYoutube: (slot = 'primary', { confirm = false } = {}) => request(`/auth/youtube/${encodeURIComponent(slot)}/disconnect${confirm ? '?confirm=true' : ''}`, { method: 'POST' }),
   activateYoutubeSlot: (slot) => request(`/auth/youtube/${encodeURIComponent(slot)}/activate`, { method: 'POST' }),
-  getUserStatus: async () => hideUnavailableSecondarySlot(await request('/auth/user')),
+  getUserStatus: async () => hideUnavailableSecondarySlot(await request('/auth/user', { cache: 'no-store' })),
   logout: () => request('/auth/logout', { method: 'POST' }),
   getSystemInfo: () => request('/settings/system'),
   getSharedSettings: () => request('/settings/shared'),
