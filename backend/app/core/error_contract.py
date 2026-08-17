@@ -66,6 +66,7 @@ def error_detail(
     retry_after_seconds: int | None = None,
     reset_at: str | None = None,
     youtube_slot: str | None = None,
+    reauthorization_required: bool = False,
 ) -> dict[str, Any]:
     """Build the only error detail shape that may be returned by the API."""
 
@@ -89,6 +90,8 @@ def error_detail(
             detail["reset_at"] = safe_reset
     if youtube_slot in {"primary", "secondary"}:
         detail["youtube_slot"] = youtube_slot
+    if reauthorization_required:
+        detail["reauthorization_required"] = True
     return detail
 
 
@@ -102,6 +105,7 @@ def http_error(
     retry_after_seconds: int | None = None,
     reset_at: str | None = None,
     youtube_slot: str | None = None,
+    reauthorization_required: bool = False,
     headers: Mapping[str, str] | None = None,
 ) -> HTTPException:
     """Return a FastAPI exception carrying a sanitized contract detail."""
@@ -116,6 +120,7 @@ def http_error(
             retry_after_seconds=retry_after_seconds,
             reset_at=reset_at,
             youtube_slot=youtube_slot,
+            reauthorization_required=reauthorization_required,
         ),
         headers=dict(headers) if headers else None,
     )
@@ -161,6 +166,7 @@ def normalize_http_detail(status_code: int, detail: Any) -> dict[str, Any]:
             retry_after_seconds=detail.get("retry_after_seconds"),
             reset_at=detail.get("reset_at"),
             youtube_slot=slot if isinstance(slot, str) else None,
+            reauthorization_required=bool(detail.get("reauthorization_required")),
         )
 
     # Never echo an arbitrary exception/detail string.  It may contain a

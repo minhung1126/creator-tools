@@ -90,7 +90,11 @@ class QuotaEstimateInput(BaseModel):
 
 
 def _resolve_playlist_id(context: YouTubeRequestContext, requested: Optional[str]) -> str:
-    raw_value = requested or get_account_setting(context.owner_sub, "default_playlist_id", "")
+    # The account-level playlist is authoritative.  The request field remains
+    # accepted only as a migration fallback for old clients/accounts that have
+    # never saved the shared setting.
+    configured_value = get_account_setting(context.owner_sub, "default_playlist_id", "")
+    raw_value = configured_value or requested
     if not str(raw_value or "").strip():
         return ""
     playlist_id = normalize_playlist_id(raw_value)

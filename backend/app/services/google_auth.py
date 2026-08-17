@@ -16,11 +16,14 @@ from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
 
 logger = logging.getLogger(__name__)
 
+DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+
 LOGIN_SCOPES = [
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
     "https://www.googleapis.com/auth/userinfo.profile",
     "https://www.googleapis.com/auth/spreadsheets.readonly",
+    DRIVE_READONLY_SCOPE,
 ]
 YOUTUBE_SCOPES = [
     "openid",
@@ -30,6 +33,26 @@ YOUTUBE_SCOPES = [
 ]
 GOOGLE_TOKEN_REFRESH_WINDOW = timedelta(minutes=5)
 _google_refresh_lock = RLock()
+
+
+def has_drive_read_scope(credentials: Credentials | None) -> bool:
+    """Return whether login credentials include the Drive read-only scope."""
+
+    if credentials is None:
+        return False
+    scopes = getattr(credentials, "scopes", None) or []
+    return DRIVE_READONLY_SCOPE in {str(scope).strip() for scope in scopes}
+
+
+def login_scope_status(credentials: Credentials | None) -> dict[str, object]:
+    """Expose only non-sensitive OAuth scope state to the authenticated UI."""
+
+    scopes = [str(scope).strip() for scope in (getattr(credentials, "scopes", None) or []) if str(scope).strip()]
+    return {
+        "scopes": sorted(set(scopes)),
+        "drive_readonly": has_drive_read_scope(credentials),
+        "drive_reauthorization_required": bool(credentials and not has_drive_read_scope(credentials)),
+    }
 
 
 def get_client_config(purpose: str = "login", slot: str = "primary") -> dict:
@@ -201,7 +224,9 @@ def _build_credentials(token_dict: dict, *, purpose: str = "login", slot: str = 
         token_uri=token_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
         client_id=client_id,
         client_secret=client_secret,
-        scopes=token_dict.get("scopes", LOGIN_SCOPES),
+        # A legacy token without a persisted scope list must not be treated as
+        # having the newly added Drive scope; the UI will ask for reauth.
+        scopes=token_dict.get("scopes") or [],
         expiry=parsed_expiry,
     )
 

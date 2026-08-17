@@ -43,7 +43,9 @@ function normalizeConfig(raw, defaults, sysSettings, sharedFilter) {
   const normalizedSharedFilter = sharedFilter?.exists ? normalizeTeamPersonFilter(sharedFilter) : null;
   return {
     spreadsheetId: raw?.spreadsheetId || raw?.spreadsheet_id || sysSettings.default_spreadsheet_id || '',
-    playlistId: raw?.playlistId || raw?.playlist_id || sysSettings.default_playlist_id || '',
+    // Playlist overrides from older draft configs remain readable for
+    // migration, but the account-level shared To-Post setting wins.
+    playlistId: sysSettings.default_playlist_id || raw?.playlistId || raw?.playlist_id || '',
     worksheetName: raw?.worksheetName || raw?.worksheet_name || defaults.worksheet,
     titleColumn: raw?.titleColumn || raw?.title_column || defaults.title,
     descriptionColumn: raw?.descriptionColumn || raw?.description_column || defaults.description,
@@ -215,6 +217,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const [sourceReady, setSourceReady] = useState(false);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [playlistId, setPlaylistId] = useState(initial.playlistId);
+  const sharedPlaylistIdRef = useRef(persistedDefaults.default_playlist_id || '');
   const [worksheets, setWorksheets] = useState([]);
   const [worksheetName, setWorksheetName] = useState(initial.worksheetName);
   const [columns, setColumns] = useState([]);
@@ -342,7 +345,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     try {
       await api.updateYoutubeDraftSettings(videoType, {
         spreadsheet_id: spreadsheetId.trim(),
-        playlist_id: playlistId.trim(),
         worksheet_name: worksheetName,
         title_column: titleColumn,
         description_column: descriptionColumn,
@@ -355,7 +357,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     } finally {
       setConfigSaving(false);
     }
-  }, [authUser, descriptionColumn, playlistId, spreadsheetId, titleColumn, toast, videoType, worksheetName]);
+  }, [authUser, descriptionColumn, spreadsheetId, titleColumn, toast, videoType, worksheetName]);
 
   const applyConfig = useCallback((config) => {
     setSpreadsheetId(config.spreadsheetId);
@@ -414,6 +416,16 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
 
     return () => { cancelled = true; };
   }, [applyConfig, authUser?.email, authUser?.sub, defaults, persistedDefaults, sharedFilter, videoType, remembered.assignments, remembered.bulkPerson, remembered.selectedVideoIds]);
+
+  useEffect(() => {
+    const sharedPlaylistId = persistedDefaults.default_playlist_id || '';
+    if (sharedPlaylistId === sharedPlaylistIdRef.current) return;
+    sharedPlaylistIdRef.current = sharedPlaylistId;
+    if (sharedPlaylistId !== playlistId) {
+      setPlaylistId(sharedPlaylistId);
+      invalidateLoadedVideos();
+    }
+  }, [invalidateLoadedVideos, persistedDefaults.default_playlist_id, playlistId]);
 
   useEffect(() => {
     if (!hydrated) return undefined;
@@ -556,13 +568,6 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setRandomPreview(null);
     setPreviewError('');
     invalidateLoadedVideos();
-  };
-
-  const handlePlaylistChange = (event) => {
-    const nextValue = event.target.value;
-    setPlaylistId(nextValue);
-    markConfigDirty();
-    if (nextValue.trim() !== playlistId.trim()) invalidateLoadedVideos();
   };
 
   useEffect(() => {
@@ -810,9 +815,9 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       </SheetDataSourcePanel>
 
       <div className="glass-panel card-padding playlist-input-panel">
-        <label className="form-label" htmlFor="batch-playlist-id"><PlaySquare size={14} /> 目標播放清單 ID 或網址</label>
-        <SourceLinkInput id="batch-playlist-id" value={playlistId} onChange={handlePlaylistChange} sourceType="youtube-playlist" disabled={executing || loadingVideos} />
-        <p className="section-desc">播放清單與試算表是獨立資料來源；切換播放清單後必須重新讀取影片。</p>
+        <label className="form-label" htmlFor="batch-playlist-id"><PlaySquare size={14} /> 共用 To-Post 播放清單</label>
+        <SourceLinkInput id="batch-playlist-id" value={playlistId} sourceType="youtube-playlist" readOnly disabled={executing || loadingVideos} />
+        <p className="section-desc">此播放清單由 YouTube 設定統一管理；舊版草稿設定中的播放清單 override 會被忽略。</p>
       </div>
 
       <TeamPersonFilterPanel

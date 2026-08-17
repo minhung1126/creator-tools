@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Video, X, Youtube } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Upload, Video, X, Youtube } from 'lucide-react';
 import useAccountWorkState from '../hooks/useAccountWorkState';
 import { youtubeIsConnected } from '../utils/youtubeRouting';
 
-const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
+const youtubeItems = [{ id: 'youtube_video_drafts', label: 'Video 草稿', icon: Clapperboard }, { id: 'youtube_shorts_drafts', label: 'Shorts 草稿', icon: Smartphone }, { id: 'youtube_upload', label: '上傳至 YouTube', icon: Upload }, { id: 'publish_clean', label: '發布草稿並清理清單', icon: Send }, { id: 'youtube_settings', label: 'YouTube 設定', icon: Settings }];
 const sheetItems = [{ id: 'sheet_copy', label: '內容複製', icon: Copy }];
 
 export default function Navbar({ activeTab, setActiveTab, authUser, onLogout, sidebarCollapsed, setSidebarCollapsed }) {

@@ -186,8 +186,8 @@ function YouTubeVideoLink({ videoId }) {
 
 export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
   const toast = useToast();
-  const { value: saved, error: workStateError, save: saveWorkState } = useAccountWorkState('youtube_publish_cleaner', {});
-  const initialPlaylistId = saved?.playlistId || sysSettings.default_playlist_id || '';
+  const { value: saved, error: workStateError } = useAccountWorkState('youtube_publish_cleaner', {});
+  const initialPlaylistId = sysSettings.default_playlist_id || saved?.playlistId || '';
   const [playlistId, setPlaylistId] = useState(initialPlaylistId);
   const [playlistSnapshot, setPlaylistSnapshot] = useState(null);
   const [loadStatus, setLoadStatus] = useState('idle');
@@ -212,6 +212,7 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
 
   const workflowRevisionRef = useRef(0);
   const playlistIdRef = useRef(initialPlaylistId);
+  const sharedPlaylistIdRef = useRef(normalizePlaylistId(sysSettings.default_playlist_id));
   const currentAuthKeyRef = useRef(authKey);
   const currentDataVersionRef = useRef(dataVersion);
   const contextRef = useRef({ authKey, dataVersion });
@@ -249,8 +250,15 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
   }, [authKey, dataVersion, invalidateSnapshot]);
 
   useEffect(() => {
-    saveWorkState({ playlistId });
-  }, [playlistId, saveWorkState]);
+    const sharedPlaylistId = normalizePlaylistId(sysSettings.default_playlist_id);
+    if (sharedPlaylistId === sharedPlaylistIdRef.current) return;
+    sharedPlaylistIdRef.current = sharedPlaylistId;
+    if (sharedPlaylistId !== normalizePlaylistId(playlistIdRef.current)) {
+      playlistIdRef.current = sharedPlaylistId;
+      invalidateSnapshot();
+      setPlaylistId(sharedPlaylistId);
+    }
+  }, [invalidateSnapshot, sysSettings.default_playlist_id]);
 
   const currentSnapshot = snapshotMatches(playlistSnapshot, {
     playlistId: normalizePlaylistId(playlistId),
@@ -533,7 +541,7 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
 
       <div className="glass-panel card-padding toolbar publish-source-panel">
         <div className="form-group publish-source-field">
-          <label className="form-label"><PlaySquare size={14} /> To-Post 播放清單 ID</label>
+          <label className="form-label"><PlaySquare size={14} /> 共用 To-Post 播放清單</label>
           <SourceLinkInput
             type="text"
             value={playlistId}

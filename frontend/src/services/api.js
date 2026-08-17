@@ -253,4 +253,17 @@ export const api = {
   updateYoutubeVideoMetadata: ({ videoId, title, description }) => request('/youtube/video-metadata', { method: 'POST', body: JSON.stringify({ video_id: videoId, title, description }) }),
   batchUpdateMetadata: ({ spreadsheetUrlOrId, playlistId, youtubeSlot, videoType, worksheetName, titleColumn, descriptionColumn, team, assignments, previewToken, previewSnapshot }) => request('/youtube/batch-update', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ spreadsheet_url_or_id: spreadsheetUrlOrId, playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), ...(youtubeSlot ? { youtube_slot: youtubeSlot } : {}), video_type: videoType, worksheet_name: worksheetName, title_column: titleColumn, description_column: descriptionColumn, team, assignments, ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
   publishAndCleanup: (playlistId, { youtubeSlot, previewToken, previewSnapshot } = {}) => request('/youtube/publish-and-cleanup', { method: 'POST', timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS, body: JSON.stringify({ playlist_id: normalizedYoutubePlaylistOrOriginal(playlistId), ...(youtubeSlot ? { youtube_slot: youtubeSlot } : {}), ...(previewToken ? { preview_token: previewToken } : {}), ...(previewSnapshot ? { preview_snapshot: previewSnapshot } : {}) }) }),
+  previewYoutubeDriveUpload: (driveSource) => request('/youtube/uploads/preview', {
+    method: 'POST',
+    timeoutMs: YOUTUBE_WORKFLOW_TIMEOUT_MS,
+    body: JSON.stringify({ drive_source: driveSource }),
+  }),
+  createYoutubeDriveUploadJob: ({ previewToken, previewSnapshot }) => request('/youtube/uploads/jobs', {
+    method: 'POST',
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    body: JSON.stringify({ preview_token: previewToken, preview_snapshot: previewSnapshot }),
+  }),
+  getYoutubeDriveUploadJob: (jobId) => request(`/youtube/uploads/jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' }),
+  cancelYoutubeDriveUploadJob: (jobId) => request(`/youtube/uploads/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' }),
+  retryYoutubeDriveUploadJob: (jobId) => request(`/youtube/uploads/jobs/${encodeURIComponent(jobId)}/retry`, { method: 'POST' }),
 };

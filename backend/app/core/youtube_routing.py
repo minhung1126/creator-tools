@@ -19,7 +19,10 @@ from backend.app.core.credential_store import credential_store
 from backend.app.core.error_contract import http_error
 from backend.app.services.google_auth import get_youtube_credentials
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
-from backend.app.services.youtube_quota_service import get_youtube_quota_tracker
+from backend.app.services.youtube_quota_service import (
+    get_youtube_quota_tracker,
+    get_youtube_upload_quota_tracker,
+)
 
 MAX_PLAYLIST_ITEMS = 5_000
 MAX_BATCH_ASSIGNMENTS = 500
@@ -28,6 +31,8 @@ PLAYLIST_PREVIEW_MAX_UNITS = PLAYLIST_ITEMS_MAX_UNITS * 2
 QUOTA_FAILURE_REASONS = frozenset(
     {"quota_insufficient", "youtube_quota_exhausted", "youtube_quota_safety_blocked"}
 )
+UPLOAD_GENERAL_COST = 50
+UPLOAD_QUOTA_COST = 1
 
 
 @dataclass(frozen=True)
@@ -278,4 +283,145 @@ def choose_youtube_slot(
     raise _routing_failure(candidates, preferred_slot)
 
 
-__all__ = ["YouTubeSlotDecision", "choose_youtube_slot", "estimate_youtube_request_units"]
+def estimate_youtube_upload_quota(item_count: int, insertion_count: int | None = None) -> dict[str, int]:
+    """Return both bucket costs for a Drive-to-YouTube upload job.
+
+    A retry may only need playlist insertion for videos that already have a
+    YouTube ID, so the upload and insertion counts are independently tracked.
+    The one-argument form remains the all-new-video estimate.
+    """
+
+    upload_count = max(int(item_count or 0), 0)
+    playlist_count = upload_count if insertion_count is None else max(int(insertion_count or 0), 0)
+    return {
+        "video_uploads": upload_count * UPLOAD_QUOTA_COST,
+        "general": 1 + playlist_count * UPLOAD_GENERAL_COST,
+        "total": upload_count * UPLOAD_QUOTA_COST + 1 + playlist_count * UPLOAD_GENERAL_COST,
+    }
+
+
+def _upload_candidate(
+    session_id: str,
+    owner_sub: str,
+    slot: str,
+    *,
+    item_count: int,
+    upload_count: int | None = None,
+    insertion_count: int | None = None,
+    check_quota: bool,
+) -> _Candidate:
+    candidate = _candidate(
+        session_id,
+        owner_sub,
+        slot,
+        estimated_units=1,
+        check_quota=False,
+    )
+    if not candidate.eligible or not check_quota:
+        return candidate
+    costs = estimate_youtube_upload_quota(
+        item_count if upload_count is None else upload_count,
+        item_count if insertion_count is None else insertion_count,
+    )
+    try:
+        general = get_youtube_quota_tracker(slot).get_usage()
+        uploads = get_youtube_upload_quota_tracker(slot).get_usage()
+    except YouTubeQuotaUnavailable as exc:
+        return _Candidate(slot, candidate.credentials, candidate.channel_id, False, exc.code, exc.reset_at)
+    if int(general.get("effective_available_units") or 0) < costs["general"]:
+        return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", general.get("reset_at"))
+    if int(uploads.get("effective_available_units") or 0) < costs["video_uploads"]:
+        return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", uploads.get("reset_at"))
+    return _Candidate(slot, candidate.credentials, candidate.channel_id, True, "available", general.get("reset_at"))
+
+
+def choose_youtube_upload_slot(
+    session_id: str,
+    owner_sub: str,
+    *,
+    item_count: int,
+    upload_count: int | None = None,
+    insertion_count: int | None = None,
+    slot_hint: str | None = None,
+) -> YouTubeSlotDecision:
+    """Select one slot that can fit both the upload and general buckets."""
+
+    routing_mode = get_account_youtube_routing_mode(owner_sub)
+    preferred_slot = get_account_active_slot(owner_sub) if routing_mode == "manual" else "primary"
+    normalized_count = max(int(item_count or 0), 0)
+    normalized_upload_count = normalized_count if upload_count is None else max(int(upload_count or 0), 0)
+    normalized_insertion_count = normalized_count if insertion_count is None else max(int(insertion_count or 0), 0)
+    normalized_hint = None
+    if slot_hint:
+        try:
+            normalized_hint = normalize_youtube_slot(slot_hint)
+        except ValueError as exc:
+            raise http_error(400, "youtube_slot_invalid", "不支援的 YouTube OAuth slot。") from exc
+    if _channel_mismatch(owner_sub):
+        raise http_error(
+            409,
+            "youtube_channel_mismatch",
+            "Primary 與 secondary 必須管理同一個 YouTube Channel，請重新授權其中一個 slot。",
+            youtube_slot=preferred_slot,
+        )
+
+    if normalized_hint:
+        candidates = [_upload_candidate(
+            session_id,
+            owner_sub,
+            normalized_hint,
+            item_count=normalized_count,
+            upload_count=normalized_upload_count,
+            insertion_count=normalized_insertion_count,
+            check_quota=True,
+        )]
+        if not candidates[0].eligible:
+            raise _routing_failure(candidates, normalized_hint)
+        return YouTubeSlotDecision(
+            slot=normalized_hint,
+            preferred_slot=preferred_slot,
+            routing_mode=routing_mode,
+            estimated_units=estimate_youtube_upload_quota(normalized_upload_count, normalized_insertion_count)["total"],
+            reason="preview_pinned_slot",
+            credentials=candidates[0].credentials,
+            channel_id=candidates[0].channel_id,
+        )
+
+    candidate_slots = [preferred_slot] if routing_mode == "manual" else ["primary", "secondary"]
+    candidates = [
+        _upload_candidate(
+            session_id,
+            owner_sub,
+            slot,
+            item_count=normalized_count,
+            upload_count=normalized_upload_count,
+            insertion_count=normalized_insertion_count,
+            check_quota=True,
+        )
+        for slot in candidate_slots
+    ]
+    for index, candidate in enumerate(candidates):
+        if not candidate.eligible:
+            continue
+        reason = "manual_active_slot" if routing_mode == "manual" else (
+            "auto_primary_available" if index == 0 else f"auto_secondary_{candidates[0].reason}"
+        )
+        return YouTubeSlotDecision(
+            slot=candidate.slot,
+            preferred_slot=preferred_slot,
+            routing_mode=routing_mode,
+            estimated_units=estimate_youtube_upload_quota(normalized_upload_count, normalized_insertion_count)["total"],
+            reason=reason,
+            credentials=candidate.credentials,
+            channel_id=candidate.channel_id,
+        )
+    raise _routing_failure(candidates, preferred_slot)
+
+
+__all__ = [
+    "YouTubeSlotDecision",
+    "choose_youtube_slot",
+    "choose_youtube_upload_slot",
+    "estimate_youtube_request_units",
+    "estimate_youtube_upload_quota",
+]

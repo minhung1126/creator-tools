@@ -37,8 +37,11 @@ JSON_SCHEMA_VERSION = 2
 PACIFIC = ZoneInfo("America/Los_Angeles")
 RESET_TIMEZONE = "America/Los_Angeles"
 GENERAL_BUCKET = "general"
+VIDEO_UPLOADS_BUCKET = "video_uploads"
 OFFICIAL_DEFAULT_LIMIT = 10_000
 DEFAULT_SAFETY_BUFFER_UNITS = 1_000
+VIDEO_UPLOADS_DEFAULT_LIMIT = 100
+VIDEO_UPLOADS_SAFETY_BUFFER_UNITS = 0
 QUOTA_SOURCE_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
 QUOTA_RULES_LAST_UPDATED_AT = "2026-06-01"
 QUOTA_RULES_VERIFIED_AT = "2026-08-02"
@@ -55,11 +58,20 @@ YOUTUBE_QUOTA_METHODS: dict[str, dict[str, Any]] = {
 # slot's ledger without changing the workflow method registry.
 YOUTUBE_AUXILIARY_QUOTA_METHODS: dict[str, dict[str, Any]] = {
     "channels.list": {"bucket": GENERAL_BUCKET, "cost": 1},
+    # Kept separate from the legacy registry so existing callers that inspect
+    # the general workflow methods retain their stable shape.
+    "playlistItems.insert": {"bucket": GENERAL_BUCKET, "cost": 50},
+    "playlists.list": {"bucket": GENERAL_BUCKET, "cost": 1},
+}
+
+YOUTUBE_UPLOAD_QUOTA_METHODS: dict[str, dict[str, Any]] = {
+    "videos.insert": {"bucket": VIDEO_UPLOADS_BUCKET, "cost": 1},
 }
 
 QUOTA_COSTS = {
     **{method: int(meta["cost"]) for method, meta in YOUTUBE_QUOTA_METHODS.items()},
     **{method: int(meta["cost"]) for method, meta in YOUTUBE_AUXILIARY_QUOTA_METHODS.items()},
+    **{method: int(meta["cost"]) for method, meta in YOUTUBE_UPLOAD_QUOTA_METHODS.items()},
 }
 
 _PATH_LOCKS: dict[str, RLock] = {}
@@ -134,12 +146,16 @@ class YouTubeQuotaLimiter:
         path: str | Path = QUOTA_FILE,
         *,
         slot: str = "primary",
+        bucket: str = GENERAL_BUCKET,
         configured_limit: int | None = None,
         safety_buffer_units: int | None = None,
     ) -> None:
         self.slot = str(slot or "primary").strip().casefold()
         if self.slot not in {"primary", "secondary"}:
             raise ValueError("YouTube quota slot must be primary or secondary")
+        self.bucket = str(bucket or GENERAL_BUCKET).strip().casefold()
+        if self.bucket not in {GENERAL_BUCKET, VIDEO_UPLOADS_BUCKET}:
+            raise ValueError("YouTube quota bucket must be general or video_uploads")
         if Path(path).resolve() == QUOTA_FILE.resolve() and self.slot == "secondary":
             path = QUOTA_FILE_SECONDARY
         self.path = Path(path)
@@ -149,7 +165,10 @@ class YouTubeQuotaLimiter:
 
     def configured_values(self) -> tuple[int, int]:
         if self._configured_limit_override is None or self._safety_buffer_override is None:
-            default_limit, default_buffer = runtime_config.get_youtube_quota_settings(self.slot)
+            if self.bucket == VIDEO_UPLOADS_BUCKET:
+                default_limit, default_buffer = runtime_config.get_youtube_upload_quota_settings(self.slot)
+            else:
+                default_limit, default_buffer = runtime_config.get_youtube_quota_settings(self.slot)
         else:
             default_limit, default_buffer = OFFICIAL_DEFAULT_LIMIT, DEFAULT_SAFETY_BUFFER_UNITS
         limit = self._configured_limit_override if self._configured_limit_override is not None else default_limit
@@ -158,6 +177,19 @@ class YouTubeQuotaLimiter:
         buffer = max(_safe_int(buffer, DEFAULT_SAFETY_BUFFER_UNITS), 0)
         buffer = min(buffer, max(limit - 1, 0))
         return limit, buffer
+
+    def _method_meta(self, method: str) -> dict[str, Any] | None:
+        registries = (
+            YOUTUBE_UPLOAD_QUOTA_METHODS,
+        ) if self.bucket == VIDEO_UPLOADS_BUCKET else (
+            YOUTUBE_QUOTA_METHODS,
+            YOUTUBE_AUXILIARY_QUOTA_METHODS,
+        )
+        for registry in registries:
+            meta = registry.get(method)
+            if meta and str(meta.get("bucket")) == self.bucket:
+                return meta
+        return None
 
     @staticmethod
     def quota_date(now: datetime | None = None) -> str:
@@ -183,7 +215,7 @@ class YouTubeQuotaLimiter:
             http_status=http_status,
             reason=reason,
             method=method,
-            bucket=GENERAL_BUCKET,
+            bucket=self.bucket,
             reset_at=reset_at,
             confirmed_by_google=confirmed,
             user_message=message,
@@ -210,7 +242,7 @@ class YouTubeQuotaLimiter:
             "schema_version": JSON_SCHEMA_VERSION,
             "slot": self.slot,
             "quota_date": quota_date,
-            "bucket": GENERAL_BUCKET,
+            "bucket": self.bucket,
             "configured_limit": limit,
             "estimated_used_units": 0,
             "state": "normal",
@@ -225,8 +257,7 @@ class YouTubeQuotaLimiter:
         }
         return data
 
-    @staticmethod
-    def _normalize_methods(value: Any) -> dict[str, dict[str, int]]:
+    def _normalize_methods(self, value: Any) -> dict[str, dict[str, int]]:
         if not isinstance(value, dict):
             raise _QuotaStorageError("methods must be an object")
         source = value
@@ -236,9 +267,7 @@ class YouTubeQuotaLimiter:
             if not isinstance(raw, dict):
                 raise _QuotaStorageError("method statistics must be objects")
             name = str(method)
-            configured_cost = int(
-                (YOUTUBE_QUOTA_METHODS.get(name) or YOUTUBE_AUXILIARY_QUOTA_METHODS.get(name) or {}).get("cost", 0)
-            )
+            configured_cost = int((self._method_meta(name) or {}).get("cost", 0))
             cost = _stored_int(raw.get("cost_per_call"), f"{name}.cost", configured_cost)
             calls = _stored_int(raw.get("calls"), f"{name}.calls")
             units = _stored_int(raw.get("units"), f"{name}.units", cost * calls)
@@ -259,6 +288,9 @@ class YouTubeQuotaLimiter:
         saved_slot = str(raw.get("slot") or "primary").strip().casefold()
         if saved_slot != self.slot:
             raise _QuotaStorageError("quota JSON belongs to a different YouTube slot")
+        saved_bucket = str(raw.get("bucket") or GENERAL_BUCKET).strip().casefold()
+        if saved_bucket != self.bucket:
+            raise _QuotaStorageError("quota JSON belongs to a different YouTube bucket")
         saved_date = str(raw.get("quota_date") or "")
         if not saved_date:
             raise _QuotaStorageError("quota_date is missing")
@@ -275,7 +307,7 @@ class YouTubeQuotaLimiter:
             "schema_version": JSON_SCHEMA_VERSION,
             "slot": self.slot,
             "quota_date": quota_date,
-            "bucket": str(raw.get("bucket") or GENERAL_BUCKET),
+            "bucket": self.bucket,
             "configured_limit": limit,
             "estimated_used_units": used,
             "state": state,
@@ -342,7 +374,7 @@ class YouTubeQuotaLimiter:
         *,
         now: datetime | None = None,
     ) -> QuotaReservation:
-        meta = YOUTUBE_QUOTA_METHODS.get(method) or YOUTUBE_AUXILIARY_QUOTA_METHODS.get(method)
+        meta = self._method_meta(method)
         current_utc = _as_utc(now)
         reset = iso_with_offset(next_reset_at(current_utc))
         quota_date = quota_date_for(current_utc)
@@ -430,7 +462,7 @@ class YouTubeQuotaLimiter:
             except _QuotaStorageError as exc:
                 logger.error("YouTube quota storage unavailable during reservation: %s", type(exc).__name__)
                 raise self._storage_unavailable(method, current_utc) from exc
-        return QuotaReservation(uuid4().hex, quota_date, GENERAL_BUCKET, method, cost, reset, self.slot)
+        return QuotaReservation(uuid4().hex, quota_date, self.bucket, method, cost, reset, self.slot)
 
     def complete(
         self,
@@ -445,6 +477,8 @@ class YouTubeQuotaLimiter:
             raise ValueError(f"Invalid YouTube quota event outcome: {outcome}")
         if reservation.slot != self.slot:
             raise ValueError("Quota reservation belongs to a different YouTube slot")
+        if reservation.bucket != self.bucket:
+            raise ValueError("Quota reservation belongs to a different YouTube bucket")
         current_utc = _as_utc(completed_at)
         if quota_date_for(current_utc) != reservation.quota_date:
             return
@@ -472,6 +506,8 @@ class YouTubeQuotaLimiter:
     def record_google_quota_exhausted(self, reservation: QuotaReservation, exc: BaseException) -> None:
         if reservation.slot != self.slot:
             raise ValueError("Quota reservation belongs to a different YouTube slot")
+        if reservation.bucket != self.bucket:
+            raise ValueError("Quota reservation belongs to a different YouTube bucket")
         info = parse_youtube_error(exc, method=reservation.method)
         now = datetime.now(timezone.utc)
         if quota_date_for(now) != reservation.quota_date:
@@ -656,6 +692,10 @@ __all__ = [
     "QUOTA_RULES_LAST_UPDATED_AT",
     "QUOTA_RULES_VERIFIED_AT",
     "QUOTA_SOURCE_URL",
+    "VIDEO_UPLOADS_BUCKET",
+    "VIDEO_UPLOADS_DEFAULT_LIMIT",
+    "VIDEO_UPLOADS_SAFETY_BUFFER_UNITS",
+    "YOUTUBE_UPLOAD_QUOTA_METHODS",
     "RESET_TIMEZONE",
     "YOUTUBE_QUOTA_METHODS",
     "YOUTUBE_AUXILIARY_QUOTA_METHODS",

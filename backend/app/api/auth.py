@@ -27,6 +27,7 @@ from backend.app.services.google_auth import (
     exchange_code_for_tokens,
     get_login_credentials,
     get_youtube_credentials,
+    login_scope_status,
 )
 from backend.app.services.google_auth import (
     get_auth_url as build_google_auth_url,
@@ -343,6 +344,7 @@ def get_user_status(request: Request):
 
     user_info = session_data.get("user") or {"email": "Authenticated User"}
     token_status = credential_store.get_google_public(session_sub) or {}
+    google_scope_status = login_scope_status(creds)
 
     youtube_slots = {}
     for slot, slot_config in settings.youtube_oauth_slots.items():
@@ -395,6 +397,7 @@ def get_user_status(request: Request):
         "token_status": token_status.get("status", "active"),
         "last_refreshed_at": token_status.get("last_refreshed_at"),
         "last_refresh_error": token_status.get("last_refresh_error"),
+        "google_scopes": google_scope_status,
         "youtube": youtube_connection,
     }
 

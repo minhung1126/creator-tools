@@ -30,12 +30,22 @@ export function sourceUrlFromValue(value, sourceType = 'url') {
   if (!trimmed) return '';
 
   if (sourceType === 'url' || looksLikeUrl(trimmed)) {
-    return normalizeHttpUrl(trimmed);
+    const normalized = normalizeHttpUrl(trimmed);
+    if (sourceType === 'drive-item' && normalized) {
+      try {
+        const host = new URL(normalized).hostname.toLowerCase();
+        if (host !== 'drive.google.com' && host !== 'www.drive.google.com') return '';
+      } catch {
+        return '';
+      }
+    }
+    return normalized;
   }
 
   const encodedValue = encodeURIComponent(trimmed);
   if (sourceType === 'spreadsheet') return `https://docs.google.com/spreadsheets/d/${encodedValue}/edit`;
   if (sourceType === 'drive-folder') return `https://drive.google.com/drive/folders/${encodedValue}`;
+  if (sourceType === 'drive-item') return `https://drive.google.com/open?id=${encodedValue}`;
   if (sourceType === 'youtube-playlist') return `https://www.youtube.com/playlist?list=${encodedValue}`;
   return '';
 }

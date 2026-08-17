@@ -278,6 +278,11 @@ def update_youtube_draft_settings(
     del creds
     key = _draft_config_key(payload.video_type)
     value = payload.config.model_dump()
+    # Keep legacy per-workflow playlist values for migration/debugging, but
+    # callers must use the account-level default_playlist_id at execution time.
+    previous = get_account_setting(owner_sub, key, {})
+    if not value.get("playlist_id") and isinstance(previous, dict) and previous.get("playlist_id"):
+        value["playlist_id"] = previous["playlist_id"]
     set_account_setting(owner_sub, key, value)
     logger.info("Account-scoped YouTube %s draft settings updated", payload.video_type)
     return {"status": "success", "video_type": payload.video_type, "config": value}

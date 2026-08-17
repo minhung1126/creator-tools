@@ -328,11 +328,11 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
 
       <form className="glass-panel card-padding settings-card card-stack" onSubmit={saveResources}>
         <div>
-          <h2 className="settings-heading"><PlaySquare size={20} color="var(--secondary)" /> YouTube 發布預設資源</h2>
-          <p className="section-desc">這個播放清單是 YouTube 發布與清理流程的 fallback。Video／Shorts 草稿頁若保存了自己的播放清單，會優先使用工作流設定。</p>
+          <h2 className="settings-heading"><PlaySquare size={20} color="var(--secondary)" /> 共用 To-Post 播放清單</h2>
+          <p className="section-desc">這是目前帳號所有 YouTube 子頁面共用的 To-Post 播放清單；新上傳、Video、Shorts 與公開清理流程都會以這個設定為準。</p>
         </div>
         <div className="form-group">
-          <label className="form-label"><PlaySquare size={14} /> 預設 To-Post 播放清單</label>
+          <label className="form-label"><PlaySquare size={14} /> 共用 To-Post 播放清單</label>
           <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID 或網址" />
         </div>
         <div className="page-actions settings-card-actions"><button className="btn btn-success" type="submit" disabled={pageBusy}><Save size={18} />{busyAction?.kind === 'playlist' ? '儲存中...' : '儲存預設播放清單'}</button></div>

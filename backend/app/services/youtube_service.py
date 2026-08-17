@@ -1,14 +1,26 @@
 import logging
+import mimetypes
 from typing import Any, Dict, List, Optional, Tuple
 
 import googleapiclient.discovery
+from googleapiclient.http import MediaFileUpload
 
 from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
+from backend.app.services.youtube_quota_service import get_youtube_upload_quota_tracker
 
 logger = logging.getLogger(__name__)
 MAX_PLAYLIST_ITEMS = 5_000
 MAX_VIDEO_IDS = 5_000
+
+
+class ResumableUploadError(RuntimeError):
+    """A transient upload error that retains Google's resumable session URI."""
+
+    def __init__(self, message: str, *, resumable_uri: str | None = None, http_status: int | None = None):
+        super().__init__(message)
+        self.resumable_uri = resumable_uri
+        self.http_status = http_status
 
 
 def get_youtube_service(context: YouTubeRequestContext):
@@ -80,6 +92,108 @@ def fetch_playlist_items(context: YouTubeRequestContext, playlist_id: str) -> Li
         if not next_page_token:
             break
     return items
+
+
+def validate_playlist(context: YouTubeRequestContext, playlist_id: str) -> Dict[str, Any]:
+    """Read one playlist before a workflow starts so invalid IDs fail closed."""
+
+    service = get_youtube_service(context)
+    request = service.playlists().list(part="id,snippet,status", id=playlist_id, maxResults=1)
+    response = _execute_with_quota(request, "playlists.list", context)
+    items = response.get("items") or []
+    if not items:
+        raise ValueError("找不到指定的 YouTube To-Post 播放清單，或目前帳號沒有權限。")
+    return dict(items[0])
+
+
+def insert_video_into_playlist(context: YouTubeRequestContext, playlist_id: str, video_id: str) -> Dict[str, Any]:
+    """Insert an uploaded private video into the shared To-Post playlist."""
+
+    service = get_youtube_service(context)
+    request = service.playlistItems().insert(
+        part="snippet",
+        body={
+            "snippet": {
+                "playlistId": playlist_id,
+                "resourceId": {"kind": "youtube#video", "videoId": video_id},
+            }
+        },
+    )
+    return _execute_with_quota(request, "playlistItems.insert", context)
+
+
+def upload_video_resumable(
+    context: YouTubeRequestContext,
+    file_path: str,
+    *,
+    title: str,
+    description: str = "",
+    mime_type: str | None = None,
+    resumable_uri: str | None = None,
+) -> Dict[str, Any]:
+    """Upload one video with Google's resumable protocol and private status."""
+
+    service = get_youtube_service(context)
+    guessed_type = mime_type or mimetypes.guess_type(file_path)[0] or "video/mp4"
+    media = MediaFileUpload(file_path, mimetype=guessed_type, chunksize=8 * 1024 * 1024, resumable=True)
+    request = service.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {"title": title, "description": description},
+            "status": {"privacyStatus": "private"},
+        },
+        media_body=media,
+    )
+    if resumable_uri:
+        request.resumable_uri = resumable_uri
+
+    tracker = get_youtube_upload_quota_tracker(context.slot)
+    reservation = tracker.reserve("videos.insert")
+    try:
+        response = None
+        while response is None:
+            _status, response = request.next_chunk()
+        if not isinstance(response, dict) or not str(response.get("id") or "").strip():
+            raise RuntimeError("YouTube resumable upload 未回傳影片 ID。")
+    except YouTubeQuotaUnavailable:
+        raise
+    except Exception as exc:
+        from backend.app.services.youtube_errors import parse_youtube_error
+
+        info = parse_youtube_error(exc, method="videos.insert")
+        if info.http_status == 403 and info.reason == "quotaExceeded":
+            tracker.record_google_quota_exhausted(reservation, exc)
+            raise tracker._unavailable(  # noqa: SLF001 - preserve the existing quota error contract
+                code="youtube_quota_exhausted",
+                method="videos.insert",
+                reset_at=reservation.reset_at,
+                reason="quotaExceeded",
+                confirmed=True,
+                http_status=403,
+                message="Google 已回報今日 YouTube API 配額用完。",
+            ) from exc
+        try:
+            tracker.complete(
+                reservation,
+                outcome="failed",
+                http_status=info.http_status,
+                error_reason=info.reason or type(exc).__name__,
+            )
+        except YouTubeQuotaUnavailable:
+            logger.error("Unable to persist video upload quota outcome")
+        resumable_uri = str(getattr(request, "resumable_uri", "") or "").strip() or None
+        if resumable_uri:
+            raise ResumableUploadError(
+                "YouTube resumable upload 中斷，稍後會從既有進度繼續。",
+                resumable_uri=resumable_uri,
+                http_status=info.http_status,
+            ) from exc
+        raise
+    try:
+        tracker.complete(reservation, outcome="succeeded")
+    except YouTubeQuotaUnavailable:
+        logger.error("Unable to persist successful video upload quota outcome")
+    return response
 
 
 def fetch_video_details(context: YouTubeRequestContext, video_ids: List[str]) -> List[Dict[str, Any]]:
@@ -255,3 +369,18 @@ def publish_and_remove_playlist_item(
         "video": update_result,
         "playlist_cleanup": playlist_cleanup,
     }
+
+
+__all__ = [
+    "ResumableUploadError",
+    "fetch_playlist_items",
+    "fetch_playlist_preview",
+    "fetch_video_details",
+    "get_video_status",
+    "insert_video_into_playlist",
+    "remove_playlist_item",
+    "set_video_public",
+    "update_single_video_metadata",
+    "upload_video_resumable",
+    "validate_playlist",
+]

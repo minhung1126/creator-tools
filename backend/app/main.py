@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from backend.app.api.router import api_router
 from backend.app.core.config import settings
 from backend.app.core.error_contract import normalize_http_detail, validation_field_errors
+from backend.app.services.youtube_upload_jobs import start_upload_worker, stop_upload_worker
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,16 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+def start_background_workers() -> None:
+    start_upload_worker()
+
+
+@app.on_event("shutdown")
+def stop_background_workers() -> None:
+    stop_upload_worker()
 
 
 @app.middleware("http")

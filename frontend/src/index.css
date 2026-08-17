@@ -2449,3 +2449,190 @@ h1, h2, h3, h4, h5, h6 {
     align-items: stretch;
   }
 }
+
+/* Drive-to-YouTube background upload workflow */
+.youtube-upload-page {
+  max-width: 1240px !important;
+}
+
+.youtube-upload-page .eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.upload-playlist-display {
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(10, 13, 20, 0.48);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.upload-quota-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.upload-quota-card {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+}
+
+.upload-quota-card strong {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.upload-quota-card span {
+  color: #fff;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.upload-quota-card small,
+.upload-preview-table small {
+  display: block;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.upload-preview-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.upload-preview-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.upload-preview-table th,
+.upload-preview-table td {
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid var(--border-color);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.upload-preview-table th {
+  color: var(--text-dim);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.upload-preview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.upload-preview-table td strong {
+  display: block;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+
+.upload-preview-table .badge {
+  max-width: 18rem;
+  white-space: normal;
+  text-align: left;
+}
+
+.upload-progress-copy {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.upload-progress-copy strong {
+  color: #fff;
+  font-size: 1.35rem;
+}
+
+.upload-progress-track {
+  height: 0.55rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.upload-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--secondary), var(--primary));
+  transition: width 0.25s ease;
+}
+
+.upload-job-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.upload-job-result {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.upload-job-result-index {
+  color: var(--secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.upload-job-result strong {
+  display: block;
+  color: #fff;
+  overflow-wrap: anywhere;
+}
+
+.upload-job-result a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.2rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
+@media (max-width: 767px) {
+  .upload-quota-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-job-result {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .upload-job-result .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+}

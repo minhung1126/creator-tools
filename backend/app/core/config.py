@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     YOUTUBE_PRIMARY_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
     YOUTUBE_SECONDARY_GENERAL_QUOTA_LIMIT: int = 10_000
     YOUTUBE_SECONDARY_QUOTA_SAFETY_BUFFER_UNITS: int = 1_000
+    YOUTUBE_PRIMARY_VIDEO_UPLOADS_QUOTA_LIMIT: int = 100
+    YOUTUBE_SECONDARY_VIDEO_UPLOADS_QUOTA_LIMIT: int = 100
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -138,6 +140,13 @@ class Settings(BaseSettings):
                 raise ValueError(f"{name}_GENERAL_QUOTA_LIMIT must be greater than 0")
             if buffer < 0 or buffer >= limit:
                 raise ValueError(f"{name}_QUOTA_SAFETY_BUFFER_UNITS must be >= 0 and less than the quota limit")
+
+        for name, limit in (
+            ("YOUTUBE_PRIMARY", self.YOUTUBE_PRIMARY_VIDEO_UPLOADS_QUOTA_LIMIT),
+            ("YOUTUBE_SECONDARY", self.YOUTUBE_SECONDARY_VIDEO_UPLOADS_QUOTA_LIMIT),
+        ):
+            if limit <= 0:
+                raise ValueError(f"{name}_VIDEO_UPLOADS_QUOTA_LIMIT must be greater than 0")
 
         if not self.PUBLIC_BASE_URL:
             self.PUBLIC_BASE_URL = f"http://localhost:{self.PORT}"

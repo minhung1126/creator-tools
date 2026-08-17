@@ -8,6 +8,7 @@ import PublishCleanerPage from './pages/PublishCleanerPage';
 import SheetCopyPage from './pages/SheetCopyPage';
 import SettingsPage from './pages/SettingsPage';
 import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
+import YouTubeUploadPage from './pages/YouTubeUploadPage';
 import ApiHealthPage from './pages/ApiHealthPage';
 import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
@@ -22,6 +23,7 @@ const VALID_TABS = new Set([
   'youtube_shorts_drafts',
   'publish_clean',
   'youtube_settings',
+  'youtube_upload',
   'sheet_copy',
   'settings',
 ]);
@@ -70,6 +72,7 @@ function authUserFromResponse(response) {
     token_status: response.token_status,
     last_refreshed_at: response.last_refreshed_at,
     last_refresh_error: response.last_refresh_error,
+    google_scopes: response.google_scopes,
     youtube: response.youtube,
   };
 }
@@ -378,6 +381,7 @@ export function AppContent() {
         {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
         {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
         {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshAuthUser={fetchUser} setActiveTab={setActiveTab} />}
+        {activeTab === 'youtube_upload' && <YouTubeUploadPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
         {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
         {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
       </main>

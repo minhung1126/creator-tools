@@ -25,6 +25,8 @@ _PERSISTABLE_FIELDS = {
     "youtube_primary_quota_safety_buffer_units",
     "youtube_secondary_general_quota_limit",
     "youtube_secondary_quota_safety_buffer_units",
+    "youtube_primary_video_uploads_quota_limit",
+    "youtube_secondary_video_uploads_quota_limit",
 }
 
 
@@ -106,6 +108,17 @@ class RuntimeConfig:
         except (TypeError, ValueError):
             parsed_buffer = max(int(slot_config.safety_buffer_units), 0)
         return parsed_limit, min(parsed_buffer, max(parsed_limit - 1, 0))
+
+    def get_youtube_upload_quota_settings(self, slot: str) -> tuple[int, int]:
+        """Return the per-day video upload bucket policy for one slot."""
+        slot_name = normalize_youtube_slot(slot)
+        limit_key = f"youtube_{slot_name}_video_uploads_quota_limit"
+        raw_limit = self.get(limit_key, 100)
+        try:
+            limit = max(int(raw_limit), 1)
+        except (TypeError, ValueError):
+            limit = 100
+        return limit, 0
 
 
 runtime_config = RuntimeConfig()

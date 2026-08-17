@@ -15,6 +15,10 @@ Google 官方目前說明：YouTube Data API 專案對搜尋、影片上傳等�
 | `videos.update` | 50 | 更新影片資訊或公開狀態 |
 | `playlistItems.delete` | 50 | 從播放清單移除影片 |
 | `channels.list` | 1 | OAuth 頻道驗證 |
+| `playlists.list` | 1 | 上傳前驗證共用 To-Post |
+| `playlistItems.insert` | 50 | 將影片加入共用 To-Post |
+
+Drive 上傳另有獨立的 `video_uploads` bucket：`videos.insert` 每部預設計 1 unit，每個 slot 預設每日 100 部。這個 bucket 與 General ledger 分開保存：`data/youtube_quota_uploads_usage.json`、`data/youtube_quota_uploads_usage.secondary.json`。
 
 每取得一頁資料就會算一次請求成本。即使請求無效，官方也規定至少會消耗一個配額單位。
 
@@ -32,6 +36,7 @@ Google 官方目前說明：YouTube Data API 專案對搜尋、影片上傳等�
 - 系統預設專案配額為 10,000 單位，安全預留預設為 1,000 單位；登入後可在 YouTube 設定頁按授權組合調整。
 - Google 回傳 HTTP 403 且錯誤原因為 `quotaExceeded` 時，該授權組合會標記為已確認用完，新的請求會停止，直到官方重設。
 - Auto routing 會在新的 workflow 開始時優先檢查 Primary；若本次保守成本無法由 Primary 的安全可用額度支應，會選用 Secondary。這不是同一批次中途重試，已開始的 workflow 會固定原本選定的 slot。
+- Drive 上傳預覽會同時檢查 `video_uploads` 與 General 兩個 bucket；工作建立後固定同一個 slot，不會因 quota 變化中途換 slot。每部影片只在取得 YouTube ID 後才保存為已上傳，重試時已有 ID 的項目只重試 playlist insertion。
 - `quotaExceeded` 或本地安全上限只會封鎖目前 slot；下一個 workflow 會重新評估，Primary 恢復且足夠時會再次優先使用 Primary。
 - YouTube 設定也支援手動模式；手動模式只使用目前作用中的 slot，不會自動 fallback。
 - 配額日界線依 `America/Los_Angeles` 的午夜計算；前端同時顯示 Pacific Time 與瀏覽器本地時間。
