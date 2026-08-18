@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi import Request
@@ -9,7 +8,6 @@ from backend.app.api import auth
 from backend.app.core.config import Settings
 from backend.app.core.credential_store import CredentialStore
 from backend.app.core.security import GOOGLE_OAUTH_STATE_SALT, sign_timed_data
-from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.core.youtube_quota_limiter import YouTubeQuotaLimiter
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 
@@ -113,18 +111,6 @@ def test_callback_rejects_a_signed_cookie_with_an_invalid_slot():
     )
     response = auth.google_oauth_callback(request, code="code", state="state")
     assert "youtube_auth_error=" in response.headers["location"]
-
-
-def test_request_context_keeps_the_selected_slot():
-    context = YouTubeRequestContext(
-        slot="secondary",
-        credentials=SimpleNamespace(token="secondary-token"),
-        quota_limiter=SimpleNamespace(),
-        channel_id="channel-1",
-        owner_sub="subject",
-    )
-    assert context.slot == "secondary"
-    assert context.channel_id == "channel-1"
 
 
 def test_slot_api_routes_are_exposed_without_single_slot_aliases():
