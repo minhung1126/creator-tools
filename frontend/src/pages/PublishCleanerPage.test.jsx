@@ -99,16 +99,18 @@ describe('PublishCleanerPage snapshot safety', () => {
     api.updateYoutubeVideoMetadata.mockResolvedValue({});
   });
 
-  it('ignores out-of-order responses after a fast playlist switch', async () => {
+  it('keeps the shared playlist read-only and ignores stale responses after settings change', async () => {
     const pending = {};
     api.getPlaylistVideos.mockImplementation((playlistId) => new Promise((resolve) => {
       pending[playlistId] = resolve;
     }));
-    renderPage();
+    const { rerender } = renderPage();
 
     const input = screen.getByPlaceholderText('YouTube Playlist ID');
+    expect(input).toHaveAttribute('readonly');
     await loadCurrentPlaylist();
-    fireEvent.change(input, { target: { value: 'playlist-b' } });
+    rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-b' }} />);
+    await waitFor(() => expect(input).toHaveValue('playlist-b'));
     await loadCurrentPlaylist();
 
     await act(async () => {
@@ -128,19 +130,21 @@ describe('PublishCleanerPage snapshot safety', () => {
       .mockResolvedValueOnce(playlistResponse('playlist-a'))
       .mockRejectedValueOnce(new Error('網路中斷'))
       .mockResolvedValueOnce(playlistResponse('playlist-c', []));
-    renderPage();
+    const { rerender } = renderPage();
 
     await loadCurrentPlaylist();
     expect(await screen.findByText('影片一')).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText('YouTube Playlist ID');
-    fireEvent.change(input, { target: { value: 'playlist-b' } });
+    rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-b' }} />);
+    await waitFor(() => expect(input).toHaveValue('playlist-b'));
     await loadCurrentPlaylist();
     expect(await screen.findByText('讀取 To-Post 播放清單失敗：網路中斷')).toBeInTheDocument();
     expect(screen.queryByText('影片一')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
 
-    fireEvent.change(input, { target: { value: 'playlist-c' } });
+    rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-c' }} />);
+    await waitFor(() => expect(input).toHaveValue('playlist-c'));
     await loadCurrentPlaylist();
     expect(await screen.findByText(/播放清單「playlist-c」目前沒有影片/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
@@ -172,7 +176,7 @@ describe('PublishCleanerPage snapshot safety', () => {
     });
   });
 
-  it('invalidates an open confirmation when the input or authorization changes', async () => {
+  it('invalidates an open confirmation when the shared setting or authorization changes', async () => {
     api.getPlaylistVideos.mockResolvedValue(playlistResponse('playlist-a'));
     const { rerender } = renderPage();
     await loadCurrentPlaylist();
@@ -180,7 +184,8 @@ describe('PublishCleanerPage snapshot safety', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText('YouTube Playlist ID');
-    fireEvent.change(input, { target: { value: 'playlist-b' } });
+    rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-b' }} />);
+    await waitFor(() => expect(input).toHaveValue('playlist-b'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
 

@@ -186,8 +186,8 @@ function YouTubeVideoLink({ videoId }) {
 
 export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
   const toast = useToast();
-  const { value: saved, error: workStateError } = useAccountWorkState('youtube_publish_cleaner', {});
-  const initialPlaylistId = sysSettings.default_playlist_id || saved?.playlistId || '';
+  const { error: workStateError } = useAccountWorkState('youtube_publish_cleaner', {});
+  const initialPlaylistId = normalizePlaylistId(sysSettings.default_playlist_id);
   const [playlistId, setPlaylistId] = useState(initialPlaylistId);
   const [playlistSnapshot, setPlaylistSnapshot] = useState(null);
   const [loadStatus, setLoadStatus] = useState('idle');
@@ -281,14 +281,6 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
       && requestedAuthKey === currentAuthKeyRef.current
       && requestedDataVersion === currentDataVersionRef.current
   );
-
-  const handlePlaylistIdChange = (event) => {
-    if (executingRef.current) return;
-    const nextPlaylistId = event.target.value;
-    playlistIdRef.current = nextPlaylistId;
-    if (nextPlaylistId !== playlistId) invalidateSnapshot();
-    setPlaylistId(nextPlaylistId);
-  };
 
   const handleLoadPlaylist = async () => {
     if (loadingRef.current || executingRef.current) return;
@@ -545,9 +537,9 @@ export default function PublishCleanerPage({ sysSettings = {}, authUser }) {
           <SourceLinkInput
             type="text"
             value={playlistId}
-            onChange={handlePlaylistIdChange}
             sourceType="youtube-playlist"
             placeholder="YouTube Playlist ID"
+            readOnly
             disabled={executing}
           />
         </div>
