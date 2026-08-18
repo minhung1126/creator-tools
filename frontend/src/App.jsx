@@ -1,32 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { BrowserRouter, useInRouterContext } from 'react-router-dom';
 import { ToastProvider, useToast } from './components/Toast';
 import { StatusMessage } from './components/StatusMessage';
-import Navbar from './components/Navbar';
-import DashboardPage from './pages/DashboardPage';
-import BatchUpdatePage from './pages/BatchUpdatePage';
-import PublishCleanerPage from './pages/PublishCleanerPage';
-import SheetCopyPage from './pages/SheetCopyPage';
-import SettingsPage from './pages/SettingsPage';
-import YouTubeSettingsPage from './pages/YouTubeSettingsPage';
-import YouTubeUploadPage from './pages/YouTubeUploadPage';
-import ApiHealthPage from './pages/ApiHealthPage';
-import LoginPage from './pages/LoginPage';
 import { api } from './services/api';
 import { clearAuthHash, parseAuthHash } from './utils/authHash';
-import { AccountWorkStateProvider } from './hooks/useAccountWorkState';
 import { usePageResume } from './hooks/usePageResume';
-
-const VALID_TABS = new Set([
-  'dashboard',
-  'api_health',
-  'youtube_video_drafts',
-  'youtube_shorts_drafts',
-  'publish_clean',
-  'youtube_settings',
-  'youtube_upload',
-  'sheet_copy',
-  'settings',
-]);
+import AppRoutes from './routes/AppRoutes';
+import { consumeOAuthReturnPath } from './utils/authReturnPath';
+import { PATHS } from './routes/paths';
 
 const SETTING_LABELS = ['系統設定', '共用設定', 'YouTube 設定', '團體與人物篩選', '工作狀態'];
 const AUTH_STATUS = {
@@ -37,10 +18,6 @@ const AUTH_STATUS = {
 };
 const RESUME_RETRY_DELAYS_MS = [0, 1000, 3000];
 const FRONTEND_COMMIT_SHA = import.meta.env.VITE_APP_COMMIT_SHA || 'development';
-
-function normalizeActiveTab(value) {
-  return VALID_TABS.has(value) ? value : 'dashboard';
-}
 
 export function isConnectionFailure(error) {
   return error?.code === 'network_error'
@@ -96,7 +73,6 @@ function ReconnectingScreen({ error, onRetry, isResuming }) {
 }
 
 export function AppContent() {
-  const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [sysSettings, setSysSettings] = useState({});
@@ -107,6 +83,7 @@ export function AppContent() {
   const [settingsStatus, setSettingsStatus] = useState(null);
   const [settingsRefreshing, setSettingsRefreshing] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [oauthReturnPath, setOauthReturnPath] = useState(null);
   const authUserRef = useRef(null);
   const authRequestRef = useRef(null);
   const initStartedRef = useRef(false);
@@ -207,7 +184,6 @@ export function AppContent() {
       if (workStateResponse) {
         const nextWorkState = workStateResponse.state || {};
         setWorkState(nextWorkState);
-        setActiveTab(normalizeActiveTab(nextWorkState.navigation?.activeTab));
         setSidebarCollapsed(nextWorkState.navigation?.sidebarCollapsed ?? false);
       }
 
@@ -271,28 +247,31 @@ export function AppContent() {
     const init = async () => {
       setInitializing(true);
       try {
-        const user = await fetchUser({ source: 'initial' });
+        // Parse and remove the callback hash before the router can process an
+        // index redirect. The return path is consumed only after validation.
         const authResult = parseAuthHash();
+        if (authResult) clearAuthHash();
+        const user = await fetchUser({ source: 'initial' });
         if (authResult?.type === 'google_success') {
           toast.success('控制台 Google 登入成功');
-          clearAuthHash();
           const updatedUser = await fetchUser({ source: 'oauth-callback' });
           if (updatedUser) await fetchSettings();
+          setOauthReturnPath(consumeOAuthReturnPath('google', PATHS.dashboard));
         } else if (authResult?.type === 'youtube_success') {
           toast.success('YouTube 頻道 Google 授權成功');
-          clearAuthHash();
           await fetchUser({ source: 'youtube-oauth-callback' });
+          setOauthReturnPath(consumeOAuthReturnPath('youtube', PATHS.youtubeConnections));
         } else if (authResult?.type === 'google_error') {
-          const message = authResult.value || '控制台 Google 登入失敗，請重新嘗試。';
+          const message = '控制台 Google 登入失敗，請重新嘗試。';
+          consumeOAuthReturnPath('google', PATHS.dashboard);
           updateAuthUser(null);
           setAuthStatus(AUTH_STATUS.UNAUTHENTICATED);
           setAuthError(message);
           toast.error(message);
-          clearAuthHash();
         } else if (authResult?.type === 'youtube_error') {
-          const message = authResult.value || 'YouTube 頻道 Google 授權失敗，請重新嘗試。';
+          const message = 'YouTube 頻道 Google 授權失敗，請重新嘗試。';
           toast.error(message);
-          clearAuthHash();
+          setOauthReturnPath(consumeOAuthReturnPath('youtube', PATHS.youtubeConnections));
           if (user) await fetchSettings();
         } else if (user) {
           await fetchSettings();
@@ -327,7 +306,6 @@ export function AppContent() {
       setAuthStatus(AUTH_STATUS.UNAUTHENTICATED);
       setAuthError(null);
       setWorkState({});
-      setActiveTab('dashboard');
       setSidebarCollapsed(false);
       toast.success('已登出控制台');
     } catch (error) {
@@ -340,53 +318,24 @@ export function AppContent() {
     return <ReconnectingScreen error={authError} onRetry={pageResume.retryNow} isResuming={pageResume.isResuming} />;
   }
   if (initializing || authStatus === AUTH_STATUS.LOADING) return <div className="loading-center">系統初始化中…</div>;
-  if (authStatus === AUTH_STATUS.UNAUTHENTICATED || !authUser) return <LoginPage initialError={authError} />;
-
-  return <AccountWorkStateProvider key={authUser.sub || authUser.email} initialState={workState}>
-    <div className={`app-container${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
-      <Navbar activeTab={activeTab} setActiveTab={setActiveTab} authUser={authUser} onLogout={handleLogout} sidebarCollapsed={sidebarCollapsed} setSidebarCollapsed={setSidebarCollapsed} />
-      <main className="main-content">
-        {updateAvailable && (
-          <StatusMessage
-            tone="warning"
-            title="版本已更新"
-            action={<button type="button" className="btn btn-secondary status-message-action" onClick={() => window.location.reload()}>重新載入</button>}
-          >
-            <span>Creator Tools 已更新，請重新載入。</span>
-          </StatusMessage>
-        )}
-        {authStatus === AUTH_STATUS.RECONNECTING && (
-          <StatusMessage
-            tone="warning"
-            title="連線中斷，正在重新連線"
-            action={<button type="button" className="btn btn-secondary status-message-action" onClick={pageResume.retryNow} disabled={pageResume.isResuming}>{pageResume.isResuming ? '重新連線中…' : '立即重試'}</button>}
-          >
-            <span>原有畫面仍保留；連線恢復後會自動更新登入狀態與設定。</span>
-            {authError && <small>{authError}</small>}
-          </StatusMessage>
-        )}
-        {settingsStatus && (
-          <StatusMessage
-            tone={settingsStatus.tone}
-            title="設定載入狀態"
-            action={<button type="button" className="btn btn-secondary status-message-action" onClick={fetchSettings} disabled={settingsRefreshing}>{settingsRefreshing ? '更新中…' : '重試'}</button>}
-          >
-            <span>{settingsStatus.message}</span>
-            {settingsStatus.details.length > 0 && <small>{settingsStatus.details.join('；')}</small>}
-          </StatusMessage>
-        )}
-        {activeTab === 'dashboard' && <DashboardPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
-        {activeTab === 'api_health' && <ApiHealthPage authUser={authUser} />}
-        {activeTab === 'youtube_video_drafts' && <BatchUpdatePage key="video-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Video" />}
-        {activeTab === 'youtube_shorts_drafts' && <BatchUpdatePage key="shorts-drafts" sysSettings={sysSettings} authUser={authUser} videoType="Shorts" />}
-        {activeTab === 'publish_clean' && <PublishCleanerPage sysSettings={sysSettings} authUser={authUser} />}
-        {activeTab === 'youtube_settings' && <YouTubeSettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} refreshAuthUser={fetchUser} setActiveTab={setActiveTab} />}
-        {activeTab === 'youtube_upload' && <YouTubeUploadPage authUser={authUser} sysSettings={sysSettings} setActiveTab={setActiveTab} />}
-        {activeTab === 'sheet_copy' && <SheetCopyPage sysSettings={sysSettings} />}
-        {activeTab === 'settings' && <SettingsPage authUser={authUser} sysSettings={sysSettings} refreshSettings={fetchSettings} />}
-      </main>
-    </div>
-  </AccountWorkStateProvider>;
+  return <AppRoutes
+    authStatus={authStatus}
+    authUser={authUser}
+    authError={authError}
+    workState={workState}
+    updateAvailable={updateAvailable}
+    settingsStatus={settingsStatus}
+    settingsRefreshing={settingsRefreshing}
+    fetchSettings={fetchSettings}
+    fetchUser={fetchUser}
+    pageResume={pageResume}
+    onLogout={handleLogout}
+    sidebarCollapsed={sidebarCollapsed}
+    setSidebarCollapsed={setSidebarCollapsed}
+    oauthReturnPath={oauthReturnPath}
+    clearOAuthReturnPath={() => setOauthReturnPath(null)}
+    sysSettings={sysSettings}
+  />;
 }
 
 export class ErrorBoundary extends React.Component {
@@ -417,5 +366,8 @@ export class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
-  return <ErrorBoundary><ToastProvider><AppContent /></ToastProvider></ErrorBoundary>;
+  const content = <ErrorBoundary><ToastProvider><AppContent /></ToastProvider></ErrorBoundary>;
+  // main.jsx owns the production BrowserRouter. Keeping this fallback makes
+  // direct App renders in unit tests safe without creating nested routers.
+  return useInRouterContext() ? content : <BrowserRouter>{content}</BrowserRouter>;
 }

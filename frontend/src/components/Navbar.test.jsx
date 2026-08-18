@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import Navbar from './Navbar';
 
 function NavbarHarness() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  return <Navbar
-    activeTab="dashboard"
-    setActiveTab={() => {}}
+  return <MemoryRouter initialEntries={['/dashboard']}><Navbar
     authUser={{ email: 'creator@example.com', youtube: { authenticated: false } }}
     onLogout={() => {}}
     sidebarCollapsed={sidebarCollapsed}
     setSidebarCollapsed={setSidebarCollapsed}
-  />;
+  /></MemoryRouter>;
 }
 
 describe('Navbar', () => {
@@ -34,7 +33,7 @@ describe('Navbar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'YouTube' }));
     const submenu = document.getElementById('youtube-submenu');
-    expect(within(submenu).getAllByRole('button').map((button) => button.textContent.trim())).toEqual([
+    expect(within(submenu).getAllByRole('link').map((link) => link.textContent.trim())).toEqual([
       '上傳至 YouTube',
       'Video 草稿',
       'Shorts 草稿',

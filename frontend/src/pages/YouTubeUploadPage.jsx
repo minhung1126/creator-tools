@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, ExternalLink, ListVideo, Loader2, Play, RefreshCw, Square, Upload } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import { api } from '../services/api';
 import SourceLinkInput from '../components/SourceLinkInput';
 import { StatusMessage } from '../components/StatusMessage';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useToast } from '../components/Toast';
+import { saveOAuthReturnPath } from '../utils/authReturnPath';
+import { PATHS } from '../routes/paths';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested', 'paused']);
 
@@ -208,14 +211,18 @@ function isRepreviewRequired(error) {
     || error?.status === 429;
 }
 
-export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiveTab }) {
+export default function YouTubeUploadPage({ sysSettings = {}, authUser, mode = 'create', jobId, navigate }) {
   const toast = useToast();
+  const location = useLocation();
+  const isJobPage = mode === 'job';
   const [driveSource, setDriveSource] = useState('');
   const [preview, setPreview] = useState(null);
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [jobAction, setJobAction] = useState(null);
   const [error, setError] = useState('');
+  const [jobNotFound, setJobNotFound] = useState(false);
+  const [recentJobId, setRecentJobId] = useState('');
   const [needsPreview, setNeedsPreview] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
 
@@ -236,32 +243,41 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
 
   useEffect(() => {
     if (!jobStorageKey || typeof window === 'undefined') return undefined;
-    let cancelled = false;
     let storedJobId = '';
     try {
       storedJobId = window.localStorage.getItem(jobStorageKey) || '';
     } catch {
       return undefined;
     }
-    if (!storedJobId) return undefined;
+    if (storedJobId) setRecentJobId(storedJobId);
+    return undefined;
+  }, [jobStorageKey]);
 
-    api.getYoutubeDriveUploadJob(storedJobId)
+  useEffect(() => {
+    if (!isJobPage || !jobId) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setJobNotFound(false);
+    api.getYoutubeDriveUploadJob(jobId)
       .then((storedJob) => {
         if (!cancelled) setJob(storedJob);
       })
-      .catch((restoreError) => {
-        if (cancelled || restoreError?.status !== 404) return;
-        try {
-          window.localStorage.removeItem(jobStorageKey);
-        } catch {
-          // Ignore storage failures; the server remains the source of truth.
+      .catch((loadError) => {
+        if (cancelled) return;
+        if (loadError?.status === 404) {
+          setJob(null);
+          setJobNotFound(true);
+          setError('工作不存在或不屬於目前帳號');
+          return;
         }
+        setError(errorText(loadError, '無法載入上傳工作狀態。'));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [jobStorageKey]);
+    return () => { cancelled = true; };
+  }, [isJobPage, jobId]);
 
   useEffect(() => {
     if (!jobStorageKey || !job?.job_id || typeof window === 'undefined') return;
@@ -296,6 +312,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
 
   const reauthorizeDrive = async () => {
     try {
+      saveOAuthReturnPath('google', `${location.pathname}${location.search}`);
       const response = await api.getAuthUrl();
       if (!response?.auth_url) throw new Error('無法取得 Google 授權網址。');
       window.location.href = response.auth_url;
@@ -331,6 +348,15 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
         previewToken: preview.preview_token,
         previewSnapshot: preview.preview_snapshot,
       });
+      if (response?.job_id && navigate) {
+        try {
+          window.localStorage.setItem(jobStorageKey, response.job_id);
+        } catch {
+          // The URL remains the source of truth when storage is unavailable.
+        }
+        navigate(PATHS.youtubeUploadJob(response.job_id));
+        return;
+      }
       setJob(response);
       toast.success(response.status === 'completed' ? '沒有新的影片需要上傳' : '上傳工作已建立，會在背景依序處理');
     } catch (startError) {
@@ -381,21 +407,25 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
           <p className="section-desc">從 Google Drive 依檔名自然排序逐部上傳；每部先設為 Private，再加入共用 To-Post 播放清單。</p>
         </div>
         <div className="page-actions">
-          <button type="button" className="btn btn-secondary" onClick={() => setActiveTab?.('youtube_settings')}>
-            <ListVideo size={16} /> YouTube 設定
-          </button>
+          <Link className="btn btn-secondary" to={PATHS.youtubeConnections}><ListVideo size={16} /> YouTube 設定</Link>
         </div>
       </div>
 
-      {!driveScopeReady && (
+      {isJobPage && <div className="page-actions"><Link className="btn btn-secondary" to={PATHS.youtubeUploadNew}><Upload size={16} /> 建立新的上傳工作</Link></div>}
+      {!isJobPage && recentJobId && <div className="info-banner"><span>最近的背景工作仍可從 URL 繼續：</span><Link to={PATHS.youtubeUploadJob(recentJobId)}>開啟最近工作</Link></div>}
+
+      {isJobPage && loading && <div className="loading-center">上傳工作載入中…</div>}
+      {isJobPage && jobNotFound && <StatusMessage tone="error" title="找不到上傳工作"><span>工作不存在或不屬於目前帳號</span><Link className="btn btn-secondary status-message-action" to={PATHS.youtubeUploadNew}>返回建立上傳工作</Link></StatusMessage>}
+
+      {!isJobPage && !driveScopeReady && (
         <StatusMessage tone="warning" title="尚未取得 Google Drive 權限" action={<button type="button" className="btn btn-secondary status-message-action" onClick={reauthorizeDrive}>重新授權 Google Drive</button>}>
           <span>目前登入 token 只有舊的 Google 權限；重新授權後才能讀取你貼上的 Drive ID／網址。</span>
         </StatusMessage>
       )}
-      {error && <StatusMessage tone="error" title="上傳流程無法繼續"><span>{error}</span></StatusMessage>}
-      {needsPreview && <StatusMessage tone="warning" title="請重新預覽後再建立工作"><span>配額、slot 或 Drive 內容可能已變更；請重新解析 Drive 內容，確認後端最新的可執行狀態。</span></StatusMessage>}
+      {error && !jobNotFound && <StatusMessage tone="error" title="上傳流程無法繼續"><span>{error}</span></StatusMessage>}
+      {!isJobPage && needsPreview && <StatusMessage tone="warning" title="請重新預覽後再建立工作"><span>配額、slot 或 Drive 內容可能已變更；請重新解析 Drive 內容，確認後端最新的可執行狀態。</span></StatusMessage>}
 
-      <form className="glass-panel card-padding card-stack" onSubmit={loadPreview}>
+      {!isJobPage && <form className="glass-panel card-padding card-stack" onSubmit={loadPreview}>
         <div>
           <h2 className="panel-title"><Upload size={19} /> Drive 來源</h2>
           <p className="panel-description">支援 Drive 資料夾 ID／網址、單一影片 ID／網址。第一版只讀取資料夾第一層。</p>
@@ -409,9 +439,9 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
             {loading ? <><Loader2 className="spin" size={17} />解析中…</> : <><RefreshCw size={17} />解析 Drive 內容</>}
           </button>
         </div>
-      </form>
+      </form>}
 
-      <section className="glass-panel card-padding card-stack">
+      {!isJobPage && <section className="glass-panel card-padding card-stack">
         <div className="page-header-row">
           <div>
             <h2 className="panel-title"><ListVideo size={19} /> 共用 To-Post 播放清單</h2>
@@ -420,10 +450,11 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
           {playlistId && <a className="youtube-video-link" href={`https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}`} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} />開啟播放清單</a>}
         </div>
         <div className="upload-playlist-display">{playlistId || '尚未設定；請先到 YouTube 設定儲存共用 To-Post 播放清單。'}</div>
-        {setActiveTab && !playlistId && <button type="button" className="btn btn-secondary settings-inline-button" onClick={() => setActiveTab('youtube_settings')}>前往 YouTube 設定</button>}
+        {!playlistId && <Link className="btn btn-secondary settings-inline-button" to={PATHS.youtubeConnections}>前往 YouTube 設定</Link>}
       </section>
+      }
 
-      {preview && (
+      {!isJobPage && preview && (
         <section className="glass-panel card-padding card-stack">
           <div className="page-header-row">
             <div>
@@ -474,7 +505,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, setActiv
         </section>
       )}
 
-      {job && (
+      {(isJobPage || job) && job && (
         <section className="glass-panel card-padding card-stack upload-job-panel">
           <div className="page-header-row">
             <div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import {
   Clapperboard,
   Smartphone,
@@ -11,8 +12,9 @@ import {
 } from 'lucide-react';
 import { SourceLinkButton } from '../components/SourceLinkInput';
 import { youtubePreferredUiSlot } from '../utils/youtubeRouting';
+import { PATHS } from '../routes/paths';
 
-export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
+export default function DashboardPage({ authUser, sysSettings }) {
   const activeSlot = youtubePreferredUiSlot(authUser?.youtube);
   const activeYoutube = authUser?.youtube?.slots?.[activeSlot] || {};
 
@@ -49,25 +51,25 @@ export default function DashboardPage({ authUser, sysSettings, setActiveTab }) {
           <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-primary"><Clapperboard size={28} /></div>
           <div className="feature-card-copy"><h3>Video 草稿</h3><p>使用 Video 專屬工作表與欄位，沿用共用團體與人物篩選。</p></div>
-          <button className="btn btn-primary feature-card-action" onClick={() => setActiveTab('youtube_video_drafts')}>進入 Video 草稿 <ArrowRight size={16} /></button>
+          <Link className="btn btn-primary feature-card-action" to={PATHS.youtubeVideoDrafts}>進入 Video 草稿 <ArrowRight size={16} /></Link>
         </div>
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-primary"><Smartphone size={28} /></div>
           <div className="feature-card-copy"><h3>Shorts 草稿</h3><p>使用 Shorts 專屬工作表與欄位，沿用共用團體與人物篩選。</p></div>
-          <button className="btn btn-primary feature-card-action" onClick={() => setActiveTab('youtube_shorts_drafts')}>進入 Shorts 草稿 <ArrowRight size={16} /></button>
+          <Link className="btn btn-primary feature-card-action" to={PATHS.youtubeShortsDrafts}>進入 Shorts 草稿 <ArrowRight size={16} /></Link>
         </div>
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-secondary"><Send size={28} /></div>
           <div className="feature-card-copy"><h3>發布並清理清單</h3><p>依序公開影片並自 To-Post 播放清單移除，完成後直接顯示結果。</p></div>
-          <button className="btn btn-primary feature-card-action" onClick={() => setActiveTab('publish_clean')}>進入發布模組 <ArrowRight size={16} /></button>
+          <Link className="btn btn-primary feature-card-action" to={PATHS.youtubePublishCleanup}>進入發布模組 <ArrowRight size={16} /></Link>
         </div>
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-accent"><Settings size={28} /></div>
           <div className="feature-card-copy"><h3>帳號與 Google 設定</h3><p>管理控制台登入與目前帳號的預設試算表；YouTube 頻道授權請至 YouTube 設定。</p></div>
-          <button className="btn btn-secondary feature-card-action" onClick={() => setActiveTab('settings')}>進入系統設定 <ArrowRight size={16} /></button>
+          <Link className="btn btn-secondary feature-card-action" to={PATHS.googleSettings}>進入系統設定 <ArrowRight size={16} /></Link>
         </div>
       </div>
     </div>

@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, CheckCircle2, Clapperboard, ExternalLink, PlaySquare, Save, Smartphone, XCircle, Youtube } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
 import { api, normalizeYoutubePlaylistInput } from '../services/api';
 import { useToast } from '../components/Toast';
 import SourceLinkInput from '../components/SourceLinkInput';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { YOUTUBE_ROUTING_MODES, youtubeRoutingLabel } from '../utils/youtubeRouting';
+import { saveOAuthReturnPath } from '../utils/authReturnPath';
+import { PATHS } from '../routes/paths';
 
 const SLOT_ORDER = ['primary', 'secondary'];
 
@@ -56,8 +59,14 @@ export function normalizeSlotRecord(slot, record) {
   };
 }
 
-export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refreshSettings, refreshAuthUser, setActiveTab }) {
+export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refreshSettings, refreshAuthUser, section = 'all' }) {
   const toast = useToast();
+  const location = useLocation();
+  const showConnections = section === 'all' || section === 'connections';
+  const showRouting = section === 'all' || section === 'routing';
+  const showQuota = section === 'all' || section === 'quota';
+  const showPlaylist = section === 'all' || section === 'playlist';
+  const showWorkflowLinks = section === 'all';
   const youtube = useMemo(() => authUser?.youtube || {}, [authUser?.youtube]);
   const initial = useMemo(
     () => initialSettings(sysSettings.default_playlist_id, sysSettings.quota_limit, sysSettings.safety_buffer_units),
@@ -180,6 +189,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     if (busyAction) return;
     setBusyAction({ kind: 'authorization', slot });
     try {
+      saveOAuthReturnPath('youtube', `${location.pathname}${location.search}`);
       const result = await api.getYoutubeAuthUrl(slot);
       if (!result.auth_url) throw new Error('無法取得 Google 授權網址，請稍後再試。');
       window.location.href = result.auth_url;
@@ -242,7 +252,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
 
-      <section className="glass-panel card-padding settings-card card-stack">
+      {showRouting && <section className="glass-panel card-padding settings-card card-stack">
         <div className="card-header">
           <div>
             <h2 className="settings-heading">YouTube slot 使用優先順序</h2>
@@ -268,9 +278,9 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
             <Save size={18} />{busyAction?.kind === 'routing' ? '儲存中...' : '儲存使用模式'}
           </button>
         </div>
-      </section>
+      </section>}
 
-      <div className="responsive-grid youtube-slot-grid">
+      {(showConnections || showQuota) && <div className="responsive-grid youtube-slot-grid">
         {SLOT_ORDER.map((slot) => {
           const record = slotRecords[slot];
           const draft = slotDrafts[slot];
@@ -301,32 +311,36 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
               </div>
               {record.last_refresh_error && <div className="info-banner"><XCircle size={16} /><span>Token refresh 失敗，請重新授權此 slot。</span></div>}
 
-              <div className="responsive-grid youtube-quota-grid">
-                <div className="form-group">
-                  <label className="form-label" htmlFor={`${slot}-quota-limit`}>Project 一般 quota</label>
-                  <input id={`${slot}-quota-limit`} className="form-input" type="number" min="1" step="1" value={draft.quotaLimit} onChange={(event) => updateDraft(slot, 'quotaLimit', event.target.value)} />
+              {showQuota && <>
+                <div className="responsive-grid youtube-quota-grid">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor={`${slot}-quota-limit`}>Project 一般 quota</label>
+                    <input id={`${slot}-quota-limit`} className="form-input" type="number" min="1" step="1" value={draft.quotaLimit} onChange={(event) => updateDraft(slot, 'quotaLimit', event.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label" htmlFor={`${slot}-quota-buffer`}>安全保留 units</label>
+                    <input id={`${slot}-quota-buffer`} className="form-input" type="number" min="0" step="1" value={draft.quotaBuffer} onChange={(event) => updateDraft(slot, 'quotaBuffer', event.target.value)} />
+                  </div>
                 </div>
-                <div className="form-group">
-                  <label className="form-label" htmlFor={`${slot}-quota-buffer`}>安全保留 units</label>
-                  <input id={`${slot}-quota-buffer`} className="form-input" type="number" min="0" step="1" value={draft.quotaBuffer} onChange={(event) => updateDraft(slot, 'quotaBuffer', event.target.value)} />
-                </div>
-              </div>
-              <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 或安全上限只影響這個 slot。Auto 模式會在下一個 workflow 開始時依 quota 選擇可用 slot。</p>
+                <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 或安全上限只影響這個 slot。Auto 模式會在下一個 workflow 開始時依 quota 選擇可用 slot。</p>
+              </>}
 
               <div className="page-actions settings-card-actions">
-                <button className="btn btn-primary" onClick={() => startOAuth(slot)} type="button" disabled={!record.configured || pageBusy || authorizationBusy}>
-                  {busy ? <><span className="login-spinner"></span> 處理中...</> : <><ExternalLink size={16} /> {record.authenticated ? '重新授權' : '連結此 slot'}</>}
-                </button>
-                <button className="btn btn-success" onClick={() => saveSlot(slot)} type="button" disabled={pageBusy}><Save size={16} />儲存 slot 設定</button>
-                {routingMode === YOUTUBE_ROUTING_MODES.MANUAL && record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={pageBusy || authorizationBusy}>設為作用中</button>}
-                {record.authenticated && <button className="btn" onClick={() => requestDisconnect(slot)} type="button" disabled={pageBusy || authorizationBusy}>斷開</button>}
+                {showConnections && <>
+                  <button className="btn btn-primary" onClick={() => startOAuth(slot)} type="button" disabled={!record.configured || pageBusy || authorizationBusy}>
+                    {busy ? <><span className="login-spinner"></span> 處理中...</> : <><ExternalLink size={16} /> {record.authenticated ? '重新授權' : '連結此 slot'}</>}
+                  </button>
+                  {routingMode === YOUTUBE_ROUTING_MODES.MANUAL && record.can_be_active && !isActive && <button className="btn btn-secondary" onClick={() => activateSlot(slot)} type="button" disabled={pageBusy || authorizationBusy}>設為作用中</button>}
+                  {record.authenticated && <button className="btn" onClick={() => requestDisconnect(slot)} type="button" disabled={pageBusy || authorizationBusy}>斷開</button>}
+                </>}
+                {showQuota && <button className="btn btn-success" onClick={() => saveSlot(slot)} type="button" disabled={pageBusy}><Save size={16} />儲存 slot 設定</button>}
               </div>
             </section>
           );
         })}
-      </div>
+      </div>}
 
-      <form className="glass-panel card-padding settings-card card-stack" onSubmit={saveResources}>
+      {showPlaylist && <form className="glass-panel card-padding settings-card card-stack" onSubmit={saveResources}>
         <div>
           <h2 className="settings-heading"><PlaySquare size={20} color="var(--secondary)" /> 共用 To-Post 播放清單</h2>
           <p className="section-desc">這是目前帳號所有 YouTube 子頁面共用的 To-Post 播放清單；新上傳、Video、Shorts 與公開清理流程都會以這個設定為準。</p>
@@ -336,9 +350,9 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
           <SourceLinkInput value={playlistId} onChange={(event) => setPlaylistId(event.target.value)} sourceType="youtube-playlist" placeholder="YouTube Playlist ID 或網址" />
         </div>
         <div className="page-actions settings-card-actions"><button className="btn btn-success" type="submit" disabled={pageBusy}><Save size={18} />{busyAction?.kind === 'playlist' ? '儲存中...' : '儲存預設播放清單'}</button></div>
-      </form>
+      </form>}
 
-      <section className="glass-panel card-padding settings-card card-stack">
+      {showWorkflowLinks && <section className="glass-panel card-padding settings-card card-stack">
         <div>
           <h2 className="settings-heading">YouTube 草稿工作流設定</h2>
           <p className="section-desc">Video 與 Shorts 的工作表、欄位與工作流資源會分別保存；Sheet 內容複製、Video、Shorts 共用團體與人物篩選。</p>
@@ -347,15 +361,15 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
           <div className="glass-panel youtube-workflow-card card-stack">
             <h3 className="youtube-workflow-heading"><Clapperboard size={18} /> Video 草稿</h3>
             <p className="section-desc">管理 Video 專屬工作表與欄位，人物篩選會與其他流程共用。</p>
-            <button className="btn btn-secondary settings-inline-button" type="button" onClick={() => setActiveTab('youtube_video_drafts')}>前往 Video 設定 <ArrowRight size={16} /></button>
+            <Link className="btn btn-secondary settings-inline-button" to={PATHS.youtubeVideoDrafts}>前往 Video 設定 <ArrowRight size={16} /></Link>
           </div>
           <div className="glass-panel youtube-workflow-card card-stack">
             <h3 className="youtube-workflow-heading"><Smartphone size={18} /> Shorts 草稿</h3>
             <p className="section-desc">管理 Shorts 專屬工作表與欄位，人物篩選會與其他流程共用。</p>
-            <button className="btn btn-secondary settings-inline-button" type="button" onClick={() => setActiveTab('youtube_shorts_drafts')}>前往 Shorts 設定 <ArrowRight size={16} /></button>
+            <Link className="btn btn-secondary settings-inline-button" to={PATHS.youtubeShortsDrafts}>前往 Shorts 設定 <ArrowRight size={16} /></Link>
           </div>
         </div>
-      </section>
+      </section>}
 
       <ConfirmDialog
         open={Boolean(disconnectTarget)}

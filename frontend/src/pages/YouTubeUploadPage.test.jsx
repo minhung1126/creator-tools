@@ -1,6 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import YouTubeUploadPage, { getYoutubeUploadQuotaDecision } from './YouTubeUploadPage';
 import { api } from '../services/api';
 
@@ -45,10 +46,10 @@ const preview = (overrides = {}) => ({
 });
 
 function renderPage() {
-  return render(<YouTubeUploadPage
+  return render(<MemoryRouter initialEntries={['/youtube/uploads/new']}><YouTubeUploadPage
     authUser={{ sub: 'user-1', google_scopes: { drive_readonly: true } }}
     sysSettings={{ default_playlist_id: 'playlist-1' }}
-  />);
+  /></MemoryRouter>);
 }
 
 describe('YouTubeUploadPage quota admission', () => {

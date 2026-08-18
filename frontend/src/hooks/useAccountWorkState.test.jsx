@@ -11,7 +11,7 @@ vi.mock('../services/api', () => ({
 }));
 
 function wrapper({ children }) {
-  return <AccountWorkStateProvider initialState={{ navigation: { activeTab: 'dashboard' } }}>{children}</AccountWorkStateProvider>;
+  return <AccountWorkStateProvider initialState={{ navigation: { sidebarCollapsed: false } }}>{children}</AccountWorkStateProvider>;
 }
 
 describe('useAccountWorkState', () => {
@@ -25,25 +25,25 @@ describe('useAccountWorkState', () => {
   it('debounces a save and merges the server state after it succeeds', async () => {
     vi.useFakeTimers();
     api.updateWorkState.mockResolvedValue({
-      state: { navigation: { activeTab: 'sheet_copy', serverRevision: 3 } },
+      state: { navigation: { sidebarCollapsed: true, serverRevision: 3 } },
     });
     const { result } = renderHook(() => useAccountWorkState('navigation'), { wrapper });
 
     let savePromise;
     act(() => {
-      savePromise = result.current.save({ activeTab: 'sheet_copy' }, { debounceMs: 50 });
+      savePromise = result.current.save({ sidebarCollapsed: true }, { debounceMs: 50 });
     });
 
     expect(api.updateWorkState).not.toHaveBeenCalled();
-    expect(result.current.value).toEqual({ activeTab: 'sheet_copy' });
+    expect(result.current.value).toEqual({ sidebarCollapsed: true });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(50);
       await savePromise;
     });
 
-    expect(api.updateWorkState).toHaveBeenCalledWith('navigation', { activeTab: 'sheet_copy' });
-    expect(result.current.value).toEqual({ activeTab: 'sheet_copy', serverRevision: 3 });
+    expect(api.updateWorkState).toHaveBeenCalledWith('navigation', { sidebarCollapsed: true });
+    expect(result.current.value).toEqual({ sidebarCollapsed: true, serverRevision: 3 });
     expect(result.current.saved).toBe(true);
     expect(result.current.saving).toBe(false);
   });
@@ -57,14 +57,14 @@ describe('useAccountWorkState', () => {
 
     let firstSave;
     await act(async () => {
-      firstSave = result.current.save({ activeTab: 'first' }, { debounceMs: 0 });
+      firstSave = result.current.save({ sidebarCollapsed: false }, { debounceMs: 0 });
       await Promise.resolve();
     });
     expect(api.updateWorkState).toHaveBeenCalledTimes(1);
 
     let secondSave;
     act(() => {
-      secondSave = result.current.save({ activeTab: 'second' }, { debounceMs: 0 });
+      secondSave = result.current.save({ sidebarCollapsed: true }, { debounceMs: 0 });
     });
 
     await act(async () => {
@@ -73,9 +73,9 @@ describe('useAccountWorkState', () => {
       await secondSave;
     });
 
-    expect(api.updateWorkState).toHaveBeenNthCalledWith(1, 'navigation', { activeTab: 'first' });
-    expect(api.updateWorkState).toHaveBeenNthCalledWith(2, 'navigation', { activeTab: 'second' });
-    expect(result.current.value).toEqual({ activeTab: 'second' });
+    expect(api.updateWorkState).toHaveBeenNthCalledWith(1, 'navigation', { sidebarCollapsed: false });
+    expect(api.updateWorkState).toHaveBeenNthCalledWith(2, 'navigation', { sidebarCollapsed: true });
+    expect(result.current.value).toEqual({ sidebarCollapsed: true });
     expect(result.current.saved).toBe(true);
   });
 
@@ -86,7 +86,7 @@ describe('useAccountWorkState', () => {
     const { result } = renderHook(() => useAccountWorkState('navigation'), { wrapper });
 
     await act(async () => {
-      await result.current.save({ activeTab: 'sheet_copy' }, { debounceMs: 0 });
+      await result.current.save({ sidebarCollapsed: true }, { debounceMs: 0 });
     });
     expect(result.current.error).toBe('伺服器忙碌');
     expect(result.current.saved).toBe(false);

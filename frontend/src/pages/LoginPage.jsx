@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../services/api';
+import { saveOAuthReturnPath } from '../utils/authReturnPath';
 import { 
   Video, 
   LogIn, 
@@ -9,7 +10,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 
-export default function LoginPage({ initialError }) {
+export default function LoginPage({ initialError, returnTo }) {
   const [loggingIn, setLoggingIn] = useState(false);
   const [oauthError, setOauthError] = useState(initialError || null);
   const [readinessError, setReadinessError] = useState(null);
@@ -40,6 +41,7 @@ export default function LoginPage({ initialError }) {
     setLoggingIn(true);
     setOauthError(null);
     try {
+      saveOAuthReturnPath('google', returnTo || '/dashboard');
       const res = await api.getAuthUrl();
       if (res && res.auth_url) {
         window.location.href = res.auth_url;

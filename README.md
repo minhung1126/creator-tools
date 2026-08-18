@@ -64,6 +64,22 @@ npm run dev
 
 開啟 <http://localhost:3000>。後端健康檢查為 <http://localhost:8000/api/v1/health>；除 HTTP 200 外，也請確認 JSON 的 `ready` 是否為 `true`。
 
+## 前端主要網址
+
+前端使用 React Router；每個功能都有可直接開啟、重新整理與分享的網址：
+
+- `/login`：Google 控制台登入
+- `/dashboard`：儀表板
+- `/system/health`、`/system/info`：API 健康度與部署資訊
+- `/youtube/uploads/new`、`/youtube/uploads/:jobId`：建立上傳與背景工作狀態
+- `/youtube/drafts/videos`、`/youtube/drafts/shorts`：Video／Shorts 草稿
+- `/youtube/publish-cleanup`：發布並清理清單
+- `/youtube/settings/connections`、`/youtube/settings/routing`、`/youtube/settings/quota`、`/youtube/settings/playlist`：YouTube 子設定
+- `/sheets/copy`：Sheet 內容複製
+- `/settings/google`、`/settings/sheets`：Google 帳號與預設 Sheet
+
+`/`、`/youtube/settings`、`/settings` 與 `/youtube/uploads` 會以 replace redirect 到對應的 canonical URL。Production 的 FastAPI SPA fallback 會提供深層前端網址的 `index.html`，但 `/api/*` 仍維持 API 404 行為。
+
 ## 驗證
 
 ```powershell

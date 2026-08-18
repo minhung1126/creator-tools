@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/Toast';
 import { api } from '../services/api';
@@ -47,10 +48,9 @@ function renderPage(overrides = {}) {
     sysSettings: { default_playlist_id: 'saved-playlist', quota_limit: 10000, safety_buffer_units: 1000 },
     refreshSettings: vi.fn().mockResolvedValue({}),
     refreshAuthUser: vi.fn().mockResolvedValue({}),
-    setActiveTab: vi.fn(),
     ...overrides,
   };
-  return render(<ToastProvider><YouTubeSettingsPage {...props} /></ToastProvider>);
+  return render(<MemoryRouter initialEntries={['/youtube/settings/connections']}><ToastProvider><YouTubeSettingsPage {...props} /></ToastProvider></MemoryRouter>);
 }
 
 describe('YouTubeSettingsPage', () => {
