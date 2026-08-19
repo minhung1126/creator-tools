@@ -8,46 +8,69 @@ export function initialGoogleSheetForm(defaultSpreadsheetId) {
   return { default_spreadsheet_id: defaultSpreadsheetId || '' };
 }
 
+function sameGoogleSheetForm(left, right) {
+  return left?.default_spreadsheet_id === right?.default_spreadsheet_id;
+}
+
 export default function GoogleSheetSettingsPage({ sysSettings = {}, refreshSettings }) {
   const toast = useToast();
   const [formData, setFormData] = useState(() => initialGoogleSheetForm(sysSettings.default_spreadsheet_id));
+  const latestFormRef = useRef(formData);
+  const mountedRef = useRef(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const saveTimerRef = useRef(null);
   const saveChainRef = useRef(Promise.resolve());
-  const saveVersionRef = useRef(0);
+  const pendingSaveRef = useRef(null);
+  const queueSaveRef = useRef(null);
+  const editVersionRef = useRef(0);
   const dirtyRef = useRef(false);
 
   useEffect(() => {
-    if (!dirtyRef.current) setFormData(initialGoogleSheetForm(sysSettings.default_spreadsheet_id));
+    if (!dirtyRef.current) {
+      const nextData = initialGoogleSheetForm(sysSettings.default_spreadsheet_id);
+      latestFormRef.current = nextData;
+      setFormData(nextData);
+    }
   }, [sysSettings.default_spreadsheet_id]);
 
   const queueSave = (nextData, { notify = false } = {}) => {
-    const version = saveVersionRef.current + 1;
-    saveVersionRef.current = version;
-    saveChainRef.current = saveChainRef.current.catch(() => undefined).then(async () => {
-      if (version !== saveVersionRef.current) return;
-      setSaving(true);
-      setMsg(null);
+    const version = editVersionRef.current;
+    const pendingSave = { version, data: nextData, promise: null };
+    pendingSaveRef.current = pendingSave;
+    const request = saveChainRef.current.catch(() => undefined).then(async () => {
+      if (version !== editVersionRef.current) return;
+      if (mountedRef.current) {
+        setSaving(true);
+        setMsg(null);
+      }
       try {
         await api.updateSharedSettings(nextData);
-        if (version !== saveVersionRef.current) return;
+        if (version !== editVersionRef.current) return;
         dirtyRef.current = false;
+        if (!mountedRef.current) return;
         await refreshSettings?.();
-        if (version === saveVersionRef.current) {
-          setMsg({ type: 'success', text: '目前帳號的 Google Sheet 設定已自動儲存。' });
-          if (notify) toast.success('設定已儲存');
-        }
+        if (version !== editVersionRef.current || !mountedRef.current) return;
+        setMsg({ type: 'success', text: '目前帳號的 Google Sheet 設定已自動儲存。' });
+        if (notify) toast.success('設定已儲存');
       } catch (error) {
-        if (version !== saveVersionRef.current) return;
+        if (version !== editVersionRef.current || !mountedRef.current) return;
         setMsg({ type: 'error', text: error.message || '伺服器儲存失敗，請稍後重試。' });
         if (notify) toast.error(`儲存失敗：${error.message || '未知錯誤'}`);
       } finally {
-        if (version === saveVersionRef.current) setSaving(false);
+        if (version === editVersionRef.current && mountedRef.current) setSaving(false);
       }
     });
-    return saveChainRef.current;
+    pendingSave.promise = request;
+    pendingSaveRef.current = pendingSave;
+    saveChainRef.current = request;
+    request.then(
+      () => { if (pendingSaveRef.current === pendingSave) pendingSaveRef.current = null; },
+      () => { if (pendingSaveRef.current === pendingSave) pendingSaveRef.current = null; },
+    );
+    return request;
   };
+  queueSaveRef.current = queueSave;
 
   const scheduleSave = (nextData) => {
     window.clearTimeout(saveTimerRef.current);
@@ -58,7 +81,9 @@ export default function GoogleSheetSettingsPage({ sysSettings = {}, refreshSetti
   };
 
   const handleChange = (value) => {
-    const nextData = { ...formData, default_spreadsheet_id: value };
+    const nextData = { ...latestFormRef.current, default_spreadsheet_id: value };
+    editVersionRef.current += 1;
+    latestFormRef.current = nextData;
     dirtyRef.current = true;
     setFormData(nextData);
     scheduleSave(nextData);
@@ -68,10 +93,22 @@ export default function GoogleSheetSettingsPage({ sysSettings = {}, refreshSetti
     event.preventDefault();
     window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = null;
-    await queueSave(formData, { notify: true });
+    await queueSave(latestFormRef.current, { notify: true });
   };
 
-  useEffect(() => () => window.clearTimeout(saveTimerRef.current), []);
+  useEffect(() => () => {
+    mountedRef.current = false;
+    window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    if (!dirtyRef.current) return;
+
+    const latestData = latestFormRef.current;
+    const pendingSave = pendingSaveRef.current;
+    const hasPendingLatestSave = pendingSave
+      && pendingSave.version === editVersionRef.current
+      && sameGoogleSheetForm(pendingSave.data, latestData);
+    if (!hasPendingLatestSave) queueSaveRef.current?.(latestData);
+  }, []);
 
   return (
     <div className="settings-page-section">
@@ -84,4 +121,3 @@ export default function GoogleSheetSettingsPage({ sysSettings = {}, refreshSetti
     </div>
   );
 }
-

@@ -245,10 +245,10 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
 
   return (
     <div className="section-gap settings-page youtube-settings-page">
-      <header className="page-header">
+      {section === 'all' && <header className="page-header">
         <h1>YouTube 設定</h1>
         <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、quota 優先順序、發布預設資源與各 project quota。Auto 模式會在每個新 workflow 開始時優先使用 Primary，quota 不足才選 Secondary；同一批次不會中途切換。</p>
-      </header>
+      </header>}
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
 

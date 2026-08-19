@@ -19,6 +19,14 @@ describe('route paths', () => {
     expect(buildLoginPath('/youtube/drafts/videos')).toBe('/login?returnTo=%2Fyoutube%2Fdrafts%2Fvideos');
   });
 
+  it.each([
+    [PATHS.youtubeSettings, PATHS.youtubeConnections],
+    [PATHS.settings, PATHS.googleSettings],
+    [PATHS.youtubeUploads, PATHS.youtubeUploadNew],
+  ])('canonicalizes protected alias %s to %s for auth return paths', (alias, canonicalPath) => {
+    expect(getSafeReturnPath(alias)).toBe(canonicalPath);
+  });
+
   it('rejects external, protocol-relative, API, login and unknown paths', () => {
     expect(getSafeReturnPath('https://example.com/dashboard')).toBeNull();
     expect(getSafeReturnPath('//example.com/dashboard')).toBeNull();
@@ -27,4 +35,3 @@ describe('route paths', () => {
     expect(getSafeReturnPath('/unknown')).toBeNull();
   });
 });
-

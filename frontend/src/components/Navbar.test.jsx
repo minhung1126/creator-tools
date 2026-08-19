@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Navbar from './Navbar';
+import { PATHS } from '../routes/paths';
 
-function NavbarHarness() {
+function NavbarHarness({ initialEntry = '/dashboard' }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  return <MemoryRouter initialEntries={['/dashboard']}><Navbar
+  return <MemoryRouter initialEntries={[initialEntry]}><Navbar
     authUser={{ email: 'creator@example.com', youtube: { authenticated: false } }}
     onLogout={() => {}}
     sidebarCollapsed={sidebarCollapsed}
@@ -40,5 +41,15 @@ describe('Navbar', () => {
       '發布草稿並清理清單',
       'YouTube 設定',
     ]);
+  });
+
+  it('exposes system and deployment information next to API health with active state', () => {
+    window.localStorage.clear();
+    render(<NavbarHarness initialEntry={PATHS.systemInfo} />);
+
+    const systemInfoLink = screen.getByRole('link', { name: '系統／部署資訊' });
+    expect(systemInfoLink).toHaveAttribute('href', PATHS.systemInfo);
+    expect(systemInfoLink).toHaveAttribute('aria-current', 'page');
+    expect(systemInfoLink).toHaveClass('active');
   });
 });

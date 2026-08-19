@@ -96,6 +96,21 @@ describe('AppRoutes', () => {
     expect(screen.getByTestId('location')).toHaveTextContent(to);
   });
 
+  it.each([
+    [PATHS.youtubeSettings, PATHS.youtubeConnections],
+    [PATHS.settings, PATHS.googleSettings],
+    [PATHS.youtubeUploads, PATHS.youtubeUploadNew],
+  ])('preserves canonical destination for unauthenticated alias %s', (alias, canonicalPath) => {
+    renderRoutes(alias, { authStatus: 'unauthenticated', authUser: null });
+    expect(screen.getByText(`login route ${canonicalPath}`)).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(`/login?returnTo=${encodeURIComponent(canonicalPath)}`);
+  });
+
+  it.each(['/youtube/settings/missing', '/settings/missing'])('renders 404 for unknown settings child path %s', (path) => {
+    renderRoutes(path);
+    expect(screen.getByText('找不到頁面')).toBeInTheDocument();
+  });
+
   it('renders a safe 404 for an unknown protected URL', () => {
     renderRoutes('/not-a-real-page');
     expect(screen.getByText('找不到頁面')).toBeInTheDocument();
@@ -107,4 +122,3 @@ describe('AppRoutes', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/login?returnTo=%2Fyoutube%2Fdrafts%2Fvideos');
   });
 });
-

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Upload, Video, X, Youtube } from 'lucide-react';
+import { Activity, CheckCircle2, ChevronDown, Clapperboard, Copy, FileSpreadsheet, Info, LayoutDashboard, Menu, PanelLeftClose, PanelLeftOpen, Send, Settings, Smartphone, Upload, Video, X, Youtube } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import useAccountWorkState from '../hooks/useAccountWorkState';
 import { youtubeIsConnected } from '../utils/youtubeRouting';
@@ -124,6 +124,7 @@ export default function Navbar({ authUser, onLogout, sidebarCollapsed, setSideba
       <nav className="sidebar-nav">
         {item({ id: 'dashboard', to: PATHS.dashboard, label: '儀表板總覽', icon: LayoutDashboard })}
         {item({ id: 'api_health', to: PATHS.systemHealth, label: 'API健康度', icon: Activity })}
+        {item({ id: 'system_info', to: PATHS.systemInfo, label: '系統／部署資訊', icon: Info })}
         {group('youtube', 'YouTube', Youtube, youtubeOpen, setYoutubeOpen, youtubeItems, youtubeActive)}
         {group('sheet', 'Sheet', FileSpreadsheet, sheetOpen, setSheetOpen, sheetItems, sheetActive)}
         {item({ id: 'settings', to: PATHS.googleSettings, label: '帳號與 Google 設定', icon: Settings, activePrefix: '/settings' })}

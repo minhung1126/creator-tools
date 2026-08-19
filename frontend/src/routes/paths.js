@@ -24,6 +24,12 @@ export const PATHS = Object.freeze({
   sheetSettings: '/settings/sheets',
 });
 
+const RETURN_PATH_ALIASES = Object.freeze({
+  [PATHS.youtubeSettings]: PATHS.youtubeConnections,
+  [PATHS.settings]: PATHS.googleSettings,
+  [PATHS.youtubeUploads]: PATHS.youtubeUploadNew,
+});
+
 const STATIC_RETURN_PATHS = new Set([
   PATHS.dashboard,
   PATHS.systemHealth,
@@ -39,6 +45,7 @@ const STATIC_RETURN_PATHS = new Set([
   PATHS.sheetCopy,
   PATHS.googleSettings,
   PATHS.sheetSettings,
+  ...Object.keys(RETURN_PATH_ALIASES),
 ]);
 
 export function isKnownProtectedPath(pathname) {
@@ -48,6 +55,10 @@ export function isKnownProtectedPath(pathname) {
 
 export function getCurrentPath(location = window.location) {
   return `${location.pathname}${location.search}`;
+}
+
+export function canonicalizeReturnPath(pathname) {
+  return RETURN_PATH_ALIASES[pathname] || pathname;
 }
 
 /**
@@ -69,8 +80,9 @@ export function getSafeReturnPath(value) {
 
   if (url.origin !== window.location.origin || !url.pathname.startsWith('/')) return null;
   if (url.pathname === PATHS.login || url.pathname.startsWith('/api/')) return null;
-  if (!isKnownProtectedPath(url.pathname)) return null;
-  return `${url.pathname}${url.search}`;
+  const canonicalPathname = canonicalizeReturnPath(url.pathname);
+  if (!isKnownProtectedPath(canonicalPathname)) return null;
+  return `${canonicalPathname}${url.search}`;
 }
 
 export const isSafeReturnPath = (value) => Boolean(getSafeReturnPath(value));

@@ -108,6 +108,7 @@ export default function AppRoutes({
             <Route path="routing" element={<YoutubeRoutingPage {...pageProps} />} />
             <Route path="quota" element={<YoutubeQuotaPage {...pageProps} />} />
             <Route path="playlist" element={<YoutubePlaylistSettingsPage {...pageProps} />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
 
           <Route path="settings" element={<Navigate replace to={PATHS.googleSettings} />} />
@@ -115,6 +116,7 @@ export default function AppRoutes({
             <Route index element={<Navigate replace to="google" />} />
             <Route path="google" element={<GoogleAccountSettingsPage {...pageProps} />} />
             <Route path="sheets" element={<GoogleSheetSettingsPage {...pageProps} />} />
+            <Route path="*" element={<NotFoundPage />} />
           </Route>
           <Route path="*" element={<NotFoundPage />} />
         </Route>
