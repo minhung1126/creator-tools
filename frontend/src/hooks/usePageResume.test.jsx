@@ -57,4 +57,28 @@ describe('usePageResume', () => {
     expect(onResume).toHaveBeenCalledTimes(2);
     expect(onResume).toHaveBeenLastCalledWith({ reason: 'manual' });
   });
+
+  it('recovers when Safari returns focus after a long background period', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const onResume = vi.fn().mockResolvedValue({ status: 'ok' });
+    renderHook(() => usePageResume(onResume, { hiddenThresholdMs: 1000, cooldownMs: 0 }));
+
+    act(() => { window.dispatchEvent(new Event('blur')); });
+    vi.setSystemTime(1001);
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+
+    expect(onResume).toHaveBeenCalledWith({ reason: 'focus' });
+  });
+
+  it('treats a persisted pageshow as a resume even without a prior visibility event', async () => {
+    const onResume = vi.fn().mockResolvedValue({ status: 'ok' });
+    renderHook(() => usePageResume(onResume, { cooldownMs: 0 }));
+    const event = new Event('pageshow');
+    Object.defineProperty(event, 'persisted', { configurable: true, value: true });
+
+    await act(async () => { window.dispatchEvent(event); });
+
+    expect(onResume).toHaveBeenCalledWith({ reason: 'pageshow-persisted' });
+  });
 });

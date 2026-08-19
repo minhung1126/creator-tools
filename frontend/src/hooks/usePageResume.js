@@ -16,7 +16,8 @@ export function usePageResume(
   } = {},
 ) {
   const onResumeRef = useRef(onResume);
-  const hiddenAtRef = useRef(null);
+  const inactiveAtRef = useRef(null);
+  const initialPageShowRef = useRef(true);
   const lastResumeAtRef = useRef(null);
   const resumePromiseRef = useRef(null);
   const mountedRef = useRef(true);
@@ -56,23 +57,52 @@ export function usePageResume(
   }, [cooldownMs]);
 
   useEffect(() => {
-    hiddenAtRef.current = document.hidden ? Date.now() : null;
+    const markInactive = () => {
+      if (inactiveAtRef.current === null) inactiveAtRef.current = Date.now();
+    };
 
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        hiddenAtRef.current = Date.now();
-        return;
-      }
-
-      const hiddenAt = hiddenAtRef.current;
-      hiddenAtRef.current = null;
-      if (hiddenAt !== null && Date.now() - hiddenAt >= hiddenThresholdMs) {
-        requestResume({ reason: 'visibilitychange' });
+    const resumeAfterInactivity = (reason) => {
+      const inactiveAt = inactiveAtRef.current;
+      inactiveAtRef.current = null;
+      if (inactiveAt !== null && Date.now() - inactiveAt >= hiddenThresholdMs) {
+        requestResume({ reason });
       }
     };
 
+    if (document.hidden) markInactive();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        markInactive();
+        return;
+      }
+      resumeAfterInactivity('visibilitychange');
+    };
+
     const handlePageShow = (event) => {
-      if (event.persisted) requestResume({ reason: 'pageshow-persisted' });
+      if (event.persisted) {
+        initialPageShowRef.current = false;
+        inactiveAtRef.current = null;
+        requestResume({ reason: 'pageshow-persisted' });
+        return;
+      }
+      if (initialPageShowRef.current) {
+        initialPageShowRef.current = false;
+        return;
+      }
+      resumeAfterInactivity('pageshow');
+    };
+
+    const handlePageHide = () => {
+      markInactive();
+    };
+
+    const handleBlur = () => {
+      markInactive();
+    };
+
+    const handleFocus = () => {
+      if (!document.hidden) resumeAfterInactivity('focus');
     };
 
     const handleOnline = () => {
@@ -81,10 +111,16 @@ export function usePageResume(
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('pageshow', handlePageShow);
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('blur', handleBlur);
+    window.addEventListener('focus', handleFocus);
     window.addEventListener('online', handleOnline);
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('pageshow', handlePageShow);
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('blur', handleBlur);
+      window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
     };
   }, [hiddenThresholdMs, requestResume]);

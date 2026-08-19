@@ -8,6 +8,7 @@ import { usePageResume } from './hooks/usePageResume';
 import AppRoutes from './routes/AppRoutes';
 import { consumeOAuthReturnPath } from './utils/authReturnPath';
 import { PATHS } from './routes/paths';
+import { clearPageRecoveryParam, recoverPage } from './utils/pageRecovery';
 
 const SETTING_LABELS = ['系統設定', '共用設定', 'YouTube 設定', '團體與人物篩選', '工作狀態'];
 const AUTH_STATUS = {
@@ -65,9 +66,14 @@ function ReconnectingScreen({ error, onRetry, isResuming }) {
         <span>目前無法確認登入狀態，請檢查網路後重試。</span>
         {error && <small>{error}</small>}
       </StatusMessage>
-      <button className="btn btn-primary" type="button" onClick={onRetry} disabled={isResuming}>
-        {isResuming ? '重新連線中…' : '立即重試'}
-      </button>
+      <div className="status-message-actions">
+        <button className="btn btn-primary status-message-action" type="button" onClick={onRetry} disabled={isResuming}>
+          {isResuming ? '重新連線中…' : '立即重試'}
+        </button>
+        <button className="btn btn-secondary status-message-action" type="button" onClick={() => recoverPage()}>
+          重新開啟本頁
+        </button>
+      </div>
     </div>
   );
 }
@@ -251,6 +257,7 @@ export function AppContent() {
         // index redirect. The return path is consumed only after validation.
         const authResult = parseAuthHash();
         if (authResult) clearAuthHash();
+        clearPageRecoveryParam();
         const user = await fetchUser({ source: 'initial' });
         if (authResult?.type === 'google_success') {
           toast.success('控制台 Google 登入成功');
@@ -356,8 +363,8 @@ export class ErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="loading-center error-state">
-          <StatusMessage tone="error" title="應用程式暫時無法顯示">為保護錯誤內容，詳細資訊不會顯示。請重新載入頁面。</StatusMessage>
-          <button className="btn btn-primary" type="button" onClick={() => window.location.reload()}>重新載入頁面</button>
+          <StatusMessage tone="error" title="應用程式暫時無法顯示">為保護錯誤內容，詳細資訊不會顯示。請重新開啟本頁。</StatusMessage>
+          <button className="btn btn-primary" type="button" onClick={() => recoverPage()}>重新開啟本頁</button>
         </div>
       );
     }

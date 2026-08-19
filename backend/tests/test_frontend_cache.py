@@ -30,7 +30,7 @@ def _security_response(path, media_type):
 
 def test_html_requires_revalidation():
     assert frontend_cache_control("/", "text/html; charset=utf-8") == HTML_CACHE_CONTROL
-    assert frontend_cache_control("/dashboard", "text/html") == "no-cache, max-age=0, must-revalidate"
+    assert frontend_cache_control("/dashboard", "text/html") == "no-store, max-age=0, must-revalidate"
 
 
 def test_hashed_javascript_and_css_are_immutable_for_one_year():

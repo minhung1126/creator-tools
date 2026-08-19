@@ -203,7 +203,7 @@ describe('ErrorBoundary', () => {
     );
 
     expect(screen.getByText('應用程式暫時無法顯示')).toBeInTheDocument();
-    expect(screen.getByText('為保護錯誤內容，詳細資訊不會顯示。請重新載入頁面。')).toBeInTheDocument();
+    expect(screen.getByText('為保護錯誤內容，詳細資訊不會顯示。請重新開啟本頁。')).toBeInTheDocument();
     expect(screen.queryByText('private implementation details')).not.toBeInTheDocument();
   });
 });

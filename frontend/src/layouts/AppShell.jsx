@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { StatusMessage } from '../components/StatusMessage';
 import Navbar from '../components/Navbar';
 import { AccountWorkStateProvider } from '../hooks/useAccountWorkState';
+import { recoverPage } from '../utils/pageRecovery';
 
 export default function AppShell({
   authUser,
@@ -32,7 +33,7 @@ export default function AppShell({
             <StatusMessage
               tone="warning"
               title="版本已更新"
-              action={<button type="button" className="btn btn-secondary status-message-action" onClick={() => window.location.reload()}>重新載入</button>}
+              action={<button type="button" className="btn btn-secondary status-message-action" onClick={() => recoverPage()}>重新開啟本頁</button>}
             >
               <span>Creator Tools 已更新，請重新載入。</span>
             </StatusMessage>
@@ -41,7 +42,12 @@ export default function AppShell({
             <StatusMessage
               tone="warning"
               title="連線中斷，正在重新連線"
-              action={<button type="button" className="btn btn-secondary status-message-action" onClick={pageResume.retryNow} disabled={pageResume.isResuming}>{pageResume.isResuming ? '重新連線中…' : '立即重試'}</button>}
+              action={(
+                <div className="status-message-actions">
+                  <button type="button" className="btn btn-secondary status-message-action" onClick={pageResume.retryNow} disabled={pageResume.isResuming}>{pageResume.isResuming ? '重新連線中…' : '立即重試'}</button>
+                  <button type="button" className="btn btn-secondary status-message-action" onClick={() => recoverPage()}>重新開啟本頁</button>
+                </div>
+              )}
             >
               <span>原有畫面仍保留；連線恢復後會自動更新登入狀態與設定。</span>
               {authError && <small>{authError}</small>}

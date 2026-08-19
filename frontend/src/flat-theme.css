@@ -871,6 +871,15 @@ textarea {
   padding: 0.4rem 0.75rem;
 }
 
+.status-message-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .empty-state {
   justify-content: flex-start;
   border-left-color: var(--border-glow);
@@ -1103,6 +1112,11 @@ textarea {
 
   .status-message-action {
     width: 100%;
+  }
+
+  .status-message-actions {
+    width: 100%;
+    flex-direction: column;
   }
 
   .quota-banner {

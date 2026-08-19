@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-HTML_CACHE_CONTROL = "no-cache, max-age=0, must-revalidate"
+HTML_CACHE_CONTROL = "no-store, max-age=0, must-revalidate"
 HASHED_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable"
 HASHED_FRONTEND_ASSET_RE = re.compile(r"-[A-Za-z0-9_-]{8,}\.(?:js|css)$", re.IGNORECASE)
 

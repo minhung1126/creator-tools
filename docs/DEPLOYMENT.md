@@ -61,7 +61,7 @@ docker compose logs -f creator-tools
 FastAPI 會對首頁及其他 HTML 回傳：
 
 ```text
-Cache-Control: no-cache, max-age=0, must-revalidate
+Cache-Control: no-store, max-age=0, must-revalidate
 ```
 
 Vite 產生的 `/assets/*-<hash>.js` 與 `/assets/*-<hash>.css` 則回傳一年 immutable 快取。若前方使用 Cloudflare 或其他 CDN，請確認 Browser Cache TTL 沒有覆寫 origin 的 HTML header，也不要對首頁套用一年 immutable 規則；不需要使用 `Clear-Site-Data`。
@@ -79,7 +79,7 @@ foreach ($asset in $assets) {
 }
 ```
 
-`APP_COMMIT_SHA` 會同時傳給 backend runtime 與 frontend builder 的 `VITE_APP_COMMIT_SHA`；health API 的 `commit_sha` 可用來辨識前後端版本是否一致。部署策略應盡量保留至少前一版 hashed assets；若暫時無法保留，首頁的 no-cache/revalidation 規則不可被 CDN 覆寫。
+`APP_COMMIT_SHA` 會同時傳給 backend runtime 與 frontend builder 的 `VITE_APP_COMMIT_SHA`；health API 的 `commit_sha` 可用來辨識前後端版本是否一致。部署策略必須保留至少前一版 hashed assets，直到所有可能仍在使用舊 HTML 的分頁都能自然失效；若使用 Docker image 直接替換，請由 CDN 或共享靜態資產儲存保留舊版 `/assets/*`。HTML 的 `no-store` 只能避免新的 HTML 被重複使用，不能補回已被刪除的舊 JS/CSS。
 
 ## 健康檢查與資料保存
 
