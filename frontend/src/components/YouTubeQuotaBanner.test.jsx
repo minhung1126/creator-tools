@@ -42,7 +42,7 @@ describe('YouTubeQuotaBanner', () => {
   it('shows confirmed exhaustion as blocked with zero effective availability', async () => {
     api.getYoutubeQuotaUsage.mockResolvedValue(usage('confirmed_exhausted'));
     render(<YouTubeQuotaBanner />);
-    await waitFor(() => expect(screen.getByText('Google 已確認 `quotaExceeded`；系統已停止新的 YouTube 請求，直到官方重設。')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Google 已確認配額耗盡；系統已停止新的 YouTube 請求，直到官方重設。')).toBeInTheDocument());
     expect(screen.getByText(/系統可用 0 單位/)).toBeInTheDocument();
   });
 
@@ -62,7 +62,7 @@ describe('YouTubeQuotaBanner', () => {
     await waitFor(() => expect(screen.getByText(/系統可用 7,180 單位/)).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('YouTube 授權組合'), { target: { value: 'secondary' } });
-    await waitFor(() => expect(screen.getByText(/正在更新次要授權組合資料/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('更新中…')).toBeInTheDocument());
     expect(screen.queryByText(/系統可用 7,180 單位/)).not.toBeInTheDocument();
 
     resolveSecondary(usage('warning'));

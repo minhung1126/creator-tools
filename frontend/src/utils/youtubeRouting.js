@@ -32,11 +32,11 @@ export function youtubeRoutingLabel(mode) {
 
 export function youtubeRoutingReasonLabel(reason) {
   const labels = {
-    auto_primary_available: 'Primary quota 足夠，優先使用 Primary',
-    auto_secondary_quota_insufficient: 'Primary 本次 quota 不足，改用 Secondary',
-    auto_secondary_youtube_quota_exhausted: 'Primary quota 已用完，改用 Secondary',
+    auto_primary_available: 'Primary 配額足夠，優先使用 Primary',
+    auto_secondary_quota_insufficient: 'Primary 本次配額不足，改用 Secondary',
+    auto_secondary_youtube_quota_exhausted: 'Primary 配額已用完，改用 Secondary',
     auto_secondary_youtube_quota_safety_blocked: 'Primary 已達安全上限，改用 Secondary',
-    auto_secondary_youtube_quota_storage_unavailable: 'Primary quota ledger 暫時不可用，改用 Secondary',
+    auto_secondary_youtube_quota_storage_unavailable: 'Primary 配額記錄暫時不可用，改用 Secondary',
     auto_secondary_not_connected: 'Primary 未連結，改用 Secondary',
     auto_secondary_not_configured: 'Primary 未配置，改用 Secondary',
     preview_pinned_slot: '沿用 preview 已選定的 slot',

@@ -42,7 +42,7 @@ describe('TeamPersonFilterPanel', () => {
     expect(screen.getByRole('combobox')).toBeDisabled();
 
     rerender(<TeamPersonFilterPanel {...baseProps} loadingPeople />);
-    expect(screen.getByText('正在讀取人物…')).toBeInTheDocument();
+    expect(screen.getByText('讀取中…')).toBeInTheDocument();
 
     rerender(<TeamPersonFilterPanel {...baseProps} people={[]} error="讀取失敗" />);
     expect(screen.getByRole('alert')).toHaveTextContent('讀取失敗');

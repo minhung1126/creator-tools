@@ -62,7 +62,7 @@ export default function DashboardPage({ authUser, sysSettings }) {
 
         <div className="glass-panel glass-panel-interactive feature-card">
           <div className="icon-box icon-box-secondary"><Send size={28} /></div>
-          <div className="feature-card-copy"><h3>發布並清理清單</h3><p>依序公開影片並自 To-Post 播放清單移除，完成後直接顯示結果。</p></div>
+          <div className="feature-card-copy"><h3>發布草稿</h3><p>依序設為公開並移出 To-Post 播放清單，完成後直接顯示結果。</p></div>
           <Link className="btn btn-primary feature-card-action" to={PATHS.youtubePublishCleanup}>進入發布模組 <ArrowRight size={16} /></Link>
         </div>
 

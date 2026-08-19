@@ -2,7 +2,19 @@ import React, { useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import Dialog from './Dialog';
 
-export default function ConfirmDialog({ open, title, message, confirmText, cancelText, onConfirm, onCancel, variant, busy = false }) {
+export default function ConfirmDialog({
+  open,
+  title,
+  message,
+  content,
+  children,
+  confirmText,
+  cancelText,
+  onConfirm,
+  onCancel,
+  variant,
+  busy = false,
+}) {
   const cancelRef = useRef(null);
   const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
@@ -10,6 +22,8 @@ export default function ConfirmDialog({ open, title, message, confirmText, cance
 
   const isDestructive = variant === 'destructive';
   const isBusy = busy || submitting;
+  const structuredContent = content ?? children;
+  const hasStructuredContent = structuredContent !== undefined && structuredContent !== null;
   const handleConfirm = async () => {
     if (isBusy || submittingRef.current) return;
     submittingRef.current = true;
@@ -38,7 +52,13 @@ export default function ConfirmDialog({ open, title, message, confirmText, cance
           <AlertTriangle size={22} aria-hidden="true" />
           <h3 id="confirm-dialog-title" className="confirm-title">{title || '確認操作'}</h3>
         </div>
-        <p id="confirm-dialog-message" className="confirm-message">{message}</p>
+        {hasStructuredContent ? (
+          <div id="confirm-dialog-message" className="confirm-message confirm-message-structured">
+            {structuredContent}
+          </div>
+        ) : (
+          <p id="confirm-dialog-message" className="confirm-message">{message}</p>
+        )}
         <div className="confirm-actions">
           <button ref={cancelRef} type="button" className="btn btn-secondary" onClick={onCancel} disabled={isBusy}>
             {cancelText || '取消'}

@@ -14,7 +14,7 @@ export default function YouTubeSettingsLayout() {
     <div className="section-gap settings-page">
       <header className="page-header">
         <h1>YouTube 設定</h1>
-        <p className="section-desc">管理 YouTube OAuth slot、頻道一致性、quota 優先順序與發布預設資源。</p>
+        <p className="section-desc">管理 YouTube OAuth slot、頻道一致性、配額優先順序與發布預設資源。</p>
       </header>
       <nav className="settings-subnav" aria-label="YouTube 設定子導覽">
         {items.map(([to, label]) => <NavLink key={to} to={to} className={({ isActive }) => `settings-subnav-link${isActive ? ' active' : ''}`}>{label}</NavLink>)}
@@ -23,4 +23,3 @@ export default function YouTubeSettingsLayout() {
     </div>
   );
 }
-

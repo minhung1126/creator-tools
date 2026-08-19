@@ -10,7 +10,7 @@ const TITLES = [
   [/^\/youtube\/uploads\//, 'YouTube 上傳工作｜Creator Tools'],
   [/^\/youtube\/drafts\/videos$/, 'Video 草稿｜Creator Tools'],
   [/^\/youtube\/drafts\/shorts$/, 'Shorts 草稿｜Creator Tools'],
-  [/^\/youtube\/publish-cleanup$/, '發布並清理清單｜Creator Tools'],
+  [/^\/youtube\/publish-cleanup$/, '發布草稿｜Creator Tools'],
   [/^\/youtube\/settings\/connections$/, 'YouTube 授權組合｜Creator Tools'],
   [/^\/youtube\/settings\/routing$/, 'YouTube Routing｜Creator Tools'],
   [/^\/youtube\/settings\/quota$/, 'YouTube Quota｜Creator Tools'],

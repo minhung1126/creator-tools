@@ -124,9 +124,9 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, ac
   if (loading || !currentUsage) {
     return (
       <div className={`glass-panel quota-status-panel${compact ? ' quota-status-panel-compact' : ''}`}>
-        <StatusMessage title="正在讀取 YouTube 配額">
+        <StatusMessage title="讀取中…">
           <RefreshCw size={16} className="spin" aria-hidden="true" />
-          正在更新{slotLabel(selectedSlot)}資料…
+          更新中…
         </StatusMessage>
       </div>
     );
@@ -177,7 +177,7 @@ export default function YouTubeQuotaBanner({ refreshKey = 0, compact = false, ac
         <span>最後更新：{formatLastUpdated(updatedAt)}</span>
       </div>
 
-      {confirmed && <div className="quota-alert quota-alert-error"><AlertTriangle size={16} aria-hidden="true" /><span>Google 已確認 `quotaExceeded`；系統已停止新的 YouTube 請求，直到官方重設。</span></div>}
+      {confirmed && <div className="quota-alert quota-alert-error"><AlertTriangle size={16} aria-hidden="true" /><span>Google 已確認配額耗盡；系統已停止新的 YouTube 請求，直到官方重設。</span></div>}
       {!confirmed && stateKey === 'safety_blocked' && <div className="quota-alert quota-alert-warning">Creator Tools 已達自訂安全上限，等待官方重設後自動恢復。</div>}
       {!confirmed && currentUsage?.reason && <div className="quota-alert quota-alert-warning"><AlertTriangle size={16} aria-hidden="true" /><span>{currentUsage.reason}</span></div>}
 

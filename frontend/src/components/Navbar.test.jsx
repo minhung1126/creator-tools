@@ -38,7 +38,7 @@ describe('Navbar', () => {
       '上傳至 YouTube',
       'Video 草稿',
       'Shorts 草稿',
-      '發布草稿並清理清單',
+      '發布草稿',
       'YouTube 設定',
     ]);
   });

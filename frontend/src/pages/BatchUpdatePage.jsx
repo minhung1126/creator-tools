@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { useToast } from '../components/Toast';
 import useAccountWorkState from '../hooks/useAccountWorkState';
 import ConfirmDialog from '../components/ConfirmDialog';
+import ResultStatus from '../components/ResultStatus';
 import ThumbnailDialog from '../components/ThumbnailDialog';
 import SheetDataSourcePanel from '../components/SheetDataSourcePanel';
 import SourceLinkInput from '../components/SourceLinkInput';
@@ -12,6 +13,13 @@ import useSharedTeamPersonFilterPersistence from '../hooks/useSharedTeamPersonFi
 import { normalizeTeamPersonFilter, readSharedTeamPersonFilter } from '../utils/teamPersonFilterStorage';
 import { sortVideosByUploadTime } from '../utils/videoOrder';
 import { youtubeIsConnected, youtubePreferredUiSlot, youtubeRoutingReasonLabel } from '../utils/youtubeRouting';
+import {
+  YOUTUBE_COPY,
+  formatQuotaUnits,
+  formatResultCounts,
+  formatVideoCount,
+  formatVideoId,
+} from '../utils/youtubeCopy';
 import {
   AlertCircle,
   CheckCircle2,
@@ -102,6 +110,15 @@ export function buildBatchPreview({
     if (distinct.size > 1) return { ...base, reason: `團體 ${team} 的選項 ${person} 有多筆且標題或描述內容不同` };
     const next = values[0];
     if (!next.title) return { ...base, newDescription: next.description, reason: `工作表的 ${titleColumn} 為空白` };
+    if (next.title === base.currentTitle && next.description === base.currentDescription) {
+      return {
+        ...base,
+        newTitle: next.title,
+        newDescription: next.description,
+        status: 'unchanged',
+        reason: '標題與描述沒有變更',
+      };
+    }
     return {
       ...base,
       newTitle: next.title,
@@ -166,9 +183,120 @@ function PreviewField({ label, value }) {
   );
 }
 
-function previewStatusLabel(item) {
-  if (item?.willUpdate || item?.status === 'ready') return '將更新';
-  return item?.reason || '略過';
+export function getBatchPreviewStatus(item) {
+  const status = String(item?.status || '').toLowerCase();
+  if (item?.willUpdate || ['ready', 'will_update', 'to_update'].includes(status)) {
+    return { key: 'willUpdate', label: '將更新', tone: 'success' };
+  }
+  if (['unchanged', 'no_change', 'no-change', 'not_changed'].includes(status)
+    || /沒有變更|無變更/.test(String(item?.reason || ''))) {
+    return { key: 'unchanged', label: '沒有變更', tone: 'neutral' };
+  }
+  if (['failed', 'error'].includes(status)) return { key: 'failed', label: '失敗', tone: 'error' };
+  return { key: 'skipped', label: '略過', tone: 'neutral' };
+}
+
+export function isBatchPreviewUpdate(item) {
+  return getBatchPreviewStatus(item).key === 'willUpdate';
+}
+
+function PreviewComparisonField({ label, value, emptyLabel, multiline = false }) {
+  const text = value === null || value === undefined || String(value) === '' ? emptyLabel : String(value);
+  const isLong = multiline && (text.length > 280 || text.split('\n').length > 6);
+  const field = <p className={`batch-preview-value-text${multiline ? ' batch-preview-value-text-multiline' : ''}`}>{text}</p>;
+  return (
+    <div className="batch-preview-value">
+      <span className="batch-preview-value-label">{label}</span>
+      {isLong ? (
+        <details className="batch-preview-expand">
+          <summary>展開完整內容</summary>
+          {field}
+        </details>
+      ) : field}
+    </div>
+  );
+}
+
+function BatchPreviewItem({ item, index }) {
+  const previewStatus = getBatchPreviewStatus(item);
+  const videoId = item.videoId || item.video_id;
+  const currentTitle = item.currentTitle || '';
+  const currentDescription = item.currentDescription || '';
+  const nextTitle = item.newTitle || '';
+  const nextDescription = item.newDescription || '';
+  const nextEmptyLabel = previewStatus.key === 'willUpdate' ? '（空白）' : '（未套用）';
+  return (
+    <article className={`batch-preview-item batch-preview-item-${previewStatus.key}`}>
+      <div className="batch-preview-item-heading">
+        <div className="batch-preview-item-title">
+          <span className="batch-preview-item-index">#{index + 1}</span>
+          <strong>{currentTitle || videoId || '無標題影片'}</strong>
+        </div>
+        <span className={`batch-preview-status batch-preview-status-${previewStatus.tone}`}>{previewStatus.label}</span>
+      </div>
+      <div className="batch-preview-item-meta">
+        <span>{formatVideoId(videoId)}</span>
+        <span>人物：{item.person || '未指定'}</span>
+      </div>
+      <div className="batch-preview-comparison" aria-label={`第 ${index + 1} 支影片的標題與描述比較`}>
+        <div className="batch-preview-column batch-preview-column-current">
+          <h4>目前內容</h4>
+          <PreviewComparisonField label="目前標題" value={currentTitle} emptyLabel="（空白）" />
+          <PreviewComparisonField label="目前描述" value={currentDescription} emptyLabel="（空白）" multiline />
+        </div>
+        <div className="batch-preview-arrow" aria-hidden="true">→</div>
+        <div className="batch-preview-column batch-preview-column-next">
+          <h4>更新後內容</h4>
+          <PreviewComparisonField label="更新後標題" value={nextTitle} emptyLabel={nextEmptyLabel} />
+          <PreviewComparisonField label="更新後描述" value={nextDescription} emptyLabel={nextEmptyLabel} multiline />
+        </div>
+      </div>
+      {previewStatus.key !== 'willUpdate' && (
+        <div className={`batch-preview-reason batch-preview-reason-${previewStatus.tone}`}>
+          <strong>{previewStatus.label}</strong>
+          {item.reason && <span>原因：{item.reason}</span>}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function BatchUpdateConfirmationContent({ batchPreview, previewCounts, quotaEstimate }) {
+  return (
+    <div className="confirm-content">
+      <dl className="confirm-summary-list" aria-label="批次更新摘要">
+        <div><dt>預覽影片</dt><dd>{formatVideoCount(batchPreview.length)}</dd></div>
+        <div><dt>將更新</dt><dd>{formatVideoCount(previewCounts.willUpdate)}</dd></div>
+        <div><dt>沒有變更</dt><dd>{formatVideoCount(previewCounts.unchanged)}</dd></div>
+        <div><dt>略過</dt><dd>{formatVideoCount(previewCounts.skipped)}</dd></div>
+        <div><dt>失敗</dt><dd>{formatVideoCount(previewCounts.failed)}</dd></div>
+      </dl>
+
+      <section className="confirm-section" aria-labelledby="batch-confirm-operation-title">
+        <h4 id="batch-confirm-operation-title">更新內容</h4>
+        <p className="confirm-section-description">本次只會{YOUTUBE_COPY.updateMetadata}；標記為略過、沒有變更或失敗的影片不會送出更新。</p>
+      </section>
+
+      {quotaEstimate && (
+        <section className="confirm-quota-panel" aria-labelledby="batch-confirm-quota-title">
+          <h4 id="batch-confirm-quota-title">配額預估</h4>
+          <dl className="confirm-summary-list confirm-summary-list-compact">
+            <div><dt>最壞估算</dt><dd>{formatQuotaUnits(quotaEstimate.projected_units)}</dd></div>
+            <div><dt>安全可用</dt><dd>{formatQuotaUnits(quotaEstimate.effective_available_units)}</dd></div>
+            <div><dt>預估結果</dt><dd>{quotaEstimate.can_complete_today ? '預計可完成' : '可能需要分批處理'}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      <div className="confirm-risk-panel" role="note" aria-label="批次更新風險說明">
+        <strong>風險與處理方式</strong>
+        <ul>
+          <li>執行前仍會驗證完整預覽；資料變更時會安全停止，不會套用舊計畫。</li>
+          <li>若途中達到配額上限，未執行項目會保留在結果中，請於官方重設後重新讀取並送出。</li>
+        </ul>
+      </div>
+    </div>
+  );
 }
 
 export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Video' }) {
@@ -329,6 +457,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     setSelectedVideoIds([]);
     setAssignments({});
     setBulkPerson('');
+    setQuotaEstimate(null);
     restoreVideoOptionsRef.current = false;
   }, []);
 
@@ -642,7 +771,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   const setAllVideosSelected = (checked) => setSelectedVideoIds(checked ? videos.map((video) => video.video_id) : []);
 
   const applyBulkAssignment = () => {
-    if (!selectedVideoIds.length) return toast.warning('請先勾選要批量編輯的影片');
+    if (!selectedVideoIds.length) return toast.warning('請先勾選要批次編輯的影片');
     if (!bulkPerson) return toast.warning('請先選擇要套用的人物');
     const selectedCount = selectedVideoIds.length;
     setAssignments((current) => {
@@ -733,10 +862,10 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       setPreviewToken('');
       setPreviewSnapshot(null);
       setPreviewFingerprint('');
-      const summary = `成功 ${res.succeeded_count || 0} 筆、略過 ${res.skipped_count || 0} 筆、失敗 ${res.failed_count || 0} 筆`;
-      if (res.quota_blocked || res.not_attempted_count) toast.warning(`YouTube 更新部分完成：${summary}`);
-      else if (res.failed_count) toast.warning(`YouTube 更新完成但有失敗項目：${summary}`);
-      else toast.success(`YouTube 更新完成：${summary}`);
+      const summary = formatResultCounts(res);
+      if (res.quota_blocked || res.not_attempted_count) toast.warning(`YouTube ${YOUTUBE_COPY.batchUpdate}部分完成：${summary}`);
+      else if (res.failed_count) toast.warning(`YouTube ${YOUTUBE_COPY.batchUpdate}完成但有失敗項目：${summary}`);
+      else toast.success(`YouTube ${YOUTUBE_COPY.batchUpdate}完成：${summary}`);
     } catch (err) {
       if (err.code === 'stale_preview' || err.status === 409) {
         setResult(null);
@@ -766,7 +895,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
     const previewResult = await loadBatchPreview();
     if (!previewResult) return;
     const { plan, snapshot } = previewResult;
-    const activeCount = plan.filter((item) => item.willUpdate).length;
+    const activeCount = plan.filter(isBatchPreviewUpdate).length;
     if (!activeCount) return toast.warning('完整預覽中沒有可更新的影片');
     setEstimateLoading(true);
     try {
@@ -777,7 +906,7 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       }));
     } catch (error) {
       setQuotaEstimate(null);
-      toast.warning(`無法取得 quota 預估，仍可直接執行：${error.message}`);
+      toast.warning(`無法取得配額預估，仍可直接執行：${error.message}`);
     } finally {
       setEstimateLoading(false);
     }
@@ -785,11 +914,26 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
   };
 
   const sourceLabel = playlistSource === 'youtube-api' ? 'YouTube API' : '';
-  const previewUpdateCount = batchPreview?.filter((item) => item.willUpdate || item.status === 'ready').length || 0;
-  const previewSkipCount = batchPreview ? batchPreview.length - previewUpdateCount : 0;
+  const previewCounts = useMemo(() => {
+    const counts = { willUpdate: 0, unchanged: 0, skipped: 0, failed: 0 };
+    (batchPreview || []).forEach((item) => {
+      counts[getBatchPreviewStatus(item).key] += 1;
+    });
+    return counts;
+  }, [batchPreview]);
   return (
     <div className="section-gap batch-update-page">
-      <ConfirmDialog open={confirmOpen} title={`確認更新 ${videoType}`} message={`完整預覽共 ${batchPreview?.length || 0} 支：將更新 ${previewUpdateCount} 支，略過 ${previewSkipCount} 支。${quotaEstimate ? `最壞估算 ${Number(quotaEstimate.projected_units || 0).toLocaleString()} 單位；今日安全可用 ${Number(quotaEstimate.effective_available_units || 0).toLocaleString()} 單位。${quotaEstimate.can_complete_today ? '預計可完成。' : '若執行途中達配額上限，未執行項目需在官方重設後重新送出。'}` : ''}`} confirmText={estimateLoading ? '估算中…' : '確認開始覆寫'} cancelText="取消" variant="destructive" busy={executing || estimateLoading} onConfirm={doExecute} onCancel={() => setConfirmOpen(false)} />
+      <ConfirmDialog
+        open={confirmOpen}
+        title={`確認${YOUTUBE_COPY.batchUpdate} ${formatVideoCount(previewCounts.willUpdate)}`}
+        content={batchPreview ? <BatchUpdateConfirmationContent batchPreview={batchPreview} previewCounts={previewCounts} quotaEstimate={quotaEstimate} /> : null}
+        confirmText={estimateLoading ? YOUTUBE_COPY.readLoading : `開始${YOUTUBE_COPY.batchUpdate}`}
+        cancelText="取消"
+        variant="destructive"
+        busy={executing || estimateLoading}
+        onConfirm={doExecute}
+        onCancel={() => setConfirmOpen(false)}
+      />
       <header className="page-header">
         <div className="section-header"><VideoIcon size={24} color="var(--primary)" /><h1>YouTube {videoType} 草稿</h1></div>
         <p className="section-desc">此頁只處理 {videoType}。先確認資料來源、工作表與欄位，再勾選要出現在人物下拉選單中的人物。</p>
@@ -848,37 +992,36 @@ export default function BatchUpdatePage({ sysSettings, authUser, videoType = 'Vi
       {errorMsg && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{errorMsg}</span></div>}
       {workStateError && <div className="filter-panel-status filter-panel-status-error" role="alert">工作狀態同步失敗：{workStateError}</div>}
       {configSaveError && <div className="glass-panel error-alert"><AlertCircle size={20} /><span>{configSaveError}</span></div>}
-      <div className="page-actions"><button className="btn btn-primary" onClick={handleLoadVideos} disabled={loadingVideos}><RefreshCw size={16} className={loadingVideos ? 'spin' : ''} /> {loadingVideos ? '載入中...' : `讀取 ${videoType} 草稿影片`}</button></div>
+      <div className="page-actions"><button className="btn btn-primary" onClick={handleLoadVideos} disabled={loadingVideos}><RefreshCw size={16} className={loadingVideos ? 'spin' : ''} /> {loadingVideos ? YOUTUBE_COPY.readLoading : `讀取 ${videoType} 草稿影片`}</button></div>
 
       {videos.length > 0 && <div className="section-gap batch-videos">
-        <div className="page-header"><h2>為每支影片指定人物（{videos.length} 支）</h2><p className="section-desc batch-source-label">來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
+        <div className="page-header"><h2>為每支影片指定人物（{formatVideoCount(videos.length)}）</h2><p className="section-desc batch-source-label">來源：{sourceLabel}{playlistFallbackReason ? `；回退原因：${playlistFallbackReason}` : ''}</p></div>
         <div className="glass-panel bulk-edit-panel card-stack">
-          <div className="action-bar bulk-edit-heading"><div><h3>批量勾選編輯（已勾選 {selectedVideoIds.length} 支）</h3><p>只會把人物選項套用到已勾選影片，不會送出或覆寫 YouTube。套用後會自動清除勾選。</p></div><label className="bulk-select-all"><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label></div>
-          <div className="toolbar bulk-edit-controls"><div className="form-group bulk-person-field"><label className="form-label">批量套用人物</label><select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">請選擇人物</option><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div><button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button></div>
+          <div className="action-bar bulk-edit-heading"><div><h3>批次勾選編輯（已勾選 {formatVideoCount(selectedVideoIds.length)}）</h3><p>只會把人物選項套用到已勾選影片，不會送出 YouTube 更新。套用後會自動清除勾選。</p></div><label className="bulk-select-all"><input type="checkbox" checked={selectedVideoIds.length === videos.length} onChange={(e) => setAllVideosSelected(e.target.checked)} /> 全選 / 全不選</label></div>
+          <div className="toolbar bulk-edit-controls"><div className="form-group bulk-person-field"><label className="form-label">批次套用人物</label><select className="form-select" value={bulkPerson} onChange={(e) => setBulkPerson(e.target.value)}><option value="">請選擇人物</option><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div><button className="btn btn-primary" onClick={applyBulkAssignment} disabled={!selectedVideoIds.length || !bulkPerson}>套用到已勾選影片</button></div>
         </div>
-        <div className="video-card-grid">{videos.map((video) => <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}${selectedVideoIds.includes(video.video_id) ? ' video-card-selected' : ''}`} role="button" tabIndex={0} aria-pressed={selectedVideoIds.includes(video.video_id)} aria-label={`${selectedVideoIds.includes(video.video_id) ? '取消選取' : '選取'}${video.title || '影片'}加入批量編輯`} onClick={(event) => handleVideoCardClick(event, video.video_id)} onKeyDown={(event) => handleVideoCardKeyDown(event, video.video_id)}>
-          <label className="video-select-label"><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批量編輯</label>
+        <div className="video-card-grid">{videos.map((video) => <div key={video.video_id} className={`glass-panel video-card ${assignments[video.video_id] && assignments[video.video_id] !== '不編輯' ? 'video-card-assigned' : 'video-card-skipped'}${selectedVideoIds.includes(video.video_id) ? ' video-card-selected' : ''}`} role="button" tabIndex={0} aria-pressed={selectedVideoIds.includes(video.video_id)} aria-label={`${selectedVideoIds.includes(video.video_id) ? '取消選取' : '選取'}${video.title || '影片'}加入批次編輯`} onClick={(event) => handleVideoCardClick(event, video.video_id)} onKeyDown={(event) => handleVideoCardKeyDown(event, video.video_id)}>
+          <label className="video-select-label"><input type="checkbox" checked={selectedVideoIds.includes(video.video_id)} onChange={() => toggleVideoSelection(video.video_id)} /> 加入批次編輯</label>
           <div className="video-thumbnail-wrapper">{video.thumbnail_url ? <button type="button" className="video-thumbnail-button" aria-label={`放大檢視${video.title || '影片'}縮圖`} onClick={() => setPreviewImage({ src: video.thumbnail_url, alt: video.title })}><img className="video-thumbnail" src={video.thumbnail_url} alt="" /></button> : <div>無縮圖</div>}</div>
-          <div className="video-card-copy"><h4>{video.title || '無標題影片'}</h4><p>Video ID: {video.video_id}</p></div>
+          <div className="video-card-copy"><h4>{video.title || '無標題影片'}</h4><p>{formatVideoId(video.video_id)}</p></div>
           <div className="form-group video-card-assignment"><label className="form-label">指定套用人物</label><select className="form-select" value={assignments[video.video_id] || '不編輯'} onChange={(e) => setAssignments((current) => ({ ...current, [video.video_id]: e.target.value }))}><option value="不編輯">不編輯（略過）</option>{availablePeople.map((person) => <option key={person} value={person}>{person}</option>)}</select></div>
         </div>)}</div>
         {batchPreview && <section className="glass-panel card-padding batch-preview-panel" aria-label="完整批次變更預覽">
-          <div className="page-header"><h3>完整批次變更預覽</h3><p className="section-desc">逐片核對目前值、新值、人物與略過原因；確認的是這份完整計畫。</p></div>
+          <div className="page-header"><h3>{YOUTUBE_COPY.batchUpdate}預覽</h3><p className="section-desc">逐片核對目前內容、更新後內容、人物與處理狀態；確認的是這份完整計畫。</p></div>
+          <div className="batch-preview-summary" aria-label="批次預覽狀態摘要">
+            <span className="batch-preview-summary-item batch-preview-summary-success">將更新 <strong>{formatVideoCount(previewCounts.willUpdate)}</strong></span>
+            <span className="batch-preview-summary-item">沒有變更 <strong>{formatVideoCount(previewCounts.unchanged)}</strong></span>
+            <span className="batch-preview-summary-item">略過 <strong>{formatVideoCount(previewCounts.skipped)}</strong></span>
+            <span className="batch-preview-summary-item batch-preview-summary-error">失敗 <strong>{formatVideoCount(previewCounts.failed)}</strong></span>
+          </div>
           <div className="batch-preview-list">
-            {batchPreview.map((item) => (
-              <article className={`batch-preview-item ${item.willUpdate || item.status === 'ready' ? 'batch-preview-item-ready' : 'batch-preview-item-skipped'}`} key={item.videoId || item.video_id}>
-                <div className="batch-preview-item-heading"><strong>{item.currentTitle || item.videoId || item.video_id}</strong><span className="badge">{item.willUpdate || item.status === 'ready' ? '將更新' : '略過'}</span></div>
-                <div className="batch-preview-item-meta">影片 ID：{item.videoId || item.video_id} · 人物：{item.person || '未指定'}</div>
-                <div className="batch-preview-values"><div><span>目前標題</span><p>{item.currentTitle || '（空白）'}</p></div><div><span>新標題</span><p>{item.newTitle || '（不變更）'}</p></div><div><span>目前描述</span><p>{item.currentDescription || '（空白）'}</p></div><div><span>新描述</span><p>{item.newDescription || '（不變更）'}</p></div></div>
-                {item.reason && <p className="batch-preview-reason">略過原因：{previewStatusLabel(item)}</p>}
-              </article>
-            ))}
+            {batchPreview.map((item, index) => <BatchPreviewItem item={item} index={index} key={item.videoId || item.video_id} />)}
           </div>
         </section>}
-        <div className="glass-panel execution-bar"><div><strong>將處理目前清單中的 {videos.length} 支影片</strong><p>人物為「不編輯」的影片會安全略過。</p></div><button className="btn btn-success" onClick={requestExecute} disabled={executing}><Send size={18} /> {executing ? '批次更新中...' : '確認並開始覆寫'}</button></div>
+        <div className="glass-panel execution-bar"><div><strong>將處理目前清單中的 {formatVideoCount(videos.length)}</strong><p>人物為「不編輯」的影片會安全略過。</p></div><button className="btn btn-success" onClick={requestExecute} disabled={executing}><Send size={18} /> {executing ? YOUTUBE_COPY.updateLoading : `檢查並${YOUTUBE_COPY.updateMetadata}`}</button></div>
       </div>}
 
-      {result && <div className="glass-panel card-padding result-panel card-stack"><h3 className={result.completed ? 'result-heading result-heading-success' : 'result-heading result-heading-warning'}><CheckCircle2 size={22} /> {result.completed ? 'YouTube 更新已執行完成' : 'YouTube 更新部分完成'}</h3><p className="section-desc">共 {result.total_count || 0} 筆：成功 {result.succeeded_count || 0}、略過 {result.skipped_count || 0}、失敗 {result.failed_count || 0}、未執行 {result.not_attempted_count || 0}。</p>{result.quota_blocked && <div className="info-banner"><Info size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新送出。</span></div>}{(result.results || []).map((item) => <div key={item.video_id} className="result-item result-row"><div><strong>{item.title || item.video_id}</strong><div className="result-meta">ID: {item.video_id}{item.person ? ` · ${item.person}` : ''}</div>{item.reason && <div className={item.status === 'failed' ? 'result-reason result-reason-failed' : 'result-reason'}>{item.reason}</div>}</div><span className={`badge ${item.status === 'succeeded' ? 'badge-connected' : item.status === 'failed' ? 'badge-disconnected' : 'badge-warning'}`}>{item.status === 'succeeded' ? '成功' : item.status === 'failed' ? '失敗' : item.status === 'skipped' ? '略過' : '未執行'}</span></div>)}</div>}
+      {result && <div className="glass-panel card-padding result-panel card-stack"><h3 className={result.completed ? 'result-heading result-heading-success' : 'result-heading result-heading-warning'}><CheckCircle2 size={22} /> {result.completed ? `YouTube ${YOUTUBE_COPY.batchUpdate}已執行完成` : `YouTube ${YOUTUBE_COPY.batchUpdate}部分完成`}</h3><p className="section-desc">共 {formatVideoCount(result.total_count || 0)}：{formatResultCounts(result)}。</p>{result.quota_blocked && <div className="info-banner"><Info size={15} /><span>已達 YouTube 配額上限；未執行項目請於官方重設後重新讀取草稿影片並送出。</span></div>}{(result.results || []).map((item) => <div key={item.video_id} className="result-item result-row"><div><strong>{item.title || item.video_id}</strong><div className="result-meta">{formatVideoId(item.video_id)}{item.person ? ` · ${item.person}` : ''}</div>{item.reason && <div className={item.status === 'failed' ? 'result-reason result-reason-failed' : 'result-reason'}>{item.reason}</div>}</div><ResultStatus status={item.status} /></div>)}</div>}
       <ThumbnailDialog image={previewImage} onClose={() => setPreviewImage(null)} />
     </div>
   );

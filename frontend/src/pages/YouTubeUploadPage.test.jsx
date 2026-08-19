@@ -188,7 +188,7 @@ describe('YouTubeUploadPage quota admission', () => {
     fireEvent.change(screen.getByLabelText('Google Drive ID／網址'), { target: { value: 'drive-folder' } });
     fireEvent.click(screen.getByRole('button', { name: '解析 Drive 內容' }));
 
-    await waitFor(() => expect(screen.getByText('Google 已確認 quota 耗盡')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Google 已確認配額耗盡')).toBeInTheDocument());
     expect(screen.getByText(/請重新解析 Drive 內容/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '確認開始背景上傳' })).toBeDisabled();
   });

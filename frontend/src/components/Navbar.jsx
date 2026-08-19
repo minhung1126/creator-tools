@@ -9,7 +9,7 @@ const youtubeItems = [
   { id: 'youtube_upload', to: PATHS.youtubeUploadNew, label: '上傳至 YouTube', icon: Upload },
   { id: 'youtube_video_drafts', to: PATHS.youtubeVideoDrafts, label: 'Video 草稿', icon: Clapperboard },
   { id: 'youtube_shorts_drafts', to: PATHS.youtubeShortsDrafts, label: 'Shorts 草稿', icon: Smartphone },
-  { id: 'publish_clean', to: PATHS.youtubePublishCleanup, label: '發布草稿並清理清單', icon: Send },
+  { id: 'publish_clean', to: PATHS.youtubePublishCleanup, label: '發布草稿', icon: Send },
   { id: 'youtube_settings', to: PATHS.youtubeConnections, label: 'YouTube 設定', icon: Settings, activePrefix: PATHS.youtubeSettings },
 ];
 const sheetItems = [{ id: 'sheet_copy', to: PATHS.sheetCopy, label: '內容複製', icon: Copy }];

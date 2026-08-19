@@ -106,13 +106,13 @@ function quotaReason(quota, general, videoUploads) {
   const generalAvailable = numericValue(general?.effective_available_units);
   const generalRequired = quotaMetric(quota, 'general', ['remaining_required', 'job_required', 'create_required'], numericValue(general?.projected_units, 0));
   if (generalAvailable !== null && generalRequired > generalAvailable) {
-    return `General 配額不足：建立工作還需要 ${formatUnits(generalRequired)} units，目前可用 ${formatUnits(generalAvailable)} units。`;
+    return `General 配額不足：建立工作還需要 ${formatUnits(generalRequired)} 單位，目前可用 ${formatUnits(generalAvailable)} 單位。`;
   }
 
   const uploadAvailable = numericValue(videoUploads?.effective_available_units);
   const uploadRequired = quotaMetric(quota, 'video_uploads', ['remaining_required', 'job_required', 'create_required'], numericValue(videoUploads?.projected_units, 0));
   if (uploadAvailable !== null && uploadRequired > uploadAvailable) {
-    return `Video Uploads 配額不足：需要 ${formatUnits(uploadRequired)} units，目前可用 ${formatUnits(uploadAvailable)} units。`;
+    return `Video Uploads 配額不足：需要 ${formatUnits(uploadRequired)} 單位，目前可用 ${formatUnits(uploadAvailable)} 單位。`;
   }
   return '後端尚未確認這份預覽可以建立背景工作。';
 }
@@ -414,7 +414,7 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, mode = '
       {isJobPage && <div className="page-actions"><Link className="btn btn-secondary" to={PATHS.youtubeUploadNew}><Upload size={16} /> 建立新的上傳工作</Link></div>}
       {!isJobPage && recentJobId && <div className="info-banner"><span>最近的背景工作仍可從 URL 繼續：</span><Link to={PATHS.youtubeUploadJob(recentJobId)}>開啟最近工作</Link></div>}
 
-      {isJobPage && loading && <div className="loading-center">上傳工作載入中…</div>}
+      {isJobPage && loading && <div className="loading-center">讀取中…</div>}
       {isJobPage && jobNotFound && <StatusMessage tone="error" title="找不到上傳工作"><span>工作不存在或不屬於目前帳號</span><Link className="btn btn-secondary status-message-action" to={PATHS.youtubeUploadNew}>返回建立上傳工作</Link></StatusMessage>}
 
       {!isJobPage && !driveScopeReady && (
@@ -472,18 +472,18 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, mode = '
             <div className={`glass-panel upload-quota-card${quotaDecision.videoUploads.can_complete === false ? ' upload-quota-card-blocked' : ''}`}>
               <strong>Video Uploads</strong>
               <span>工作成本 {formatUnits(quotaDecision.jobRequired.video_uploads)} / {formatUnits(quotaDecision.videoUploads.limit || 100)}</span>
-              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.video_uploads)} · 完整流程 {formatUnits(quotaDecision.total.video_uploads)} · 可用 {quotaDecision.videoUploads.effective_available_units ?? '—'} units</small>
+              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.video_uploads)} · 完整流程 {formatUnits(quotaDecision.total.video_uploads)} · 可用 {quotaDecision.videoUploads.effective_available_units ?? '—'} 單位</small>
             </div>
             <div className={`glass-panel upload-quota-card${quotaDecision.general.can_complete === false ? ' upload-quota-card-blocked' : ''}`}>
               <strong>General</strong>
-              <span>工作成本 {formatUnits(quotaDecision.jobRequired.general)} units</span>
-              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.general)} · 完整流程 {formatUnits(quotaDecision.total.general)} · 可用 {quotaDecision.general.effective_available_units ?? '—'} units</small>
+              <span>工作成本 {formatUnits(quotaDecision.jobRequired.general)} 單位</span>
+              <small>預覽讀取 {formatUnits(quotaDecision.previewRead.general)} · 完整流程 {formatUnits(quotaDecision.total.general)} · 可用 {quotaDecision.general.effective_available_units ?? '—'} 單位</small>
             </div>
           </div>
-          <div className="upload-quota-total">本次完整流程估算：General {formatUnits(quotaDecision.total.general ?? quotaDecision.estimated.general)} · Video Uploads {formatUnits(quotaDecision.total.video_uploads ?? quotaDecision.estimated.video_uploads)} · 合計 {formatUnits(quotaDecision.total.general + quotaDecision.total.video_uploads)} units</div>
-          {quotaDecision.confirmedExhausted && <StatusMessage tone="error" title="Google 已確認 quota 耗盡"><span>目前 slot 已被 Google 確認 quotaExceeded；官方重設{resetLabel(quotaDecision.resetAt) ? `（${resetLabel(quotaDecision.resetAt)}）` : ''}後，請重新解析 Drive 內容。</span></StatusMessage>}
-          {!quotaDecision.confirmedExhausted && (!quotaDecision.previewCanExecute || !quotaDecision.canStart) && <StatusMessage tone="warning" title={quotaDecision.previewCanExecute ? '預覽已完成，但目前不可建立工作' : '預覽目前不可執行'}><span>{quotaDecision.reason} 請重新預覽以取得最新 quota 與 slot 判斷。</span></StatusMessage>}
-          {quotaDecision.previewCanExecute && quotaDecision.canStart && <div className="upload-quota-ready">預覽已驗證，但建立前仍會重新檢查 quota、slot 與 Drive 內容。</div>}
+          <div className="upload-quota-total">本次完整流程估算：General {formatUnits(quotaDecision.total.general ?? quotaDecision.estimated.general)} · Video Uploads {formatUnits(quotaDecision.total.video_uploads ?? quotaDecision.estimated.video_uploads)} · 合計 {formatUnits(quotaDecision.total.general + quotaDecision.total.video_uploads)} 單位</div>
+          {quotaDecision.confirmedExhausted && <StatusMessage tone="error" title="Google 已確認配額耗盡"><span>目前 slot 已被 Google 確認配額已用完；官方重設{resetLabel(quotaDecision.resetAt) ? `（${resetLabel(quotaDecision.resetAt)}）` : ''}後，請重新解析 Drive 內容。</span></StatusMessage>}
+          {!quotaDecision.confirmedExhausted && (!quotaDecision.previewCanExecute || !quotaDecision.canStart) && <StatusMessage tone="warning" title={quotaDecision.previewCanExecute ? '預覽已完成，但目前不可建立工作' : '預覽目前不可執行'}><span>{quotaDecision.reason} 請重新預覽以取得最新配額與 slot 判斷。</span></StatusMessage>}
+          {quotaDecision.previewCanExecute && quotaDecision.canStart && <div className="upload-quota-ready">預覽已驗證，但建立前仍會重新檢查配額、slot 與 Drive 內容。</div>}
 
           <div className="upload-preview-table-wrap">
             <table className="upload-preview-table">

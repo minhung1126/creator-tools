@@ -141,13 +141,13 @@ describe('PublishCleanerPage snapshot safety', () => {
     await loadCurrentPlaylist();
     expect(await screen.findByText('讀取 To-Post 播放清單失敗：網路中斷')).toBeInTheDocument();
     expect(screen.queryByText('影片一')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設為公開並移出清單' })).not.toBeInTheDocument();
 
     rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-c' }} />);
     await waitFor(() => expect(input).toHaveValue('playlist-c'));
     await loadCurrentPlaylist();
     expect(await screen.findByText(/播放清單「playlist-c」目前沒有影片/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設為公開並移出清單' })).not.toBeInTheDocument();
   });
 
   it('shows the exact confirmation snapshot and sends its complete preview payload', async () => {
@@ -155,16 +155,26 @@ describe('PublishCleanerPage snapshot safety', () => {
     renderPage();
     await loadCurrentPlaylist();
     expect(await screen.findByText('影片一')).toBeInTheDocument();
+    const pageList = screen.getByRole('list', { name: '待處理影片清單' });
+    const pageItems = within(pageList).getAllByRole('listitem');
+    expect(pageItems).toHaveLength(2);
+    expect(pageItems[0]).toHaveTextContent('影片一');
+    expect(pageItems[1]).toHaveTextContent('影片二');
 
-    fireEvent.click(screen.getByRole('button', { name: '確認公開並移出 To-Post' }));
+    fireEvent.click(screen.getByRole('button', { name: '設為公開並移出清單' }));
     const dialog = await screen.findByRole('dialog');
     expect(dialog).toHaveTextContent('播放清單：playlist-a');
     expect(dialog).toHaveTextContent('授權組合：primary／頻道 工作頻道／帳號 creator@example.com');
-    expect(dialog).toHaveTextContent('影片數量：2');
-    expect(dialog).toHaveTextContent('#1 影片一（video-1）');
-    expect(dialog).toHaveTextContent('#2 影片二（video-2）');
+    expect(dialog).toHaveTextContent('影片數量：2 支影片');
+    expect(dialog).toHaveTextContent('#1 影片一');
+    expect(dialog).toHaveTextContent('影片 ID：video-1');
+    expect(dialog).toHaveTextContent('#2 影片二');
+    expect(dialog).toHaveTextContent('影片 ID：video-2');
+    const videoList = within(dialog).getByRole('list', { name: '實際確認影片' });
+    expect(videoList).toBeInTheDocument();
+    expect(within(videoList).getAllByRole('listitem')).toHaveLength(2);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: '確認公開並移出 To-Post' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '設為公開並移出清單' }));
     await waitFor(() => expect(api.publishAndCleanup).toHaveBeenCalledTimes(1));
     expect(api.publishAndCleanup).toHaveBeenCalledWith('playlist-a', {
       youtubeSlot: 'primary',
@@ -180,21 +190,21 @@ describe('PublishCleanerPage snapshot safety', () => {
     api.getPlaylistVideos.mockResolvedValue(playlistResponse('playlist-a'));
     const { rerender } = renderPage();
     await loadCurrentPlaylist();
-    fireEvent.click(screen.getByRole('button', { name: '確認公開並移出 To-Post' }));
+    fireEvent.click(screen.getByRole('button', { name: '設為公開並移出清單' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
 
     const input = screen.getByPlaceholderText('YouTube Playlist ID');
     rerender(<PublishCleanerPage authUser={primaryAuthUser} sysSettings={{ default_playlist_id: 'playlist-b' }} />);
     await waitFor(() => expect(input).toHaveValue('playlist-b'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設為公開並移出清單' })).not.toBeInTheDocument();
 
     rerender(<PublishCleanerPage authUser={{
       ...primaryAuthUser,
       youtube: { ...primaryAuthUser.youtube, active_slot: 'secondary' },
     }} sysSettings={{ default_playlist_id: 'playlist-b' }} />);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設為公開並移出清單' })).not.toBeInTheDocument();
   });
 
   it('invalidates the loaded snapshot when the data version changes', async () => {
@@ -212,6 +222,6 @@ describe('PublishCleanerPage snapshot safety', () => {
       sysSettings={{ default_playlist_id: 'playlist-a' }}
     />);
     expect(screen.queryByText('影片一')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '確認公開並移出 To-Post' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '設為公開並移出清單' })).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { vi } from 'vitest';
 import ConfirmDialog from './ConfirmDialog';
 
@@ -51,5 +51,34 @@ describe('ConfirmDialog accessibility behavior', () => {
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
   });
-});
 
+  it('renders structured content with a semantic list and keeps it as the dialog description', () => {
+    render(
+      <ConfirmDialog
+        open
+        title="確認發布 2 支影片"
+        content={(
+          <>
+            <dl aria-label="發布摘要">
+              <div><dt>影片數量</dt><dd>2 支影片</dd></div>
+            </dl>
+            <ol aria-label="實際確認影片">
+              <li>影片一（影片 ID：video-1）</li>
+              <li>影片二（影片 ID：video-2）</li>
+            </ol>
+          </>
+        )}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const dialog = screen.getByRole('dialog', { name: '確認發布 2 支影片' });
+    const description = document.getElementById('confirm-dialog-message');
+    expect(description).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('aria-describedby', 'confirm-dialog-message');
+    expect(within(description).getByRole('list', { name: '實際確認影片' })).toBeInTheDocument();
+    expect(within(description).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(description).getAllByRole('listitem')[0]).toHaveTextContent('影片 ID：video-1');
+  });
+});

@@ -129,7 +129,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     const limit = Number(draft.quotaLimit);
     const buffer = Number(draft.quotaBuffer);
     if (!Number.isInteger(limit) || limit <= 0 || !Number.isInteger(buffer) || buffer < 0 || buffer >= limit) {
-      const message = 'quota limit 必須大於 0，安全保留必須大於等於 0 且小於 quota limit。';
+      const message = '配額上限必須大於 0，安全保留必須大於等於 0 且小於配額上限。';
       setMsg({ type: 'error', text: message });
       toast.error(message);
       return;
@@ -247,7 +247,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     <div className="section-gap settings-page youtube-settings-page">
       {section === 'all' && <header className="page-header">
         <h1>YouTube 設定</h1>
-        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、quota 優先順序、發布預設資源與各 project quota。Auto 模式會在每個新 workflow 開始時優先使用 Primary，quota 不足才選 Secondary；同一批次不會中途切換。</p>
+        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、配額優先順序、發布預設資源與各 project 配額。Auto 模式會在每個新 workflow 開始時優先使用 Primary，配額不足才選 Secondary；同一批次不會中途切換。</p>
       </header>}
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
@@ -256,7 +256,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
         <div className="card-header">
           <div>
             <h2 className="settings-heading">YouTube slot 使用優先順序</h2>
-            <p className="section-desc">目前模式：{youtubeRoutingLabel(routingMode)}。Auto 模式會以本次 workflow 的保守 quota 預估選擇可用 slot，並在 Primary 恢復後自動優先回到 Primary。</p>
+            <p className="section-desc">目前模式：{youtubeRoutingLabel(routingMode)}。Auto 模式會以本次 workflow 的保守配額預估選擇可用 slot，並在 Primary 恢復後自動優先回到 Primary。</p>
           </div>
           <span className="badge badge-info">{youtubeRoutingLabel(routingMode)}</span>
         </div>
@@ -264,7 +264,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
           <div className="form-group">
             <label className="form-label" htmlFor="youtube-routing-mode">Routing mode</label>
             <select id="youtube-routing-mode" className="form-select" value={routingModeDraft} onChange={(event) => setRoutingModeDraft(event.target.value)}>
-              <option value={YOUTUBE_ROUTING_MODES.AUTO_PRIMARY}>Auto：Primary 優先，quota 不足時 Secondary</option>
+              <option value={YOUTUBE_ROUTING_MODES.AUTO_PRIMARY}>Auto：Primary 優先，配額不足時 Secondary</option>
               <option value={YOUTUBE_ROUTING_MODES.MANUAL}>手動：只使用目前作用中 slot</option>
             </select>
           </div>
@@ -314,15 +314,15 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
               {showQuota && <>
                 <div className="responsive-grid youtube-quota-grid">
                   <div className="form-group">
-                    <label className="form-label" htmlFor={`${slot}-quota-limit`}>Project 一般 quota</label>
+                    <label className="form-label" htmlFor={`${slot}-quota-limit`}>Project 一般配額</label>
                     <input id={`${slot}-quota-limit`} className="form-input" type="number" min="1" step="1" value={draft.quotaLimit} onChange={(event) => updateDraft(slot, 'quotaLimit', event.target.value)} />
                   </div>
                   <div className="form-group">
-                    <label className="form-label" htmlFor={`${slot}-quota-buffer`}>安全保留 units</label>
+                    <label className="form-label" htmlFor={`${slot}-quota-buffer`}>安全保留單位</label>
                     <input id={`${slot}-quota-buffer`} className="form-input" type="number" min="0" step="1" value={draft.quotaBuffer} onChange={(event) => updateDraft(slot, 'quotaBuffer', event.target.value)} />
                   </div>
                 </div>
-                <p className="section-desc">此 ledger 只記錄 {record.label}；quotaExceeded 或安全上限只影響這個 slot。Auto 模式會在下一個 workflow 開始時依 quota 選擇可用 slot。</p>
+                <p className="section-desc">此記錄只記錄 {record.label}；配額已達上限或安全上限時，只影響這個 slot。Auto 模式會在下一個 workflow 開始時依配額選擇可用 slot。</p>
               </>}
 
               <div className="page-actions settings-card-actions">
@@ -343,7 +343,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
       {showPlaylist && <form className="glass-panel card-padding settings-card card-stack" onSubmit={saveResources}>
         <div>
           <h2 className="settings-heading"><PlaySquare size={20} color="var(--secondary)" /> 共用 To-Post 播放清單</h2>
-          <p className="section-desc">這是目前帳號所有 YouTube 子頁面共用的 To-Post 播放清單；新上傳、Video、Shorts 與公開清理流程都會以這個設定為準。</p>
+          <p className="section-desc">這是目前帳號所有 YouTube 子頁面共用的 To-Post 播放清單；新上傳、Video、Shorts 與發布草稿流程都會以這個設定為準。</p>
         </div>
         <div className="form-group">
           <label className="form-label"><PlaySquare size={14} /> 共用 To-Post 播放清單</label>
