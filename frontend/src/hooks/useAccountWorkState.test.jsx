@@ -48,6 +48,20 @@ describe('useAccountWorkState', () => {
     expect(result.current.saving).toBe(false);
   });
 
+  it('keeps command references stable when the stored state changes', async () => {
+    api.updateWorkState.mockResolvedValue({ state: {} });
+    const { result } = renderHook(() => useAccountWorkState('navigation'), { wrapper });
+    const initialSave = result.current.save;
+    const initialRetry = result.current.retry;
+
+    await act(async () => {
+      await result.current.save({ sidebarCollapsed: true }, { debounceMs: 0 });
+    });
+
+    expect(result.current.save).toBe(initialSave);
+    expect(result.current.retry).toBe(initialRetry);
+  });
+
   it('persists a newer value after an earlier request is already in flight', async () => {
     let releaseFirst;
     api.updateWorkState

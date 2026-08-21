@@ -173,13 +173,18 @@ export function AccountWorkStateProvider({ initialState = {}, children }) {
 
 export default function useAccountWorkState(key, fallback = {}) {
   const context = useContext(AccountWorkStateContext);
+  // The provider's context object changes whenever a stored value or status
+  // changes, but its save/retry commands are stable. Depend on those commands
+  // directly so consumers' autosave effects do not restart after every save.
+  const contextSave = context?.save;
+  const contextRetry = context?.retry;
   const save = useCallback(
-    (value, options) => (context ? context.save(key, value, options) : Promise.resolve(null)),
-    [context, key],
+    (value, options) => (contextSave ? contextSave(key, value, options) : Promise.resolve(null)),
+    [contextSave, key],
   );
   const retry = useCallback(
-    () => (context ? context.retry(key) : Promise.resolve(null)),
-    [context, key],
+    () => (contextRetry ? contextRetry(key) : Promise.resolve(null)),
+    [contextRetry, key],
   );
   if (!context) {
     return {
