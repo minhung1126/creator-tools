@@ -96,7 +96,7 @@ def _session_id(request: Request) -> str:
     return str(request.cookies.get(settings.session_cookie_name) or "")
 
 
-def _context(decision, owner_sub: str) -> YouTubeRequestContext:
+def _context(decision, owner_sub: str, *, session_id: str | None = None) -> YouTubeRequestContext:
     return YouTubeRequestContext(
         slot=decision.slot,
         credentials=decision.credentials,
@@ -107,6 +107,7 @@ def _context(decision, owner_sub: str) -> YouTubeRequestContext:
         selection_reason=decision.reason,
         estimated_units=decision.estimated_units,
         preferred_slot=decision.preferred_slot,
+        session_id=session_id,
     )
 
 
@@ -496,7 +497,7 @@ def preview_drive_upload(
             upload_count=pending_uploads,
             insertion_count=insertion_count,
         )
-        context = _context(decision, owner_sub)
+        context = _context(decision, owner_sub, session_id=_session_id(request))
         playlist = validate_playlist(context, playlist_id)
     except YouTubeQuotaUnavailable as exc:
         raise http_error(
@@ -612,7 +613,7 @@ def create_upload_job(
         snapshot_channel_id = str(snapshot.get("youtube_channel_id") or "").strip()
         if snapshot_channel_id and decision.channel_id != snapshot_channel_id:
             raise http_error(409, "stale_preview", "YouTube 頻道已變更，請重新解析預覽。")
-        context = _context(decision, owner_sub)
+        context = _context(decision, owner_sub, session_id=_session_id(request))
         validate_playlist(context, playlist_id)
         quota = _quota_summary_at_stage(
             decision.slot,

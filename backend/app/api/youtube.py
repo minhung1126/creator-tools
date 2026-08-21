@@ -25,6 +25,7 @@ from backend.app.core.preview import (
 from backend.app.core.request_protection import enforce_workflow_rate_limit
 from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.core.youtube_input import normalize_playlist_id
+from backend.app.core.youtube_routing import choose_youtube_slot
 from backend.app.services.provider_errors import map_youtube_error
 from backend.app.services.sheets_service import (
     get_all_rows_for_sheet,
@@ -123,6 +124,62 @@ def _youtube_context_metadata(context: YouTubeRequestContext) -> dict[str, Any]:
         "youtube_preferred_slot": context.preferred_slot,
         "youtube_estimated_units": context.estimated_units,
     }
+
+
+def _preview_slot(snapshot: object, fallback: str) -> str:
+    """Read the slot that signed the preview, with a safe legacy fallback."""
+
+    if isinstance(snapshot, dict):
+        candidate = str(snapshot.get("youtube_slot") or "").strip()
+        if candidate in {"primary", "secondary"}:
+            return candidate
+    return fallback
+
+
+def _switch_youtube_context(
+    context: YouTubeRequestContext,
+    *,
+    estimated_units: int,
+    attempted_slots: set[str],
+) -> YouTubeRequestContext | None:
+    """Select the other Auto slot after a quota failure.
+
+    The initial request context remains immutable for ordinary work, but a
+    provider quota failure is a safe boundary: both configured slots are
+    required to represent the same channel, and the failed request did not
+    perform a write. The caller retries only that operation on the alternate
+    slot and keeps the same account-bound preview data.
+    """
+
+    if context.routing_mode != "auto_primary" or not context.session_id:
+        return None
+    for slot in ("secondary", "primary"):
+        if slot == context.slot or slot in attempted_slots:
+            continue
+        try:
+            decision = choose_youtube_slot(
+                context.session_id,
+                context.owner_sub,
+                estimated_units=max(int(estimated_units or 0), 1),
+                slot_hint=slot,
+            )
+        except HTTPException:
+            continue
+        if decision.slot == context.slot or decision.slot in attempted_slots:
+            continue
+        return YouTubeRequestContext(
+            slot=decision.slot,
+            credentials=decision.credentials,
+            quota_limiter=get_youtube_quota_tracker(decision.slot),
+            owner_sub=context.owner_sub,
+            channel_id=decision.channel_id,
+            routing_mode=decision.routing_mode,
+            selection_reason=f"auto_{decision.slot}_quota_fallback",
+            estimated_units=decision.estimated_units,
+            preferred_slot=decision.preferred_slot,
+            session_id=context.session_id,
+        )
+    return None
 
 
 def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = None) -> dict:
@@ -285,6 +342,7 @@ def get_playlist_videos(
         videos = [{**video, "youtube_slot": youtube_context.slot} for video in videos]
         preview_snapshot = playlist_snapshot_from_preview(videos)
         preview_snapshot["youtube_slot"] = youtube_context.slot
+        preview_snapshot["youtube_channel_id"] = youtube_context.channel_id
         preview_snapshot["youtube_routing_mode"] = youtube_context.routing_mode
         preview_snapshot["youtube_slot_reason"] = youtube_context.selection_reason
         return {
@@ -337,14 +395,16 @@ def update_video_metadata(
     if not video_id or not title:
         raise http_error(400, "youtube_video_input_invalid", "影片 ID 與標題不可為空白。")
 
-    try:
-        details = fetch_video_details(youtube_context, [video_id])
+    active_context = youtube_context
+
+    def execute_update(context: YouTubeRequestContext) -> dict[str, Any]:
+        details = fetch_video_details(context, [video_id])
         detail = next((item for item in details if item.get("id") == video_id), None)
         if not detail:
-            raise http_error(404, "youtube_not_found", "找不到指定的 YouTube 影片。", youtube_slot=youtube_context.slot)
+            raise http_error(404, "youtube_not_found", "找不到指定的 YouTube 影片。", youtube_slot=context.slot)
 
         update_single_video_metadata(
-            youtube_context,
+            context,
             video_id,
             str(title),
             description,
@@ -352,24 +412,38 @@ def update_video_metadata(
         )
         return {
             "video_id": video_id,
-            **_youtube_context_metadata(youtube_context),
+            **_youtube_context_metadata(context),
             "title": str(title),
             "description": description,
             "thumbnail_url": _youtube_thumbnail(detail, video_id),
             "status": "succeeded",
         }
+
+    try:
+        try:
+            return execute_update(active_context)
+        except YouTubeQuotaUnavailable:
+            fallback_context = _switch_youtube_context(
+                active_context,
+                estimated_units=51,
+                attempted_slots={active_context.slot},
+            )
+            if fallback_context is None:
+                raise
+            active_context = fallback_context
+            return execute_update(active_context)
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
     except HTTPException:
         raise
     except ValueError as exc:
         raise map_youtube_error(
-            exc, method="videos.update", youtube_slot=youtube_context.slot
+            exc, method="videos.update", youtube_slot=active_context.slot
         ).to_http_exception() from exc
     except Exception as exc:
-        logger.error("Single YouTube metadata update failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
+        logger.error("Single YouTube metadata update failed for slot %s: %s", active_context.slot, type(exc).__name__)
         raise map_youtube_error(
-            exc, method="videos.update", youtube_slot=youtube_context.slot
+            exc, method="videos.update", youtube_slot=active_context.slot
         ).to_http_exception() from exc
 
 
@@ -410,11 +484,12 @@ def _verify_playlist_preview_token(
     preview_token: Optional[str],
     *,
     operation: str = "youtube.playlist_preview",
+    token_slot: Optional[str] = None,
 ) -> None:
     if not preview_token or not verify_preview_token(
         preview_token,
         owner_sub=context.owner_sub,
-        youtube_slot=context.slot,
+        youtube_slot=token_slot or context.slot,
         operation=operation,
         playlist_id=playlist_id,
         playlist=expected_playlist,
@@ -552,6 +627,7 @@ def create_batch_metadata_preview(
             "worksheet_name": payload.worksheet_name,
             "playlist_id": playlist_id,
             "youtube_slot": youtube_context.slot,
+            "youtube_channel_id": youtube_context.channel_id,
             "youtube_routing_mode": youtube_context.routing_mode,
             "youtube_slot_reason": youtube_context.selection_reason,
             "sheet_digest": sheet_state["sheet_digest"],
@@ -728,10 +804,15 @@ def run_batch_metadata_update(
                 "video_snapshot": video_snapshot_digest(details_map, requested_video_ids),
             }
         )
+        submitted_preview_snapshot = payload.preview_snapshot if isinstance(payload.preview_snapshot, dict) else {}
+        preview_slot = _preview_slot(submitted_preview_snapshot, youtube_context.slot)
+        preview_channel_id = str(submitted_preview_snapshot.get("youtube_channel_id") or "").strip()
+        if preview_channel_id and youtube_context.channel_id and preview_channel_id != youtube_context.channel_id:
+            raise _stale_preview_exception()
         if not payload.preview_token or not verify_preview_token(
             payload.preview_token,
             owner_sub=youtube_context.owner_sub,
-            youtube_slot=youtube_context.slot,
+            youtube_slot=preview_slot,
             operation="youtube.batch_update",
             playlist_id=playlist_id,
             playlist=initial_playlist_state,
@@ -759,6 +840,8 @@ def run_batch_metadata_update(
                     raise _stale_preview_exception()
         results: list[dict] = []
         quota_error: Optional[YouTubeQuotaUnavailable] = None
+        active_context = youtube_context
+        attempted_slots = {active_context.slot}
         for item in prepared:
             detail = details_map.get(item["video_id"])
             missing_video = item["status"] == "pending" and not detail
@@ -766,7 +849,7 @@ def run_batch_metadata_update(
             snippet = (detail or {}).get("snippet") or {}
             base_result = {
                 "video_id": item["video_id"],
-                "youtube_slot": youtube_context.slot,
+                "youtube_slot": active_context.slot,
                 "title": snippet.get("title") or item["video_id"],
                 "description": snippet.get("description") or "",
                 "thumbnail_url": _youtube_thumbnail(detail or {}, item["video_id"]),
@@ -779,7 +862,7 @@ def run_batch_metadata_update(
                         404,
                         "youtube_not_found",
                         "找不到指定的 YouTube 影片，或目前帳號無權存取。",
-                        youtube_slot=youtube_context.slot,
+                        youtube_slot=active_context.slot,
                     ).detail
                 results.append(
                     {
@@ -802,7 +885,7 @@ def run_batch_metadata_update(
                 continue
             try:
                 update_single_video_metadata(
-                    youtube_context,
+                    active_context,
                     item["video_id"],
                     str(item.get("new_title") or ""),
                     str(item.get("new_description") or ""),
@@ -818,12 +901,53 @@ def run_batch_metadata_update(
                     }
                 )
             except YouTubeQuotaUnavailable as exc:
+                fallback_context = _switch_youtube_context(
+                    active_context,
+                    estimated_units=50,
+                    attempted_slots=attempted_slots,
+                )
+                if fallback_context is not None:
+                    attempted_slots.add(fallback_context.slot)
+                    active_context = fallback_context
+                    fallback_result = {
+                        **base_result,
+                        "youtube_slot": active_context.slot,
+                    }
+                    try:
+                        update_single_video_metadata(
+                            active_context,
+                            item["video_id"],
+                            str(item.get("new_title") or ""),
+                            str(item.get("new_description") or ""),
+                            current_snippet=snippet,
+                        )
+                        results.append(
+                            {
+                                **fallback_result,
+                                "title": item.get("new_title") or fallback_result["title"],
+                                "description": item.get("new_description") or "",
+                                "status": "succeeded",
+                                "reason": None,
+                            }
+                        )
+                        continue
+                    except YouTubeQuotaUnavailable as fallback_exc:
+                        quota_error = fallback_exc
+                        results.append(
+                            {
+                                **fallback_result,
+                                "status": "not_attempted",
+                                "reason": fallback_exc.user_message,
+                                "error": fallback_exc.to_dict(),
+                            }
+                        )
+                        continue
                 quota_error = exc
                 results.append(
                     {**base_result, "status": "not_attempted", "reason": exc.user_message, "error": exc.to_dict()}
                 )
             except Exception as exc:
-                item_error = _workflow_error_detail(exc, slot=youtube_context.slot)
+                item_error = _workflow_error_detail(exc, slot=active_context.slot)
                 results.append(
                     {
                         **base_result,
@@ -836,8 +960,8 @@ def run_batch_metadata_update(
             "youtube.metadata_update",
             results,
             quota_error=quota_error,
-            slot=youtube_context.slot,
-            context=youtube_context,
+            slot=active_context.slot,
+            context=active_context,
         )
     except YouTubeQuotaUnavailable as exc:
         raise _quota_http_exception(exc) from exc
@@ -865,11 +989,17 @@ def run_publish_and_cleanup(
     try:
         raw_items = fetch_playlist_items(youtube_context, playlist_id)
         initial_playlist_state = playlist_snapshot(raw_items)
+        submitted_preview_snapshot = payload.preview_snapshot if isinstance(payload.preview_snapshot, dict) else {}
+        preview_slot = _preview_slot(submitted_preview_snapshot, youtube_context.slot)
+        preview_channel_id = str(submitted_preview_snapshot.get("youtube_channel_id") or "").strip()
+        if preview_channel_id and youtube_context.channel_id and preview_channel_id != youtube_context.channel_id:
+            raise _stale_preview_exception()
         _verify_playlist_preview_token(
             youtube_context,
             playlist_id,
             initial_playlist_state,
             payload.preview_token,
+            token_slot=preview_slot,
         )
         if not raw_items:
             response = _direct_workflow_response(
@@ -901,13 +1031,35 @@ def run_publish_and_cleanup(
         results: list[dict] = []
         quota_error: Optional[YouTubeQuotaUnavailable] = None
         stopped_reason: Optional[str] = None
+        active_context = youtube_context
+        attempted_slots = {active_context.slot}
+
+        def execute_with_quota_fallback(operation, *, estimated_units: int):
+            nonlocal active_context
+            try:
+                return operation(active_context), None
+            except YouTubeQuotaUnavailable as exc:
+                fallback_context = _switch_youtube_context(
+                    active_context,
+                    estimated_units=estimated_units,
+                    attempted_slots=attempted_slots,
+                )
+                if fallback_context is None:
+                    return None, exc
+                attempted_slots.add(fallback_context.slot)
+                active_context = fallback_context
+                try:
+                    return operation(active_context), None
+                except YouTubeQuotaUnavailable as fallback_exc:
+                    return None, fallback_exc
+
         for video_id in ordered_ids:
             detail = details_map.get(video_id)
             missing = detail is None
             snippet = (detail or {}).get("snippet") or {}
             base_result = {
                 "video_id": video_id,
-                "youtube_slot": youtube_context.slot,
+                "youtube_slot": active_context.slot,
                 "title": title_map.get(video_id) or snippet.get("title") or video_id,
                 "description": snippet.get("description") or "",
                 "thumbnail_url": _youtube_thumbnail(detail or {}, video_id),
@@ -922,7 +1074,7 @@ def run_publish_and_cleanup(
                             404,
                             "youtube_not_found",
                             "找不到指定的 YouTube 影片，或目前帳號無權存取。",
-                            youtube_slot=youtube_context.slot,
+                            youtube_slot=active_context.slot,
                         ).detail,
                     }
                 )
@@ -942,55 +1094,75 @@ def run_publish_and_cleanup(
                 continue
 
             try:
-                set_video_public(youtube_context, video_id, current_video=detail)
-            except YouTubeQuotaUnavailable as exc:
-                quota_error = exc
-                results.append(
-                    {**base_result, "status": "not_attempted", "reason": exc.user_message, "error": exc.to_dict()}
+                _public_result, public_quota_error = execute_with_quota_fallback(
+                    lambda context: set_video_public(context, video_id, current_video=detail),
+                    estimated_units=50,
                 )
-                continue
             except Exception as exc:
-                item_error = _workflow_error_detail(exc, slot=youtube_context.slot)
+                item_error = _workflow_error_detail(exc, slot=active_context.slot)
                 stopped_reason = f"前一支影片無法設為公開，後續影片未執行：{item_error['message']}"
                 results.append(
                     {
                         **base_result,
+                        "youtube_slot": active_context.slot,
                         "status": "failed",
                         "reason": item_error["message"],
                         "error": item_error,
                     }
                 )
                 continue
-
-            try:
-                remove_playlist_item(youtube_context, playlist_item_map.get(video_id))
-                results.append({**base_result, "status": "succeeded", "reason": None})
-            except YouTubeQuotaUnavailable as exc:
+            if public_quota_error is not None:
+                exc = public_quota_error
                 quota_error = exc
                 results.append(
                     {
                         **base_result,
-                        "status": "succeeded_with_warnings",
-                        "reason": f"影片已設為公開，但尚未移出 To-Post：{exc.user_message}",
+                        "youtube_slot": active_context.slot,
+                        "status": "not_attempted",
+                        "reason": exc.user_message,
                         "error": exc.to_dict(),
                     }
                 )
+                continue
+            try:
+                _cleanup_result, cleanup_quota_error = execute_with_quota_fallback(
+                    lambda context: remove_playlist_item(context, playlist_item_map.get(video_id)),
+                    estimated_units=50,
+                )
             except Exception as exc:
-                item_error = _workflow_error_detail(exc, slot=youtube_context.slot)
+                item_error = _workflow_error_detail(exc, slot=active_context.slot)
                 results.append(
                     {
                         **base_result,
+                        "youtube_slot": active_context.slot,
                         "status": "succeeded_with_warnings",
                         "reason": f"影片已設為公開，但移出 To-Post 失敗：{item_error['message']}",
                         "error": item_error,
+                    }
+                )
+                continue
+            if cleanup_quota_error is None:
+                results.append(
+                    {**base_result, "youtube_slot": active_context.slot, "status": "succeeded", "reason": None}
+                )
+            else:
+                exc = cleanup_quota_error
+                quota_error = exc
+                results.append(
+                    {
+                        **base_result,
+                        "youtube_slot": active_context.slot,
+                        "status": "succeeded_with_warnings",
+                        "reason": f"影片已設為公開，但尚未移出 To-Post：{exc.user_message}",
+                        "error": exc.to_dict(),
                     }
                 )
         response = _direct_workflow_response(
             "youtube.publish_cleanup",
             results,
             quota_error=quota_error,
-            slot=youtube_context.slot,
-            context=youtube_context,
+            slot=active_context.slot,
+            context=active_context,
         )
         response.update({"playlist_id": playlist_id, "sort_order": "published_at_ascending"})
         return response

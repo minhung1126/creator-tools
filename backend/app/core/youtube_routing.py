@@ -28,9 +28,7 @@ MAX_PLAYLIST_ITEMS = 5_000
 MAX_BATCH_ASSIGNMENTS = 500
 PLAYLIST_ITEMS_MAX_UNITS = math.ceil(MAX_PLAYLIST_ITEMS / 50)
 PLAYLIST_PREVIEW_MAX_UNITS = PLAYLIST_ITEMS_MAX_UNITS * 2
-QUOTA_FAILURE_REASONS = frozenset(
-    {"quota_insufficient", "youtube_quota_exhausted", "youtube_quota_safety_blocked"}
-)
+QUOTA_FAILURE_REASONS = frozenset({"quota_insufficient", "youtube_quota_exhausted", "youtube_quota_safety_blocked"})
 UPLOAD_GENERAL_COST = 50
 UPLOAD_QUOTA_COST = 1
 UPLOAD_PLAYLIST_VALIDATION_READS = 2
@@ -124,8 +122,7 @@ def estimate_youtube_request_units(
 
 def _channel_mismatch(owner_sub: str) -> bool:
     public = {
-        slot: credential_store.get_youtube_public(owner_sub, slot=slot) or {}
-        for slot in ("primary", "secondary")
+        slot: credential_store.get_youtube_public(owner_sub, slot=slot) or {} for slot in ("primary", "secondary")
     }
     primary_channel = str(public["primary"].get("channel_id") or "").strip()
     secondary_channel = str(public["secondary"].get("channel_id") or "").strip()
@@ -174,7 +171,9 @@ def _routing_failure(candidates: list[_Candidate], preferred_slot: str) -> HTTPE
             youtube_slot=preferred_slot,
         )
     authenticated_candidates = [candidate for candidate in candidates if candidate.credentials and candidate.channel_id]
-    if authenticated_candidates and all(candidate.reason in QUOTA_FAILURE_REASONS for candidate in authenticated_candidates):
+    if authenticated_candidates and all(
+        candidate.reason in QUOTA_FAILURE_REASONS for candidate in authenticated_candidates
+    ):
         reset_at = next((candidate.reset_at for candidate in authenticated_candidates if candidate.reset_at), None)
         return http_error(
             429,
@@ -229,26 +228,49 @@ def choose_youtube_slot(
             raise http_error(400, "youtube_slot_invalid", "不支援的 YouTube OAuth slot。") from exc
 
     if normalized_hint and (routing_mode == "auto_primary" or normalized_hint == preferred_slot):
-        candidates = [
-            _candidate(
+        # A preview hint is a preference, not permission to ignore a quota
+        # change that happened while the user was reviewing the preview. In
+        # Auto mode, try the hinted slot first and immediately fall back to
+        # the other authenticated slot when its latest safe quota is short.
+        hinted = _candidate(
+            session_id,
+            owner_sub,
+            normalized_hint,
+            estimated_units=normalized_estimate,
+            check_quota=routing_mode == "auto_primary",
+        )
+        candidates = [hinted]
+        if hinted.eligible:
+            return YouTubeSlotDecision(
+                slot=normalized_hint,
+                preferred_slot=preferred_slot,
+                routing_mode=routing_mode,
+                estimated_units=normalized_estimate,
+                reason="preview_pinned_slot",
+                credentials=hinted.credentials,
+                channel_id=hinted.channel_id,
+            )
+        if routing_mode == "auto_primary":
+            fallback_slot = "secondary" if normalized_hint == "primary" else "primary"
+            fallback = _candidate(
                 session_id,
                 owner_sub,
-                normalized_hint,
+                fallback_slot,
                 estimated_units=normalized_estimate,
-                check_quota=False,
+                check_quota=True,
             )
-        ]
-        if not candidates[0].eligible:
-            raise _routing_failure(candidates, normalized_hint)
-        return YouTubeSlotDecision(
-            slot=normalized_hint,
-            preferred_slot=preferred_slot,
-            routing_mode=routing_mode,
-            estimated_units=normalized_estimate,
-            reason="preview_pinned_slot",
-            credentials=candidates[0].credentials,
-            channel_id=candidates[0].channel_id,
-        )
+            candidates.append(fallback)
+            if fallback.eligible:
+                return YouTubeSlotDecision(
+                    slot=fallback.slot,
+                    preferred_slot=preferred_slot,
+                    routing_mode=routing_mode,
+                    estimated_units=normalized_estimate,
+                    reason=f"auto_{fallback.slot}_{hinted.reason}",
+                    credentials=fallback.credentials,
+                    channel_id=fallback.channel_id,
+                )
+        raise _routing_failure(candidates, normalized_hint)
 
     candidate_slots = [preferred_slot] if routing_mode == "manual" else ["primary", "secondary"]
     candidates = [
@@ -382,9 +404,13 @@ def _upload_candidate(
     except YouTubeQuotaUnavailable as exc:
         return _Candidate(slot, candidate.credentials, candidate.channel_id, False, exc.code, exc.reset_at)
     if costs["general"] and int(general.get("effective_available_units") or 0) < costs["general"]:
-        return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", general.get("reset_at"))
+        return _Candidate(
+            slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", general.get("reset_at")
+        )
     if costs["video_uploads"] and int(uploads.get("effective_available_units") or 0) < costs["video_uploads"]:
-        return _Candidate(slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", uploads.get("reset_at"))
+        return _Candidate(
+            slot, candidate.credentials, candidate.channel_id, False, "quota_insufficient", uploads.get("reset_at")
+        )
     return _Candidate(
         slot,
         candidate.credentials,
@@ -436,7 +462,7 @@ def choose_youtube_upload_slot(
         )
 
     if normalized_hint:
-        candidates = [_upload_candidate(
+        hinted = _upload_candidate(
             session_id,
             owner_sub,
             normalized_hint,
@@ -445,22 +471,50 @@ def choose_youtube_upload_slot(
             insertion_count=normalized_insertion_count,
             general_reads_spent=normalized_reads_spent,
             check_quota=True,
-        )]
-        if not candidates[0].eligible:
-            raise _routing_failure(candidates, normalized_hint)
-        return YouTubeSlotDecision(
-            slot=normalized_hint,
-            preferred_slot=preferred_slot,
-            routing_mode=routing_mode,
-            estimated_units=estimate_youtube_upload_quota(
-                normalized_upload_count,
-                normalized_insertion_count,
-                general_reads_spent=normalized_reads_spent,
-            )["total"],
-            reason="preview_pinned_slot",
-            credentials=candidates[0].credentials,
-            channel_id=candidates[0].channel_id,
         )
+        candidates = [hinted]
+        if hinted.eligible:
+            return YouTubeSlotDecision(
+                slot=normalized_hint,
+                preferred_slot=preferred_slot,
+                routing_mode=routing_mode,
+                estimated_units=estimate_youtube_upload_quota(
+                    normalized_upload_count,
+                    normalized_insertion_count,
+                    general_reads_spent=normalized_reads_spent,
+                )["total"],
+                reason="preview_pinned_slot",
+                credentials=hinted.credentials,
+                channel_id=hinted.channel_id,
+            )
+        if routing_mode == "auto_primary":
+            fallback_slot = "secondary" if normalized_hint == "primary" else "primary"
+            fallback = _upload_candidate(
+                session_id,
+                owner_sub,
+                fallback_slot,
+                item_count=normalized_count,
+                upload_count=normalized_upload_count,
+                insertion_count=normalized_insertion_count,
+                general_reads_spent=normalized_reads_spent,
+                check_quota=True,
+            )
+            candidates.append(fallback)
+            if fallback.eligible:
+                return YouTubeSlotDecision(
+                    slot=fallback.slot,
+                    preferred_slot=preferred_slot,
+                    routing_mode=routing_mode,
+                    estimated_units=estimate_youtube_upload_quota(
+                        normalized_upload_count,
+                        normalized_insertion_count,
+                        general_reads_spent=normalized_reads_spent,
+                    )["total"],
+                    reason=f"auto_{fallback.slot}_{hinted.reason}",
+                    credentials=fallback.credentials,
+                    channel_id=fallback.channel_id,
+                )
+        raise _routing_failure(candidates, normalized_hint)
 
     candidate_slots = [preferred_slot] if routing_mode == "manual" else ["primary", "secondary"]
     candidates = [
@@ -479,8 +533,10 @@ def choose_youtube_upload_slot(
     for index, candidate in enumerate(candidates):
         if not candidate.eligible:
             continue
-        reason = "manual_active_slot" if routing_mode == "manual" else (
-            "auto_primary_available" if index == 0 else f"auto_secondary_{candidates[0].reason}"
+        reason = (
+            "manual_active_slot"
+            if routing_mode == "manual"
+            else ("auto_primary_available" if index == 0 else f"auto_secondary_{candidates[0].reason}")
         )
         return YouTubeSlotDecision(
             slot=candidate.slot,

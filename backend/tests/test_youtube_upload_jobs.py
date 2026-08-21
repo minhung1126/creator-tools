@@ -136,8 +136,9 @@ def test_worker_uploads_downloaded_file_and_completes_job(monkeypatch, tmp_path:
     monkeypatch.setattr(
         youtube_upload_jobs,
         "insert_video_into_playlist",
-        lambda _context, playlist_id, video_id: calls.append(("insert", playlist_id, video_id))
-        or {"id": "playlist-item-1"},
+        lambda _context, playlist_id, video_id: (
+            calls.append(("insert", playlist_id, video_id)) or {"id": "playlist-item-1"}
+        ),
     )
 
     YouTubeUploadWorker(store)._run_job(JOB_ID)
@@ -191,3 +192,56 @@ def test_worker_pauses_after_playlist_quota_failure_and_preserves_uploaded_video
     assert saved["items"][0]["status"] == "uploaded"
     assert saved["items"][0]["youtube_video_id"] == "video-1"
     assert saved["error"]["code"] == "youtube_quota_safety_blocked"
+
+
+def test_worker_switches_auto_slot_after_playlist_quota_failure(monkeypatch, tmp_path: Path):
+    _install_worker_credentials(monkeypatch)
+    monkeypatch.setattr(
+        youtube_upload_jobs,
+        "settings",
+        SimpleNamespace(youtube_oauth_slot=lambda _slot: SimpleNamespace(configured=True)),
+    )
+    monkeypatch.setattr(
+        youtube_upload_jobs.credential_store,
+        "get_youtube_public",
+        lambda _owner, slot="primary": {"channel_id": "channel-1"},
+    )
+    store = UploadJobStore(tmp_path / "jobs.json", tmp_path / "tmp")
+    store.create(
+        "owner-a",
+        {
+            "job_id": JOB_ID,
+            "status": "queued",
+            "playlist_id": "playlist-1",
+            "youtube_slot": "primary",
+            "youtube_routing_mode": "auto_primary",
+            "youtube_channel_id": "channel-1",
+            "needs_reconciliation": True,
+            "items": [
+                {
+                    "status": "uploaded",
+                    "drive_file_id": "drive-1",
+                    "youtube_video_id": "video-1",
+                    "playlist_item_id": None,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(youtube_upload_jobs, "fetch_playlist_items", lambda *_args: [])
+    calls = []
+
+    def insert(context, _playlist_id, video_id):
+        calls.append((context.slot, video_id))
+        if context.slot == "primary":
+            raise _quota_error()
+        return {"id": "playlist-item-1"}
+
+    monkeypatch.setattr(youtube_upload_jobs, "insert_video_into_playlist", insert)
+
+    YouTubeUploadWorker(store)._run_job(JOB_ID)
+
+    saved = store.get("owner-a", JOB_ID)
+    assert saved["status"] == "completed"
+    assert saved["youtube_slot"] == "secondary"
+    assert saved["items"][0]["status"] == "added"
+    assert calls == [("primary", "video-1"), ("secondary", "video-1")]

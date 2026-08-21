@@ -31,6 +31,9 @@ def _get_preview_slot_hint(path: str, body: object) -> str | None:
     if not str(body.get("preview_token") or "").strip() or not isinstance(body.get("preview_snapshot"), dict):
         return None
     hint = body.get("youtube_slot")
+    if not isinstance(hint, str) or not hint.strip():
+        snapshot = body.get("preview_snapshot")
+        hint = snapshot.get("youtube_slot") if isinstance(snapshot, dict) else None
     return hint if isinstance(hint, str) else None
 
 
@@ -113,4 +116,5 @@ async def require_youtube_context(request: Request) -> YouTubeRequestContext:
         selection_reason=decision.reason,
         estimated_units=decision.estimated_units,
         preferred_slot=decision.preferred_slot,
+        session_id=session_id,
     )

@@ -12,12 +12,12 @@ from backend.app.core.youtube_quota_limiter import YouTubeQuotaLimiter
 
 @dataclass(frozen=True)
 class YouTubeRequestContext:
-    """The immutable YouTube resources selected at request start.
+    """The YouTube resources selected for one operation boundary.
 
-    A workflow receives one instance for its whole lifetime. Auto routing may
-    choose Secondary before a request starts, but changing quota state or the
-    control-panel setting cannot move an in-flight batch to another token or
-    quota ledger.
+    A workflow starts with one context. Auto mode may construct a second
+    context only after a quota failure, then retry the single failed operation
+    on the other verified slot; ordinary account-setting changes never mutate
+    an in-flight context.
     """
 
     slot: str
@@ -29,6 +29,7 @@ class YouTubeRequestContext:
     selection_reason: str = "manual_active_slot"
     estimated_units: int = 0
     preferred_slot: str = "primary"
+    session_id: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "slot", normalize_youtube_slot(self.slot))

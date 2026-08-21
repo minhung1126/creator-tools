@@ -247,7 +247,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
     <div className="section-gap settings-page youtube-settings-page">
       {section === 'all' && <header className="page-header">
         <h1>YouTube 設定</h1>
-        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、配額優先順序、發布預設資源與各 project 配額。Auto 模式會在每個新 workflow 開始時優先使用 Primary，配額不足才選 Secondary；同一批次不會中途切換。</p>
+        <p className="section-desc">管理兩組 YouTube OAuth slot、頻道一致性、配額優先順序、發布預設資源與各 project 配額。Auto 模式會優先使用 Primary，配額不足時自動切換 Secondary 並繼續處理。</p>
       </header>}
 
       {msg && <div className="info-banner">{msg.type === 'success' ? <CheckCircle2 size={18} /> : <XCircle size={18} />}{msg.text}</div>}
@@ -270,7 +270,7 @@ export default function YouTubeSettingsPage({ authUser, sysSettings = {}, refres
           </div>
           <div className="glass-panel settings-info-card">
             <strong>切換邊界</strong>
-            <p>{routingModeDraft === YOUTUBE_ROUTING_MODES.AUTO_PRIMARY ? '每個新的 request／preview 開始時選定；同一個 preview 與批次執行會固定同一 slot。' : '只使用下方標示的目前作用中 slot，不會自動 fallback。'}</p>
+            <p>{routingModeDraft === YOUTUBE_ROUTING_MODES.AUTO_PRIMARY ? '每個新的 request／preview 會先選擇可用 slot；執行途中若 quota 不足，會自動切換另一個 slot 並重試目前操作。' : '只使用下方標示的目前作用中 slot，不會自動 fallback。'}</p>
           </div>
         </div>
         <div className="page-actions settings-card-actions">

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-from backend.app.core.config import normalize_youtube_slot
+from backend.app.core.config import normalize_youtube_slot, settings
 from backend.app.core.credential_store import credential_store
 from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.drive_service import download_drive_file, get_drive_metadata
@@ -412,7 +412,17 @@ class YouTubeUploadWorker:
                 estimated_units=int(job.get("estimated_quota", {}).get("total") or 0),
                 preferred_slot=job.get("youtube_preferred_slot", youtube_slot),
             )
-            self._reconcile_playlist_if_needed(context, owner_sub, job_id)
+            attempted_slots = {context.slot}
+            try:
+                self._reconcile_playlist_if_needed(context, owner_sub, job_id)
+            except YouTubeQuotaUnavailable:
+                fallback_context = self._alternate_context(context, job, attempted_slots)
+                if fallback_context is None:
+                    raise
+                attempted_slots.add(fallback_context.slot)
+                context = fallback_context
+                self._persist_context(job_id, context)
+                self._reconcile_playlist_if_needed(context, owner_sub, job_id)
             for index, item in enumerate(job.get("items", [])):
                 current = self.store.get(owner_sub, job_id)
                 if not current:
@@ -423,7 +433,21 @@ class YouTubeUploadWorker:
                 if current.get("cancel_requested") and not current_item.get("youtube_video_id"):
                     self._cancel_remaining(owner_sub, job_id, index)
                     return
-                self._process_item(login_creds, context, owner_sub, job_id, index)
+                try:
+                    self._process_item(login_creds, context, owner_sub, job_id, index)
+                except YouTubeQuotaUnavailable:
+                    fallback_context = self._alternate_context(context, job, attempted_slots)
+                    if fallback_context is None:
+                        raise
+                    attempted_slots.add(fallback_context.slot)
+                    context = fallback_context
+                    self._persist_context(job_id, context)
+                    self._reset_item_after_quota_fallback(job_id, index)
+                    self._reconcile_playlist_if_needed(context, owner_sub, job_id)
+                    retry_job = self.store.get(owner_sub, job_id)
+                    retry_item = (retry_job or {}).get("items", [])[index]
+                    if retry_item.get("status") not in {ITEM_DONE, "skipped"}:
+                        self._process_item(login_creds, context, owner_sub, job_id, index)
             self.store.update_internal(
                 job_id,
                 lambda current: current.update(
@@ -442,6 +466,98 @@ class YouTubeUploadWorker:
         finally:
             _remove_temp_dir(self.store.temp_root, job_id)
 
+    def _alternate_context(
+        self,
+        context: YouTubeRequestContext,
+        job: dict[str, Any],
+        attempted_slots: set[str],
+    ) -> YouTubeRequestContext | None:
+        """Build the other authenticated slot for an Auto job retry."""
+
+        if context.routing_mode != "auto_primary":
+            return None
+        alternate_slot = "secondary" if context.slot == "primary" else "primary"
+        if alternate_slot in attempted_slots:
+            return None
+        if not settings.youtube_oauth_slot(alternate_slot).configured:
+            return None
+        owner_sub = str(job.get("owner_sub") or context.owner_sub or "").strip()
+        youtube_token = credential_store.get_youtube_credentials(owner_sub, slot=alternate_slot)
+        if not youtube_token:
+            return None
+        try:
+            youtube_credentials = build_credentials_from_dict(
+                youtube_token,
+                credential_key="youtube",
+                owner_sub=owner_sub,
+                slot=alternate_slot,
+            )
+        except Exception as exc:
+            logger.warning("Unable to load alternate YouTube slot %s: %s", alternate_slot, type(exc).__name__)
+            return None
+        if not youtube_credentials:
+            return None
+        public = credential_store.get_youtube_public(owner_sub, slot=alternate_slot) or {}
+        channel_id = str(public.get("channel_id") or "").strip() or None
+        expected_channel_id = str(job.get("youtube_channel_id") or context.channel_id or "").strip() or None
+        if not channel_id or (expected_channel_id and channel_id != expected_channel_id):
+            return None
+        return YouTubeRequestContext(
+            slot=alternate_slot,
+            credentials=youtube_credentials,
+            quota_limiter=get_youtube_quota_tracker(alternate_slot),
+            owner_sub=owner_sub,
+            channel_id=channel_id,
+            routing_mode=context.routing_mode,
+            selection_reason=f"auto_{alternate_slot}_quota_fallback",
+            estimated_units=context.estimated_units,
+            preferred_slot=context.preferred_slot,
+        )
+
+    def _persist_context(self, job_id: str, context: YouTubeRequestContext) -> None:
+        self.store.update_internal(
+            job_id,
+            lambda current: current.update(
+                {
+                    "youtube_slot": context.slot,
+                    "youtube_routing_mode": context.routing_mode,
+                    "youtube_slot_reason": context.selection_reason,
+                    "youtube_preferred_slot": context.preferred_slot,
+                    "youtube_channel_id": context.channel_id,
+                    "error": None,
+                    "status": "running",
+                }
+            ),
+        )
+
+    def _reset_item_after_quota_fallback(self, job_id: str, index: int) -> None:
+        def reset(current: dict[str, Any]) -> None:
+            items = current.get("items", [])
+            if not isinstance(items, list) or index >= len(items) or not isinstance(items[index], dict):
+                return
+            item = items[index]
+            if item.get("playlist_item_id"):
+                item_status = ITEM_DONE
+            elif item.get("youtube_video_id"):
+                item_status = "uploaded"
+            else:
+                item_status = "pending"
+            item.update({"status": item_status, "error": None})
+            current.update(
+                {
+                    "status": "running",
+                    "error": None,
+                    "current_index": index,
+                    "needs_reconciliation": any(
+                        bool(entry.get("youtube_video_id")) and not entry.get("playlist_item_id")
+                        for entry in items
+                        if isinstance(entry, dict)
+                    ),
+                }
+            )
+
+        self.store.update_internal(job_id, reset)
+
     def _reconcile_playlist_if_needed(
         self,
         context: YouTubeRequestContext,
@@ -454,9 +570,7 @@ class YouTubeUploadWorker:
         if not job:
             return
         unresolved = [
-            item
-            for item in job.get("items", [])
-            if item.get("youtube_video_id") and not item.get("playlist_item_id")
+            item for item in job.get("items", []) if item.get("youtube_video_id") and not item.get("playlist_item_id")
         ]
         if not unresolved and not job.get("needs_reconciliation"):
             return

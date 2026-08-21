@@ -69,12 +69,23 @@ def test_preview_slot_hint_is_pinned_even_if_primary_recovers(monkeypatch):
     }
     install_routing_fakes(monkeypatch, usage)
 
-    decision = youtube_routing.choose_youtube_slot(
-        "session", "owner", estimated_units=200, slot_hint="secondary"
-    )
+    decision = youtube_routing.choose_youtube_slot("session", "owner", estimated_units=200, slot_hint="secondary")
 
     assert decision.slot == "secondary"
     assert decision.reason == "preview_pinned_slot"
+
+
+def test_preview_slot_hint_falls_back_when_that_slot_loses_quota(monkeypatch):
+    usage = {
+        "primary": {"effective_available_units": 199, "reset_at": "primary-reset"},
+        "secondary": {"effective_available_units": 200, "reset_at": "secondary-reset"},
+    }
+    install_routing_fakes(monkeypatch, usage)
+
+    decision = youtube_routing.choose_youtube_slot("session", "owner", estimated_units=200, slot_hint="primary")
+
+    assert decision.slot == "secondary"
+    assert decision.reason == "auto_secondary_quota_insufficient"
 
 
 def test_upload_estimate_separates_preview_reads_and_zero_upload_bucket_cost():
@@ -147,17 +158,53 @@ def test_pinned_upload_slot_stays_secondary_when_primary_recovers(monkeypatch):
     assert decision.reason == "preview_pinned_slot"
 
 
+def test_pinned_upload_slot_fallback_reserves_preview_read_on_new_slot(monkeypatch):
+    usage = {
+        "primary": {"effective_available_units": 100, "reset_at": "primary-reset"},
+        "secondary": {"effective_available_units": 102, "reset_at": "secondary-reset"},
+    }
+    install_routing_fakes(monkeypatch, usage)
+    monkeypatch.setattr(
+        youtube_routing,
+        "get_youtube_upload_quota_tracker",
+        lambda _slot: SimpleNamespace(get_usage=lambda: {"effective_available_units": 0}),
+    )
+
+    decision = youtube_routing.choose_youtube_upload_slot(
+        "session",
+        "owner",
+        item_count=0,
+        upload_count=0,
+        insertion_count=2,
+        slot_hint="primary",
+        general_reads_spent=1,
+    )
+
+    assert decision.slot == "secondary"
+    assert decision.estimated_units == 102
+    assert decision.reason == "auto_secondary_quota_insufficient"
+
+
 def test_workflow_estimates_are_conservative():
     assert youtube_routing.estimate_youtube_request_units("/api/v1/youtube/video-metadata") == 51
-    assert youtube_routing.estimate_youtube_request_units(
-        "/api/v1/youtube/batch-update",
-        {"playlist_id": "playlist", "assignments": [{"video_id": "video-1"}, {"video_id": "video-2"}]},
-    ) == 301
-    assert youtube_routing.estimate_youtube_request_units(
-        "/api/v1/youtube/batch-preview",
-        {"playlist_id": "playlist", "assignments": [{"video_id": "video-1"}]},
-    ) == 101
-    assert youtube_routing.estimate_youtube_request_units(
-        "/api/v1/youtube/publish-and-cleanup",
-        {"preview_snapshot": {"video_ids": ["video-1", "video-2"]}},
-    ) == 203
+    assert (
+        youtube_routing.estimate_youtube_request_units(
+            "/api/v1/youtube/batch-update",
+            {"playlist_id": "playlist", "assignments": [{"video_id": "video-1"}, {"video_id": "video-2"}]},
+        )
+        == 301
+    )
+    assert (
+        youtube_routing.estimate_youtube_request_units(
+            "/api/v1/youtube/batch-preview",
+            {"playlist_id": "playlist", "assignments": [{"video_id": "video-1"}]},
+        )
+        == 101
+    )
+    assert (
+        youtube_routing.estimate_youtube_request_units(
+            "/api/v1/youtube/publish-and-cleanup",
+            {"preview_snapshot": {"video_ids": ["video-1", "video-2"]}},
+        )
+        == 203
+    )

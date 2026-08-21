@@ -66,4 +66,3 @@ export default function GoogleAccountSettingsPage({ authUser, sysSettings = {} }
     </div>
   );
 }
-
