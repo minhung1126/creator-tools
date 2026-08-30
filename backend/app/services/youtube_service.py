@@ -158,18 +158,19 @@ def upload_video_resumable(
     except YouTubeQuotaUnavailable:
         raise
     except Exception as exc:
-        from backend.app.services.youtube_errors import parse_youtube_error
+        from backend.app.services.youtube_errors import is_youtube_quota_exceeded, parse_youtube_error
 
         info = parse_youtube_error(exc, method="videos.insert")
-        if info.http_status == 403 and info.reason == "quotaExceeded":
+        if is_youtube_quota_exceeded(exc):
+            quota_reason = info.reason or "quotaExceeded"
             tracker.record_google_quota_exhausted(reservation, exc)
             raise tracker._unavailable(  # noqa: SLF001 - preserve the existing quota error contract
                 code="youtube_quota_exhausted",
                 method="videos.insert",
                 reset_at=reservation.reset_at,
-                reason="quotaExceeded",
+                reason=quota_reason,
                 confirmed=True,
-                http_status=403,
+                http_status=info.http_status,
                 message="Google 已回報今日 YouTube API 配額用完。",
             ) from exc
         try:

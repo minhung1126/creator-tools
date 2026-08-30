@@ -7,13 +7,21 @@ from backend.app.core.youtube_context import YouTubeRequestContext
 from backend.app.services.youtube_errors import YouTubeQuotaUnavailable
 
 
-def youtube_context(slot="primary", *, session_id=None):
+def youtube_context(
+    slot="primary",
+    *,
+    session_id=None,
+    routing_mode="manual",
+    selection_reason="manual_active_slot",
+):
     return YouTubeRequestContext(
         slot=slot,
         credentials=object(),
         quota_limiter=SimpleNamespace(),
         owner_sub="test-user",
         session_id=session_id,
+        routing_mode=routing_mode,
+        selection_reason=selection_reason,
     )
 
 
@@ -178,8 +186,13 @@ def test_single_video_metadata_quota_failure_switches_slot(monkeypatch):
             "categoryId": "22",
         },
     }
-    primary = youtube_context(session_id="session")
-    secondary = youtube_context("secondary", session_id="session")
+    primary = youtube_context(session_id="session", routing_mode="auto_primary")
+    secondary = youtube_context(
+        "secondary",
+        session_id="session",
+        routing_mode="auto_primary",
+        selection_reason="auto_secondary_quota_fallback",
+    )
     monkeypatch.setattr(
         youtube_api,
         "_switch_youtube_context",
@@ -270,6 +283,57 @@ def test_metadata_quota_failure_switches_slot_and_continues(monkeypatch):
     assert [item["youtube_slot"] for item in response["results"]] == ["secondary", "secondary"]
     assert calls == [("primary", "video-1"), ("secondary", "video-1"), ("secondary", "video-2")]
     assert response["quota_blocked"] is False
+
+
+def test_metadata_preflight_quota_failure_switches_slot_before_writes(monkeypatch):
+    people = ["Alice", "Bob"]
+    install_metadata_inputs(monkeypatch, people)
+    primary = youtube_context(session_id="session", routing_mode="auto_primary")
+    secondary = youtube_context(
+        "secondary",
+        session_id="session",
+        routing_mode="auto_primary",
+        selection_reason="auto_secondary_quota_fallback",
+    )
+    monkeypatch.setattr(
+        youtube_api,
+        "_switch_youtube_context",
+        lambda context, **_kwargs: secondary if context.slot == "primary" else None,
+    )
+    details = {
+        video_id: {
+            "id": video_id,
+            "snippet": {
+                "title": f"Old {video_id}",
+                "description": "Old description",
+                "categoryId": "22",
+            },
+        }
+        for video_id in ("video-1", "video-2")
+    }
+    fetch_calls = []
+
+    def fetch(context, video_ids):
+        fetch_calls.append(context.slot)
+        if context.slot == "primary":
+            raise quota_error()
+        return [details[video_id] for video_id in video_ids]
+
+    monkeypatch.setattr(youtube_api, "fetch_video_details", fetch)
+    update_calls = []
+    monkeypatch.setattr(
+        youtube_api,
+        "update_single_video_metadata",
+        lambda context, video_id, *_args, **_kwargs: update_calls.append((context.slot, video_id)) or {"id": video_id},
+    )
+
+    response = youtube_api.run_batch_metadata_update(metadata_payload(*people), creds=primary, sheet_creds=object())
+
+    assert [item["status"] for item in response["results"]] == ["succeeded", "succeeded"]
+    assert [item["youtube_slot"] for item in response["results"]] == ["secondary", "secondary"]
+    assert fetch_calls == ["primary", "secondary", "secondary"]
+    assert update_calls == [("secondary", "video-1"), ("secondary", "video-2")]
+    assert response["youtube_slot_reason"] == "auto_secondary_quota_fallback"
 
 
 def test_publish_cleanup_warning_continues_but_public_failure_stops_later_items(monkeypatch):
@@ -405,3 +469,56 @@ def test_publish_quota_failure_switches_slot_and_continues(monkeypatch):
     assert public_calls == [("primary", "video-1"), ("secondary", "video-1")]
     assert cleanup_calls == [("secondary", "playlist-video-1")]
     assert response["quota_blocked"] is False
+
+
+def test_publish_preflight_quota_failure_switches_slot_before_writes(monkeypatch):
+    monkeypatch.setattr(youtube_api, "verify_preview_token", lambda *_args, **_kwargs: True)
+    raw_items = [{"id": "playlist-video-1", "contentDetails": {"videoId": "video-1"}, "snippet": {"title": "One"}}]
+    detail = {
+        "id": "video-1",
+        "snippet": {"title": "One", "publishedAt": "2026-01-01T00:00:00Z"},
+        "status": {"privacyStatus": "private"},
+    }
+    primary = youtube_context(session_id="session", routing_mode="auto_primary")
+    secondary = youtube_context(
+        "secondary",
+        session_id="session",
+        routing_mode="auto_primary",
+        selection_reason="auto_secondary_quota_fallback",
+    )
+    monkeypatch.setattr(
+        youtube_api,
+        "_switch_youtube_context",
+        lambda context, **_kwargs: secondary if context.slot == "primary" else None,
+    )
+    playlist_calls = []
+
+    def fetch_playlist(context, _playlist_id):
+        playlist_calls.append(context.slot)
+        if context.slot == "primary":
+            raise quota_error()
+        return raw_items
+
+    monkeypatch.setattr(youtube_api, "fetch_playlist_items", fetch_playlist)
+    monkeypatch.setattr(youtube_api, "fetch_video_details", lambda _context, _ids: [detail])
+    write_calls = []
+    monkeypatch.setattr(
+        youtube_api,
+        "set_video_public",
+        lambda context, video_id, **_kwargs: write_calls.append(("public", context.slot, video_id)) or {},
+    )
+    monkeypatch.setattr(
+        youtube_api,
+        "remove_playlist_item",
+        lambda context, item_id: write_calls.append(("cleanup", context.slot, item_id)) or {},
+    )
+
+    response = youtube_api.run_publish_and_cleanup(
+        PublishCleanupInput(playlist_id="playlist", preview_token="unit-test-preview-token"), creds=primary
+    )
+
+    assert response["results"][0]["status"] == "succeeded"
+    assert response["youtube_slot"] == "secondary"
+    assert response["youtube_slot_reason"] == "auto_secondary_quota_fallback"
+    assert playlist_calls == ["primary", "secondary", "secondary"]
+    assert write_calls == [("public", "secondary", "video-1"), ("cleanup", "secondary", "playlist-video-1")]

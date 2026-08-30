@@ -8,6 +8,18 @@ from typing import Any, Optional
 
 from backend.app.core.error_contract import error_detail
 
+# Google may report a project-level daily limit with a different reason than
+# YouTube's resource-specific ``quotaExceeded`` error.  All of these mean that
+# the current OAuth/project slot cannot spend more quota for the day; they are
+# intentionally kept separate from rate-limit reasons.
+YOUTUBE_QUOTA_EXHAUSTION_REASONS = frozenset(
+    {
+        "quotaexceeded",
+        "dailylimitexceeded",
+        "dailylimitexceededunreg",
+    }
+)
+
 
 @dataclass(frozen=True)
 class YouTubeErrorInfo:
@@ -71,10 +83,10 @@ def parse_youtube_error(exc: BaseException, *, method: str = "") -> YouTubeError
 
 
 def is_youtube_quota_exceeded(exc: BaseException) -> bool:
-    """Return true only for Google's documented 403/quotaExceeded pair."""
+    """Return true for Google's 403 quota-exhaustion reasons."""
 
     info = parse_youtube_error(exc)
-    return info.http_status == 403 and info.reason == "quotaExceeded"
+    return info.http_status == 403 and info.reason.casefold() in YOUTUBE_QUOTA_EXHAUSTION_REASONS
 
 
 class YouTubeQuotaUnavailable(RuntimeError):
@@ -118,6 +130,7 @@ class YouTubeQuotaUnavailable(RuntimeError):
 __all__ = [
     "YouTubeErrorInfo",
     "YouTubeQuotaUnavailable",
+    "YOUTUBE_QUOTA_EXHAUSTION_REASONS",
     "is_youtube_quota_exceeded",
     "parse_youtube_error",
 ]

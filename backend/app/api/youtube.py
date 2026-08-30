@@ -182,6 +182,29 @@ def _switch_youtube_context(
     return None
 
 
+def _run_youtube_operation_with_quota_fallback(
+    context: YouTubeRequestContext,
+    operation,
+    *,
+    estimated_units: int,
+    attempted_slots: set[str],
+) -> tuple[YouTubeRequestContext, Any]:
+    """Run one read/write boundary and retry it once on the other Auto slot."""
+
+    try:
+        return context, operation(context)
+    except YouTubeQuotaUnavailable:
+        fallback_context = _switch_youtube_context(
+            context,
+            estimated_units=max(int(estimated_units or 0), 1),
+            attempted_slots=attempted_slots,
+        )
+        if fallback_context is None:
+            raise
+        attempted_slots.add(fallback_context.slot)
+        return fallback_context, operation(fallback_context)
+
+
 def _quota_estimate(operation: str, item_count: int, *, slot: Optional[str] = None) -> dict:
     count = max(int(item_count), 0)
     pages = math.ceil(count / 50) if count else 0
@@ -692,6 +715,9 @@ def run_batch_metadata_update(
 ):
     """Validate and update selected videos synchronously, returning one result per video."""
     youtube_context = creds
+    active_context = youtube_context
+    attempted_slots = {active_context.slot}
+    fallback_estimate = max(int(youtube_context.estimated_units or 0), 1)
 
     spreadsheet_id = (
         payload.spreadsheet_url_or_id or get_account_setting(youtube_context.owner_sub, "default_spreadsheet_id", "")
@@ -734,7 +760,13 @@ def run_batch_metadata_update(
 
         sheet_state = sheet_snapshot(spreadsheet_id, payload.worksheet_name, headers, sheet_rows)
         if playlist_id:
-            initial_playlist_state = playlist_snapshot(fetch_playlist_items(youtube_context, playlist_id))
+            active_context, current_playlist_items = _run_youtube_operation_with_quota_fallback(
+                active_context,
+                lambda context: fetch_playlist_items(context, playlist_id),
+                estimated_units=fallback_estimate,
+                attempted_slots=attempted_slots,
+            )
+            initial_playlist_state = playlist_snapshot(current_playlist_items)
         else:
             initial_playlist_state = playlist_snapshot(
                 [{"id": "", "contentDetails": {"videoId": video_id}} for video_id, _person in active_assignments]
@@ -788,11 +820,13 @@ def run_batch_metadata_update(
                         }
                     )
 
-        details_map = {
-            item["id"]: item
-            for item in fetch_video_details(youtube_context, [item["video_id"] for item in prepared])
-            if item.get("id")
-        }
+        active_context, video_details = _run_youtube_operation_with_quota_fallback(
+            active_context,
+            lambda context: fetch_video_details(context, [item["video_id"] for item in prepared]),
+            estimated_units=fallback_estimate,
+            attempted_slots=attempted_slots,
+        )
+        details_map = {item["id"]: item for item in video_details if item.get("id")}
         request_state = input_digest(
             {
                 "spreadsheet_id": spreadsheet_id,
@@ -807,7 +841,7 @@ def run_batch_metadata_update(
         submitted_preview_snapshot = payload.preview_snapshot if isinstance(payload.preview_snapshot, dict) else {}
         preview_slot = _preview_slot(submitted_preview_snapshot, youtube_context.slot)
         preview_channel_id = str(submitted_preview_snapshot.get("youtube_channel_id") or "").strip()
-        if preview_channel_id and youtube_context.channel_id and preview_channel_id != youtube_context.channel_id:
+        if preview_channel_id and active_context.channel_id and preview_channel_id != active_context.channel_id:
             raise _stale_preview_exception()
         if not payload.preview_token or not verify_preview_token(
             payload.preview_token,
@@ -827,21 +861,29 @@ def run_batch_metadata_update(
             if sheet_snapshot(spreadsheet_id, payload.worksheet_name, current_headers, current_rows) != sheet_state:
                 raise _stale_preview_exception()
             if playlist_id:
-                current_playlist_items = fetch_playlist_items(youtube_context, playlist_id)
+                active_context, current_playlist_items = _run_youtube_operation_with_quota_fallback(
+                    active_context,
+                    lambda context: fetch_playlist_items(context, playlist_id),
+                    estimated_units=fallback_estimate,
+                    attempted_slots=attempted_slots,
+                )
                 if playlist_snapshot(current_playlist_items) != initial_playlist_state:
                     raise _stale_preview_exception()
                 if not set(requested_video_ids).issubset(set(playlist_snapshot(current_playlist_items)["video_ids"])):
                     raise _stale_preview_exception()
             else:
-                current_details = fetch_video_details(youtube_context, pending_video_ids)
+                active_context, current_details = _run_youtube_operation_with_quota_fallback(
+                    active_context,
+                    lambda context: fetch_video_details(context, pending_video_ids),
+                    estimated_units=fallback_estimate,
+                    attempted_slots=attempted_slots,
+                )
                 if {item.get("id") for item in current_details if item.get("id")} != {
                     item_id for item_id in details_map if item_id in pending_video_ids
                 }:
                     raise _stale_preview_exception()
         results: list[dict] = []
         quota_error: Optional[YouTubeQuotaUnavailable] = None
-        active_context = youtube_context
-        attempted_slots = {active_context.slot}
         for item in prepared:
             detail = details_map.get(item["video_id"])
             missing_video = item["status"] == "pending" and not detail
@@ -968,9 +1010,9 @@ def run_batch_metadata_update(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Batch metadata update failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
+        logger.error("Batch metadata update failed for slot %s: %s", active_context.slot, type(exc).__name__)
         raise map_youtube_error(
-            exc, method="videos.update", youtube_slot=youtube_context.slot
+            exc, method="videos.update", youtube_slot=active_context.slot
         ).to_http_exception() from exc
 
 
@@ -982,20 +1024,28 @@ def run_publish_and_cleanup(
 ):
     """Snapshot To-Post, sort oldest-first, then publish each video synchronously."""
     youtube_context = creds
+    active_context = youtube_context
+    attempted_slots = {active_context.slot}
+    fallback_estimate = max(int(youtube_context.estimated_units or 0), 1)
 
     playlist_id = _resolve_playlist_id(youtube_context, payload.playlist_id)
     if not playlist_id:
         raise http_error(400, "playlist_required", "請提供播放清單 ID。")
     try:
-        raw_items = fetch_playlist_items(youtube_context, playlist_id)
+        active_context, raw_items = _run_youtube_operation_with_quota_fallback(
+            active_context,
+            lambda context: fetch_playlist_items(context, playlist_id),
+            estimated_units=fallback_estimate,
+            attempted_slots=attempted_slots,
+        )
         initial_playlist_state = playlist_snapshot(raw_items)
         submitted_preview_snapshot = payload.preview_snapshot if isinstance(payload.preview_snapshot, dict) else {}
-        preview_slot = _preview_slot(submitted_preview_snapshot, youtube_context.slot)
+        preview_slot = _preview_slot(submitted_preview_snapshot, active_context.slot)
         preview_channel_id = str(submitted_preview_snapshot.get("youtube_channel_id") or "").strip()
-        if preview_channel_id and youtube_context.channel_id and preview_channel_id != youtube_context.channel_id:
+        if preview_channel_id and active_context.channel_id and preview_channel_id != active_context.channel_id:
             raise _stale_preview_exception()
         _verify_playlist_preview_token(
-            youtube_context,
+            active_context,
             playlist_id,
             initial_playlist_state,
             payload.preview_token,
@@ -1003,7 +1053,7 @@ def run_publish_and_cleanup(
         )
         if not raw_items:
             response = _direct_workflow_response(
-                "youtube.publish_cleanup", [], slot=youtube_context.slot, context=youtube_context
+                "youtube.publish_cleanup", [], slot=active_context.slot, context=active_context
             )
             response["message"] = "To-Post 播放清單目前沒有影片。"
             return response
@@ -1017,7 +1067,13 @@ def run_publish_and_cleanup(
             playlist_item_map[video_id] = item.get("id")
             api_order.append(video_id)
             title_map[video_id] = item.get("snippet", {}).get("title", "")
-        details_map = {item["id"]: item for item in fetch_video_details(youtube_context, api_order) if item.get("id")}
+        active_context, details = _run_youtube_operation_with_quota_fallback(
+            active_context,
+            lambda context: fetch_video_details(context, api_order),
+            estimated_units=fallback_estimate,
+            attempted_slots=attempted_slots,
+        )
+        details_map = {item["id"]: item for item in details if item.get("id")}
         original_positions = {video_id: index for index, video_id in enumerate(api_order)}
         ordered_ids = sorted(
             api_order, key=lambda video_id: upload_time_sort_key(video_id, details_map, original_positions)
@@ -1025,14 +1081,17 @@ def run_publish_and_cleanup(
         # The preview may have been displayed for minutes. Re-read the
         # playlist immediately before the first write and fail closed if the
         # slot, item IDs, order, or video collection changed.
-        latest_playlist_items = fetch_playlist_items(youtube_context, playlist_id)
+        active_context, latest_playlist_items = _run_youtube_operation_with_quota_fallback(
+            active_context,
+            lambda context: fetch_playlist_items(context, playlist_id),
+            estimated_units=fallback_estimate,
+            attempted_slots=attempted_slots,
+        )
         if playlist_snapshot(latest_playlist_items) != initial_playlist_state:
             raise _stale_preview_exception()
         results: list[dict] = []
         quota_error: Optional[YouTubeQuotaUnavailable] = None
         stopped_reason: Optional[str] = None
-        active_context = youtube_context
-        attempted_slots = {active_context.slot}
 
         def execute_with_quota_fallback(operation, *, estimated_units: int):
             nonlocal active_context
@@ -1171,7 +1230,7 @@ def run_publish_and_cleanup(
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error("Publish cleanup workflow failed for slot %s: %s", youtube_context.slot, type(exc).__name__)
+        logger.error("Publish cleanup workflow failed for slot %s: %s", active_context.slot, type(exc).__name__)
         raise map_youtube_error(
-            exc, method="playlistItems.delete", youtube_slot=youtube_context.slot
+            exc, method="playlistItems.delete", youtube_slot=active_context.slot
         ).to_http_exception() from exc

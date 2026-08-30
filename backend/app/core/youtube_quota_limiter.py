@@ -24,7 +24,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from backend.app.core.runtime_config import runtime_config
-from backend.app.services.youtube_errors import YouTubeQuotaUnavailable, parse_youtube_error
+from backend.app.services.youtube_errors import YouTubeQuotaUnavailable, is_youtube_quota_exceeded, parse_youtube_error
 
 logger = logging.getLogger(__name__)
 
@@ -520,14 +520,15 @@ class YouTubeQuotaLimiter:
                 method_data = data["methods"].get(reservation.method)
                 if isinstance(method_data, dict):
                     method_data["failed_calls"] = int(method_data.get("failed_calls") or 0) + 1
+                quota_reason = info.reason or "quotaExceeded"
                 data.update(
                     {
                         "state": "confirmed_exhausted",
-                        "blocked_reason": "quotaExceeded",
+                        "blocked_reason": quota_reason,
                         "blocked_until": reservation.reset_at,
                         "confirmed_exhausted_at": iso_with_offset(now),
                         "last_http_status": info.http_status,
-                        "last_error_reason": "quotaExceeded",
+                        "last_error_reason": quota_reason,
                         "last_error_method": reservation.method,
                         "updated_at": iso_with_offset(now),
                     }
@@ -551,15 +552,16 @@ class YouTubeQuotaLimiter:
             response = request.execute()
         except Exception as exc:
             info = parse_youtube_error(exc, method=method)
-            if info.http_status == 403 and info.reason == "quotaExceeded":
+            if is_youtube_quota_exceeded(exc):
+                quota_reason = info.reason or "quotaExceeded"
                 self.record_google_quota_exhausted(reservation, exc)
                 raise self._unavailable(
                     code="youtube_quota_exhausted",
                     method=method,
                     reset_at=reservation.reset_at,
-                    reason="quotaExceeded",
+                    reason=quota_reason,
                     confirmed=True,
-                    http_status=403,
+                    http_status=info.http_status,
                     message="Google 已回報今日 YouTube API 配額用完。",
                 ) from exc
             try:

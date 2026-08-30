@@ -86,6 +86,7 @@ def test_youtube_provider_mapping_distinguishes_categories_without_raw_body():
         (ProviderFailure(403, "forbidden"), "youtube_permission_denied", 403, False),
         (ProviderFailure(401, "authError"), "youtube_reauthorization_required", 401, False),
         (ProviderFailure(403, "quotaExceeded"), "youtube_quota_exhausted", 429, True),
+        (ProviderFailure(403, "dailyLimitExceeded"), "youtube_quota_exhausted", 429, True),
         (ProviderFailure(403, "rateLimitExceeded"), "youtube_rate_limited", 429, True),
         (ProviderFailure(503, "backendError"), "youtube_temporary_unavailable", 503, True),
     ]

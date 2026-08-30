@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from backend.app.core.error_contract import error_detail, http_error
-from backend.app.services.youtube_errors import parse_youtube_error
+from backend.app.services.youtube_errors import YOUTUBE_QUOTA_EXHAUSTION_REASONS, parse_youtube_error
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ def map_youtube_error(
     rate_reasons = {"ratelimitexceeded", "userratelimitexceeded", "too_many_requests"}
     transient_reasons = {"backenderror", "internalerror", "serviceunavailable", "unavailable", "deadlineexceeded"}
 
-    if reason == "quotaexceeded" and status in {403, 429, None}:
+    if reason in YOUTUBE_QUOTA_EXHAUSTION_REASONS and status in {403, 429, None}:
         return _mapped(
             429,
             "youtube_quota_exhausted",

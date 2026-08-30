@@ -113,14 +113,31 @@ def test_safety_buffer_is_reserved_at_the_exact_policy_cap(tmp_path):
     assert caught.value.code == "youtube_quota_safety_blocked"
 
 
-def test_only_403_quota_exceeded_is_confirmed_quota(tmp_path):
+def test_only_403_quota_exhaustion_reasons_are_confirmed_quota(tmp_path):
     assert is_youtube_quota_exceeded(HttpFailure("quotaExceeded")) is True
+    assert is_youtube_quota_exceeded(HttpFailure("dailyLimitExceeded")) is True
+    assert is_youtube_quota_exceeded(HttpFailure("dailyLimitExceededUnreg")) is True
     assert is_youtube_quota_exceeded(HttpFailure("forbidden")) is False
 
     ledger = make_ledger(tmp_path)
     with pytest.raises(HttpFailure):
         ledger.execute(SimpleNamespace(execute=lambda: (_ for _ in ()).throw(HttpFailure("forbidden"))), "videos.list")
     assert ledger.get_usage()["confirmed_by_google"] is False
+
+
+@pytest.mark.parametrize("reason", ["quotaExceeded", "dailyLimitExceeded", "dailyLimitExceededUnreg"])
+def test_google_quota_exhaustion_reason_blocks_the_current_slot(tmp_path, reason):
+    ledger = make_ledger(tmp_path)
+    with pytest.raises(YouTubeQuotaUnavailable) as caught:
+        ledger.execute(
+            SimpleNamespace(execute=lambda: (_ for _ in ()).throw(HttpFailure(reason))), "videos.update"
+        )
+
+    assert caught.value.code == "youtube_quota_exhausted"
+    assert caught.value.reason == reason
+    usage = ledger.get_usage()
+    assert usage["state"] == "confirmed_exhausted"
+    assert usage["last_error_reason"] == reason
 
 
 def test_confirmed_exhaustion_sets_effective_available_to_zero(tmp_path):

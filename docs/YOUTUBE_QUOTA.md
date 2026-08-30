@@ -34,7 +34,7 @@ Drive 上傳另有獨立的 `video_uploads` bucket：`videos.insert` 每部預�
 - 每個授權組合各自使用一份 ledger：`primary` 為 `data/youtube_quota_usage.json`，`secondary` 為 `data/youtube_quota_usage.secondary.json`。
 - 請求送出前先保留官方成本；安全預留會從專案可用上限扣除。若預估會超過安全上限，請求不會送出。
 - 系統預設專案配額為 10,000 單位，安全預留預設為 1,000 單位；登入後可在 YouTube 設定頁按授權組合調整。
-- Google 回傳 HTTP 403 且錯誤原因為 `quotaExceeded` 時，該授權組合會標記為已確認用完，新的請求會停止，直到官方重設。
+- Google 回傳 HTTP 403 且錯誤原因為 `quotaExceeded`、`dailyLimitExceeded` 或 `dailyLimitExceededUnreg` 時，該授權組合會標記為已確認用完，新的請求會停止，直到官方重設。
 - Auto routing 會在新的 workflow 開始時優先檢查 Primary；若本次保守成本無法由 Primary 的安全可用額度支應，會選用 Secondary。若執行途中 provider 或本地 ledger 回報 quota 不足，Auto 模式會在安全的單一操作邊界切換另一個 slot 並重試，不需要使用者重新按兩次。
 - Drive 上傳預覽會同時檢查 `video_uploads` 與 General 兩個 bucket；工作建立後先使用預選 slot，執行途中 quota 失敗時會自動切換另一個已驗證同頻道的 slot。每部影片只在取得 YouTube ID 後才保存為已上傳，重試時已有 ID 的項目只重試 playlist insertion。
 - Drive 上傳完整流程的 General 保守成本是 `2 + 50 × insertion_count`：預覽時一次 `playlists.list`、建立工作前再驗證一次，之後每個 To-Post 插入各 50 單位；`video_uploads` 則只計 `1 × new_upload_count`。因此 resume-only 工作（`new_upload_count = 0`）不會誤扣 `video_uploads`。
