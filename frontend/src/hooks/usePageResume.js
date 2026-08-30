@@ -2,6 +2,46 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const PAGE_HIDDEN_RESUME_THRESHOLD_MS = 5 * 60 * 1000;
 export const PAGE_RESUME_COOLDOWN_MS = 10 * 1000;
+export const PAGE_REPAINT_OPACITY = '0.999999';
+
+/**
+ * Some browsers can restore a window with a stale compositor surface: the
+ * DOM is still present, but only the page background is painted. Changing the
+ * root opacity for one animation frame makes the browser rebuild that surface
+ * without remounting React or disturbing the user's current form state.
+ */
+export function forcePageRepaint(root = typeof document !== 'undefined' ? document.getElementById('root') : null) {
+  if (!root?.style) return () => {};
+
+  const previousOpacity = root.style.opacity;
+  let restored = false;
+  root.style.opacity = PAGE_REPAINT_OPACITY;
+
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    root.style.opacity = previousOpacity;
+  };
+
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    const frame = window.requestAnimationFrame(restore);
+    return () => {
+      window.cancelAnimationFrame?.(frame);
+      restore();
+    };
+  }
+
+  if (typeof window !== 'undefined') {
+    const timer = window.setTimeout(restore, 0);
+    return () => {
+      window.clearTimeout(timer);
+      restore();
+    };
+  }
+
+  restore();
+  return () => {};
+}
 
 /**
  * Coordinate the browser events that indicate Safari may have suspended or
@@ -21,6 +61,7 @@ export function usePageResume(
   const lastResumeAtRef = useRef(null);
   const resumePromiseRef = useRef(null);
   const mountedRef = useRef(true);
+  const repaintCleanupRef = useRef(null);
   const [isResuming, setIsResuming] = useState(false);
 
   useEffect(() => {
@@ -32,6 +73,16 @@ export function usePageResume(
     return () => {
       mountedRef.current = false;
     };
+  }, []);
+
+  const repaintPage = useCallback(() => {
+    repaintCleanupRef.current?.();
+    repaintCleanupRef.current = forcePageRepaint();
+  }, []);
+
+  useEffect(() => () => {
+    repaintCleanupRef.current?.();
+    repaintCleanupRef.current = null;
   }, []);
 
   const requestResume = useCallback(({ force = false, reason = 'unknown' } = {}) => {
@@ -76,10 +127,12 @@ export function usePageResume(
         markInactive();
         return;
       }
+      repaintPage();
       resumeAfterInactivity('visibilitychange');
     };
 
     const handlePageShow = (event) => {
+      repaintPage();
       if (event.persisted) {
         initialPageShowRef.current = false;
         inactiveAtRef.current = null;
@@ -102,7 +155,12 @@ export function usePageResume(
     };
 
     const handleFocus = () => {
-      if (!document.hidden) resumeAfterInactivity('focus');
+      if (document.hidden) return;
+      // Window focus does not always produce visibilitychange, especially on
+      // desktop Safari. Repaint immediately even when the data refresh
+      // threshold has not elapsed.
+      repaintPage();
+      resumeAfterInactivity('focus');
     };
 
     const handleOnline = () => {
@@ -123,7 +181,7 @@ export function usePageResume(
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('online', handleOnline);
     };
-  }, [hiddenThresholdMs, requestResume]);
+  }, [hiddenThresholdMs, repaintPage, requestResume]);
 
   const retryNow = useCallback(() => requestResume({ force: true, reason: 'manual' }), [requestResume]);
 

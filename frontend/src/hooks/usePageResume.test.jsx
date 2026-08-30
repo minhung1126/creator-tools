@@ -1,7 +1,7 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { usePageResume } from './usePageResume';
+import { forcePageRepaint, PAGE_REPAINT_OPACITY, usePageResume } from './usePageResume';
 
 function setDocumentHidden(value) {
   Object.defineProperty(document, 'hidden', { configurable: true, value });
@@ -13,6 +13,34 @@ afterEach(() => {
 });
 
 describe('usePageResume', () => {
+  it('forces a one-frame root repaint without changing the existing opacity', () => {
+    const root = document.createElement('div');
+    root.style.opacity = '0.8';
+    document.body.appendChild(root);
+
+    const cancelRepaint = forcePageRepaint(root);
+    expect(root.style.opacity).toBe(PAGE_REPAINT_OPACITY);
+
+    cancelRepaint();
+    expect(root.style.opacity).toBe('0.8');
+    root.remove();
+  });
+
+  it('repaints on a short window focus without starting a data refresh', () => {
+    const root = document.createElement('div');
+    root.id = 'root';
+    document.body.appendChild(root);
+    const onResume = vi.fn().mockResolvedValue({ status: 'ok' });
+    renderHook(() => usePageResume(onResume, { hiddenThresholdMs: 1000, cooldownMs: 0 }));
+
+    act(() => { window.dispatchEvent(new Event('blur')); });
+    act(() => { window.dispatchEvent(new Event('focus')); });
+
+    expect(root.style.opacity).toBe(PAGE_REPAINT_OPACITY);
+    expect(onResume).not.toHaveBeenCalled();
+    root.remove();
+  });
+
   it('shares one in-flight resume request and exposes its busy state', async () => {
     let release;
     const onResume = vi.fn(() => new Promise((resolve) => { release = resolve; }));

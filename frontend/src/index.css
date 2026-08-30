@@ -23,6 +23,11 @@ body {
   background-attachment: fixed;
 }
 
+#root {
+  min-height: 100dvh;
+  background-color: var(--bg-primary);
+}
+
 button, input, select, textarea {
   font: inherit;
 }
