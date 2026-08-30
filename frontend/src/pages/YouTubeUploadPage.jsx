@@ -10,6 +10,7 @@ import { saveOAuthReturnPath } from '../utils/authReturnPath';
 import { PATHS } from '../routes/paths';
 
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running', 'cancel_requested', 'paused']);
+export const YOUTUBE_UPLOAD_POLL_INTERVAL_MS = 2000;
 
 function formatBytes(value) {
   const bytes = Number(value || 0);
@@ -291,22 +292,57 @@ export default function YouTubeUploadPage({ sysSettings = {}, authUser, mode = '
   useEffect(() => {
     if (!job?.job_id || !ACTIVE_JOB_STATUSES.has(job.status)) return undefined;
     let cancelled = false;
+    let timer = null;
+    let requestInFlight = false;
+
+    const stopPolling = () => {
+      if (timer === null) return;
+      window.clearTimeout(timer);
+      timer = null;
+    };
+
+    const schedulePoll = () => {
+      if (cancelled || document.hidden || timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        poll();
+      }, YOUTUBE_UPLOAD_POLL_INTERVAL_MS);
+    };
+
     const poll = async () => {
+      if (cancelled || document.hidden || requestInFlight) return;
+      requestInFlight = true;
+      let shouldContinue = true;
       try {
         const next = await api.getYoutubeDriveUploadJob(job.job_id);
         if (!cancelled) {
           setJob(next);
           if (!ACTIVE_JOB_STATUSES.has(next.status) && next.status === 'completed') toast.success('Drive 影片已全部上傳並加入共用 To-Post');
+          shouldContinue = ACTIVE_JOB_STATUSES.has(next.status);
         }
       } catch (pollError) {
         if (!cancelled) setError(errorText(pollError, '無法更新上傳工作狀態。'));
+      } finally {
+        requestInFlight = false;
+        if (shouldContinue) schedulePoll();
       }
     };
-    poll();
-    const timer = window.setInterval(poll, 2000);
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+      poll();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    if (!document.hidden) poll();
+
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [job?.job_id, job?.status, toast]);
 

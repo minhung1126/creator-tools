@@ -1,8 +1,8 @@
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import YouTubeUploadPage, { getYoutubeUploadQuotaDecision } from './YouTubeUploadPage';
+import YouTubeUploadPage, { getYoutubeUploadQuotaDecision, YOUTUBE_UPLOAD_POLL_INTERVAL_MS } from './YouTubeUploadPage';
 import { api } from '../services/api';
 
 vi.mock('../services/api', () => ({
@@ -52,10 +52,49 @@ function renderPage() {
   /></MemoryRouter>);
 }
 
+function renderJobPage() {
+  return render(<MemoryRouter initialEntries={['/youtube/uploads/job-1']}><YouTubeUploadPage
+    authUser={{ sub: 'user-1', google_scopes: { drive_readonly: true } }}
+    mode="job"
+    jobId="job-1"
+  /></MemoryRouter>);
+}
+
+function setDocumentHidden(value) {
+  Object.defineProperty(document, 'hidden', { configurable: true, value });
+}
+
 describe('YouTubeUploadPage quota admission', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    setDocumentHidden(false);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setDocumentHidden(false);
+  });
+
+  it('stops background job polling while hidden and refreshes when visible again', async () => {
+    vi.useFakeTimers();
+    const activeJob = { job_id: 'job-1', status: 'running', items: [] };
+    api.getYoutubeDriveUploadJob.mockResolvedValue(activeJob);
+    renderJobPage();
+
+    await act(async () => { await Promise.resolve(); });
+    const callsAfterInitialLoad = api.getYoutubeDriveUploadJob.mock.calls.length;
+    expect(callsAfterInitialLoad).toBeGreaterThan(0);
+
+    setDocumentHidden(true);
+    act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { vi.advanceTimersByTime(YOUTUBE_UPLOAD_POLL_INTERVAL_MS * 5); });
+    expect(api.getYoutubeDriveUploadJob).toHaveBeenCalledTimes(callsAfterInitialLoad);
+
+    setDocumentHidden(false);
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(api.getYoutubeDriveUploadJob).toHaveBeenCalledTimes(callsAfterInitialLoad + 1);
+
   });
 
   it('does not treat a completed preview as permission to create a job', async () => {
